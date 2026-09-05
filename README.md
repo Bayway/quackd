@@ -261,9 +261,9 @@ Eight robots, and one table for how far each one has actually got. The distincti
 | | `rosbridge:ws` | the real one, over `rosbridge_server` | 🧪 names, behind `quackd[rosbridge]` |
 | **XLeRobot** | `xlerobot:mock` | a dual-arm mobile manipulator on an IKEA cart, about $660 to build | ✅ mock |
 | | `xlerobot:zmq` | the real one, over the ZeroMQ host it already ships | 🧪 names, behind `quackd[xlerobot]`. The whole wire format is exercised against a fake host over loopback, so only the cart is untested |
-| **AlohaMini** | `alohamini:mock`, `sim2d` | two arms on a lift, on a wheeled base | ✅ mock, and a simulator that runs but has no seeded sweep yet |
+| **AlohaMini** | `alohamini:mock`, `sim2d` | two arms on a lift, on a wheeled base | ✅ mock, ✅ simulator, `alohamini-lookout` 10 of 10 seeds |
 | | `alohamini:zmq` | the real one, over the ZeroMQ host it already ships | 🧪 names, behind `quackd[alohamini]`. The wire is exercised against a fake host over loopback. Its arms need quackd's own host on the robot, because upstream's leaves them limp |
-| **ToddlerBot** | `toddlerbot:mock`, `sim2d` | a small open source humanoid you can build | ✅ mock, and a simulator that runs but has no seeded sweep yet |
+| **ToddlerBot** | `toddlerbot:mock`, `sim2d` | a small open source humanoid you can build | ✅ mock, ✅ simulator, `toddlerbot-lookout` 10 of 10 seeds |
 | | `toddlerbot:bridge` | the real one, through a daemon quackd ships for it | 🧪 names, and the daemon's own safety machinery exercised against a fake body over loopback. It has no walk policy unless you stage one, and it cannot get up if it falls |
 
 <p align="center">

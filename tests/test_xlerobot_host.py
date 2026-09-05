@@ -284,3 +284,22 @@ async def test_the_state_never_claims_a_pose_or_a_battery() -> None:
         await adapter.connect()
         assert (await adapter.health()).battery_percent is None
         await link.close()
+
+
+async def test_a_host_that_dies_mid_verb_is_a_refusal_and_not_a_crash() -> None:
+    """The host exits by itself after an hour, and there is no supervisor anywhere upstream
+    to restart it, so this is a scheduled event rather than a rare one. Refusal is data: the
+    pilot must be told the link is gone, not handed a ZMQ error through the executor's
+    catch-all, which reads like a crash in quackd."""
+    with FakeXLerobotHost() as host:
+        link = await _connected(host)
+
+        def gone(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("Again: Resource temporarily unavailable")
+
+        link._link.send = gone  # type: ignore[union-attr, method-assign]
+        ack = await link.send_intent(Intent.move(vx=0.1))
+        assert not ack.accepted
+        assert "stopped answering" in str(ack.reason)
+        assert "restart it on the robot" in str(ack.reason)
+        await link.close()

@@ -26,6 +26,7 @@ from quackd.adapters.xlerobot import (
     describe,
     implementations,
     max_vy_for,
+    parse_swap_colour,
     parse_variant,
     xlerobot_manifest,
 )
@@ -36,13 +37,27 @@ from quackd.cli import app
 from quackd.duckfile.parser import load_duck, parse_duck_text
 from quackd.duckfile.validate import validate_duck
 from quackd.perception.color_blob import ColorBlobDetector
-from quackd.safety import Executor, allow_all
+from quackd.safety import Executor, VerbNotAllowed, allow_all
 from quackd.transport.base import Intent, TransportError
 from quackd.verbs.core import scan_mode
 from quackd.verbs.registry import VerbNotFound, registry_from_manifest
 from tests.conftest import REPO
 
 runner = CliRunner()
+
+
+def _verb_column(output: str) -> set[str]:
+    """The names in the rendered table's first column.
+
+    Searching the whole output is wrong: `approach_and`'s own description names `kick` and
+    `grab` as example follow-up verbs, so a substring check finds verbs that are not there.
+    """
+    return {
+        line.split(chr(9474))[1].strip().rstrip(chr(8230))
+        for line in output.splitlines()
+        if line.count(chr(9474)) > 2
+    }
+
 
 XLEROBOT_VERBS = {
     "report_state",
@@ -453,3 +468,95 @@ def test_an_unknown_backend_names_the_real_ones() -> None:
 )
 def test_the_variant_comes_off_the_address(address: str | None, expected: str) -> None:
     assert parse_variant(address) == expected
+
+
+async def test_the_camera_composites_run_through_the_executor() -> None:
+    """`search_scan`, `go_to` and `approach_and` are in this manifest whenever a camera is,
+    so they get driven rather than assumed. They are also the only declared verbs that would
+    move a 12 kg cart across a room, which makes them the last ones to leave untested."""
+    adapter = XLerobotAdapter(XLerobotMock())
+    manifest = await adapter.connect()
+    ex = _executor(adapter, manifest)
+    for verb in ("search_scan", "go_to", "approach_and"):
+        assert manifest.provides(verb), verb
+
+    scanned = await ex.run_verb("search_scan", {"target": "ball", "max_steps": 4})
+    assert scanned.ok, scanned.summary
+
+    went = await ex.run_verb("go_to", {"target": "ball", "stop_distance": 0.8})
+    assert went.ok, went.summary
+
+    then = await ex.run_verb(
+        "approach_and", {"target": "ball", "stop_distance": 0.8, "then": "stop"}
+    )
+    assert then.ok, then.summary
+
+
+async def test_a_blind_cart_has_no_composites_to_run() -> None:
+    """A stock XLeRobot ships with every camera commented out, so this is the common case
+    rather than the odd one. The four camera verbs are absent from the registry, not refused."""
+    adapter = XLerobotAdapter(XLerobotMock(camera=False))
+    manifest = await adapter.connect()
+    ex = _executor(adapter, manifest)
+    for verb in ("observe", "search_scan", "go_to", "approach_and"):
+        assert not manifest.provides(verb), verb
+        with pytest.raises((VerbNotFound, VerbNotAllowed)):
+            await ex.run_verb(verb, {})
+
+
+async def test_the_colour_swap_is_reachable_from_the_address() -> None:
+    """The detector every camera verb steers by does not fail loudly on a swapped frame, it
+    quietly stops finding things, so the switch has to be reachable without editing quackd.
+    The Open Duck Mini's camera daemon has had the same one since 0.5."""
+    assert parse_swap_colour(None) is True
+    assert parse_swap_colour("tcp://cart:5555") is True
+    assert parse_swap_colour("tcp://cart:5555?swap_colour=1") is True
+    for off in ("0", "false", "no", "off", "OFF"):
+        assert parse_swap_colour(f"tcp://cart:5555?swap_colour={off}") is False, off
+    # it composes with the flags already on the address rather than replacing them
+    both = "tcp://cart:5555?variant=omni3&swap_colour=0"
+    assert parse_variant(both) == "omni3" and parse_swap_colour(both) is False
+
+    adapter = make_adapter("xlerobot:zmq", address="tcp://cart:5555?swap_colour=0")
+    assert adapter.transport.swap_colour is False
+
+
+# ── the contract, at the library level and at the exit code ────────────────────────────
+
+
+def test_the_manifest_declares_exactly_this_set_and_no_more() -> None:
+    full = xlerobot_manifest("zmq", camera=True)
+    assert set(full.verb_names()) == {
+        "report_state",
+        "stop",
+        "move",
+        "move_joints",
+        "gripper",
+        "observe",
+        "go_to",
+        "approach_and",
+        "search_scan",
+    }
+    blind = xlerobot_manifest("zmq", camera=False)
+    assert set(blind.verb_names()) == {
+        "report_state",
+        "stop",
+        "move",
+        "move_joints",
+        "gripper",
+    }
+
+
+def test_a_kicking_task_is_refused_against_this_cart_with_the_validators_words() -> None:
+    problems = validate_duck(load_duck("find-and-kick"), [describe("mock", "xlerobot-01")])
+    assert any("does not provide it" in p.message for p in problems), [p.message for p in problems]
+    cli = runner.invoke(app, ["validate", "ducks/find-and-kick.duck", "--robot", "xlerobot:mock"])
+    assert cli.exit_code == 1 and "does not provide it" in cli.output
+
+
+def test_list_verbs_shows_the_real_set() -> None:
+    result = runner.invoke(app, ["list-verbs", "--robot", "xlerobot:mock"])
+    assert result.exit_code == 0
+    names = _verb_column(result.output)
+    assert {"move", "gripper", "observe"} <= names, names
+    assert not names & {"kick", "quack", "say", "gaze", "lift", "perform"}, names

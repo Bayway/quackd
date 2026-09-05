@@ -267,3 +267,20 @@ def test_the_observation_port_defaults_to_one_past_the_command_port() -> None:
     assert split_address(None) == ("127.0.0.1", 5555, 5556)
     assert split_address("tcp://10.0.0.9:5555") == ("10.0.0.9", 5555, 5556)
     assert split_address("tcp://10.0.0.9:7000?obs=9001") == ("10.0.0.9", 7000, 9001)
+
+
+async def test_a_host_that_dies_mid_verb_is_a_refusal_and_not_a_crash() -> None:
+    """The host exits by itself after about 100 minutes and also on a sustained over-current,
+    so losing it mid-verb is a scheduled event. Refusal is data: the pilot is told the link
+    is gone rather than handed a ZMQ error through the executor's catch-all."""
+    with FakeAlohaMiniHost() as host:
+        link = await _connected(host)
+
+        def gone(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("Again: Resource temporarily unavailable")
+
+        link._link.send = gone  # type: ignore[union-attr, method-assign]
+        ack = await link.send_intent(Intent.move(vx=0.1))
+        assert not ack.accepted
+        assert "stopped answering" in str(ack.reason)
+        await link.close()

@@ -43,12 +43,26 @@ from quackd.cli import app
 from quackd.duckfile.parser import load_duck
 from quackd.duckfile.validate import validate_duck
 from quackd.perception.color_blob import ColorBlobDetector
-from quackd.safety import Executor, allow_all
+from quackd.safety import Executor, VerbNotAllowed, allow_all
 from quackd.transport.base import Intent
 from quackd.verbs.core import scan_mode
 from quackd.verbs.registry import VerbNotFound, registry_from_manifest
 
 runner = CliRunner()
+
+
+def _verb_column(output: str) -> set[str]:
+    """The names in the rendered table's first column.
+
+    Searching the whole output is wrong: `approach_and`'s own description names `kick` and
+    `grab` as example follow-up verbs, so a substring check finds verbs that are not there.
+    """
+    return {
+        line.split(chr(9474))[1].strip().rstrip(chr(8230))
+        for line in output.splitlines()
+        if line.count(chr(9474)) > 2
+    }
+
 
 ALOHAMINI_VERBS = {
     "report_state",
@@ -388,3 +402,71 @@ def test_the_static_manifest_claims_nothing_the_real_host_has_not_shown() -> Non
 )
 def test_the_model_hint_comes_off_the_address(address: str | None, expected: str) -> None:
     assert parse_model(address) == expected
+
+
+async def test_the_camera_composites_run_through_the_executor() -> None:
+    """`search_scan`, `go_to` and `approach_and` are in this manifest, so they get driven
+    rather than assumed: they are the verbs that would drive the base across a room."""
+    adapter = AlohaMiniAdapter(AlohaMiniMock())
+    manifest = await adapter.connect()
+    ex = _executor(adapter, manifest)
+    for verb in ("search_scan", "go_to", "approach_and"):
+        assert manifest.provides(verb), verb
+
+    scanned = await ex.run_verb("search_scan", {"target": "ball", "max_steps": 4})
+    assert scanned.ok, scanned.summary
+
+    went = await ex.run_verb("go_to", {"target": "ball", "stop_distance": 0.8})
+    assert went.ok, went.summary
+
+    then = await ex.run_verb(
+        "approach_and", {"target": "ball", "stop_distance": 0.8, "then": "stop"}
+    )
+    assert then.ok, then.summary
+
+
+async def test_a_host_with_no_camera_has_no_composites_to_run() -> None:
+    adapter = AlohaMiniAdapter(AlohaMiniMock(camera=False))
+    manifest = await adapter.connect()
+    ex = _executor(adapter, manifest)
+    for verb in ("observe", "search_scan", "go_to", "approach_and"):
+        assert not manifest.provides(verb), verb
+        with pytest.raises((VerbNotFound, VerbNotAllowed)):
+            await ex.run_verb(verb, {})
+
+
+# ── the contract, at the library level and at the exit code ────────────────────────────
+
+
+def test_the_manifest_declares_exactly_this_set_and_no_more() -> None:
+    full = alohamini_manifest("zmq", camera=True, arms=True)
+    assert set(full.verb_names()) == {
+        "report_state",
+        "stop",
+        "move",
+        "lift",
+        "move_joints",
+        "gripper",
+        "home_arms",
+        "observe",
+        "go_to",
+        "approach_and",
+        "search_scan",
+    }
+    no_arms = alohamini_manifest("zmq", camera=True, arms=False)
+    assert not (set(no_arms.verb_names()) & {"move_joints", "gripper", "home_arms"})
+
+
+def test_a_kicking_task_is_refused_against_this_robot_with_the_validators_words() -> None:
+    problems = validate_duck(load_duck("find-and-kick"), [describe("mock", "alohamini-01")])
+    assert any("does not provide it" in p.message for p in problems), [p.message for p in problems]
+    cli = runner.invoke(app, ["validate", "ducks/find-and-kick.duck", "--robot", "alohamini:mock"])
+    assert cli.exit_code == 1 and "does not provide it" in cli.output
+
+
+def test_list_verbs_shows_the_real_set() -> None:
+    result = runner.invoke(app, ["list-verbs", "--robot", "alohamini:mock"])
+    assert result.exit_code == 0
+    names = _verb_column(result.output)
+    assert {"move", "lift", "gripper", "observe"} <= names, names
+    assert not names & {"kick", "quack", "say", "gaze", "perform", "stand"}, names

@@ -63,7 +63,9 @@ BLURB = (
 _MOVE_DESCRIPTION = (
     "Drive with a velocity for a duration: vx forward m/s, vy left m/s (this robot really "
     "can slide sideways without turning), wz rad/s (+ = left). The base's own driver moves; "
-    "quackd re-sends the command while the verb runs."
+    "quackd re-sends the command while the verb runs. This is a 12 kg cart: upstream's own "
+    "teleop opens at 0.1 m/s and 30 deg/s, so ask for 0.1 on a first run rather than "
+    "taking the default."
 )
 _STALE_LIMIT_MS = 500.0
 """Matches the host's own watchdog (`upstream_api.WATCHDOG_TIMEOUT_MS`): by the time an
@@ -85,6 +87,18 @@ def parse_variant(address: str | None) -> str:
         return DEFAULT_VARIANT
     wanted = parse_qs(urlsplit(address).query).get("variant", [DEFAULT_VARIANT])[0].strip().lower()
     return wanted if wanted in VARIANTS else DEFAULT_VARIANT
+
+
+def parse_swap_colour(address: str | None) -> bool:
+    """`tcp://host:5555?swap_colour=0`. The default is to swap, which is what upstream's
+    own capture path produces, and it is UNVERIFIED because nobody has held a red ball in
+    front of a real cart. It has to be reachable without editing quackd: the detector every
+    camera verb steers by does not fail loudly on a swapped frame, it quietly stops finding
+    things, and the Open Duck Mini's camera daemon has had the same switch since 0.5."""
+    if not address:
+        return True
+    raw = parse_qs(urlsplit(address).query).get("swap_colour", ["1"])[0].strip().lower()
+    return raw not in ("0", "false", "no", "off")
 
 
 def xlerobot_manifest(
@@ -275,7 +289,12 @@ class XLerobotAdapter:
 def describe(backend: str, robot_id: str | None = None) -> RobotManifest:
     """Static: the mock always has its camera; the real host claims none until connect() has
     seen one on the wire, because a stock cart ships with every camera commented out."""
-    return xlerobot_manifest(backend, robot_id, camera=backend == "mock", camera_key="head")
+    camera = backend == "mock"
+    # never a camera_key on a manifest that declares no camera: a stock cart ships
+    # blind, and naming a camera it has not got is a claim the same manifest denies.
+    return xlerobot_manifest(
+        backend, robot_id, camera=camera, camera_key="head" if camera else None
+    )
 
 
 def implementations() -> dict[str, Verb]:
@@ -304,7 +323,12 @@ def make(
         from quackd.adapters.xlerobot.zmq_host import XLerobotZmq
 
         return XLerobotAdapter(
-            XLerobotZmq(address=address, variant=parse_variant(address)), robot_id=robot_id
+            XLerobotZmq(
+                address=address,
+                variant=parse_variant(address),
+                swap_colour=parse_swap_colour(address),
+            ),
+            robot_id=robot_id,
         )
     raise ValueError(f"unknown xlerobot backend {backend!r}; choose one of {BACKENDS}")
 
@@ -324,6 +348,7 @@ __all__ = [
     "implementations",
     "make",
     "max_vy_for",
+    "parse_swap_colour",
     "parse_variant",
     "xlerobot_manifest",
 ]

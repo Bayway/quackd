@@ -190,6 +190,18 @@ class XLerobotZmq:
             return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=self.timeout_s)
         except TimeoutError as e:
             raise TransportError(f"xlerobot: the host did not answer in {self.timeout_s}s") from e
+        except TransportError:
+            raise
+        except Exception as e:
+            # Refusal is data, never an exception. Whatever the socket raised (the host
+            # exited on its own timer, the process died, the cable went), the pilot is
+            # told the link is gone rather than handed a ZMQ error through the
+            # executor's catch-all, which reads like a crash in quackd.
+            raise TransportError(
+                f"xlerobot: the host at tcp://{self.host}:{self.cmd_port} stopped answering "
+                f"({type(e).__name__}: {e}). It exits by itself after an hour, so if it "
+                "has been running a while, restart it on the robot."
+            ) from e
 
     async def _pump(self, timeout_ms: int = POLL_MS) -> bool:
         """Take the newest observation if one is waiting. Stamps on arrival: nothing on the

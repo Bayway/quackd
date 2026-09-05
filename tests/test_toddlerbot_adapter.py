@@ -33,12 +33,26 @@ from quackd.cli import app
 from quackd.duckfile.parser import load_duck
 from quackd.duckfile.validate import validate_duck
 from quackd.perception.color_blob import ColorBlobDetector
-from quackd.safety import Executor, allow_all
+from quackd.safety import Executor, VerbNotAllowed, allow_all
 from quackd.transport.base import Intent
 from quackd.verbs.core import scan_mode
 from quackd.verbs.registry import VerbNotFound, registry_from_manifest
 
 runner = CliRunner()
+
+
+def _verb_column(output: str) -> set[str]:
+    """The names in the rendered table's first column.
+
+    Searching the whole output is wrong: `approach_and`'s own description names `kick` and
+    `grab` as example follow-up verbs, so a substring check finds verbs that are not there.
+    """
+    return {
+        line.split(chr(9474))[1].strip().rstrip(chr(8230))
+        for line in output.splitlines()
+        if line.count(chr(9474)) > 2
+    }
+
 
 #: Verbs other robots have and this body has not, at this pin.
 ABSENT = {"say", "quack", "express", "play_sound", "wake_up", "sit", "kick", "grab", "stand_up"}
@@ -289,6 +303,65 @@ async def test_connect_narrows_to_what_the_transport_reported() -> None:
     assert manifest.provides("stand") and manifest.provides("perform")
 
 
+async def test_the_camera_composites_run_through_the_executor() -> None:
+    """`search_scan`, `go_to` and `approach_and` are in this manifest, so they get driven
+    rather than assumed. They are also the only declared verbs that would walk a body which
+    cannot get up if it falls, which makes them the last ones to leave untested."""
+    adapter = ToddlerBotAdapter(ToddlerBotMock())
+    manifest = await adapter.connect()
+    ex = _executor(adapter, manifest)
+    mock = adapter.transport
+    assert isinstance(mock, ToddlerBotMock)
+    for verb in ("search_scan", "go_to", "approach_and"):
+        assert manifest.provides(verb), verb
+
+    scanned = await ex.run_verb("search_scan", {"target": "ball", "max_steps": 4})
+    assert scanned.ok, scanned.summary
+
+    went = await ex.run_verb("go_to", {"target": "ball", "stop_distance": 0.4})
+    assert went.ok, went.summary
+    rel = mock.ball_relative()
+    assert rel is not None and rel[0] < 1.3, "it actually closed the distance"
+
+
+async def test_approach_and_runs_its_then_verb_through_the_executor() -> None:
+    adapter = ToddlerBotAdapter(ToddlerBotMock())
+    manifest = await adapter.connect()
+    ex = _executor(adapter, manifest)
+    mock = adapter.transport
+    assert isinstance(mock, ToddlerBotMock)
+    then = await ex.run_verb(
+        "approach_and", {"target": "ball", "stop_distance": 0.8, "then": "stand"}
+    )
+    assert then.ok, then.summary
+    assert mock.stands >= 1, "the `then` verb ran"
+
+
+async def test_a_blind_build_has_no_composites_to_run() -> None:
+    """With no camera these four are absent from the registry rather than refused, so asking
+    for one is a VerbNotFound and never an accepted call that does nothing."""
+    adapter = ToddlerBotAdapter(ToddlerBotMock(camera=False))
+    manifest = await adapter.connect()
+    ex = _executor(adapter, manifest)
+    for verb in ("observe", "search_scan", "go_to", "approach_and"):
+        assert not manifest.provides(verb), verb
+        with pytest.raises((VerbNotFound, VerbNotAllowed)):
+            await ex.run_verb(verb, {})
+
+
+async def test_the_gripper_build_grips_through_the_executor() -> None:
+    """`grip` exists only on the gripper builds, so it is only driveable there."""
+    adapter = ToddlerBotAdapter(ToddlerBotMock(gripper=True))
+    manifest = await adapter.connect()
+    ex = _executor(adapter, manifest)
+    mock = adapter.transport
+    assert isinstance(mock, ToddlerBotMock)
+    assert manifest.provides("grip")
+    closed = await ex.run_verb("grip", {"close": True, "side": "right"})
+    assert closed.ok, closed.summary
+    assert mock.holding["right"] is True
+
+
 # ── the simulator ──────────────────────────────────────────────────────────────────────
 
 
@@ -341,3 +414,42 @@ def test_only_the_builds_quackd_will_drive_are_listed() -> None:
         "toddlerbot_2xm",
         "toddlerbot_2xm_gripper",
     }
+
+
+# ── the contract, at the library level and at the exit code ────────────────────────────
+
+
+def test_the_manifest_declares_exactly_this_set_and_no_more() -> None:
+    """Pinned on purpose. A verb that appears here without anyone deciding to add it is a
+    verb the model will be offered on a body that cannot get up if it falls."""
+    full = toddlerbot_manifest("bridge", camera=True, neck=True, gripper=True, walk=True)
+    assert set(full.verb_names()) == {
+        "report_state",
+        "stop",
+        "observe",
+        "move",
+        "go_to",
+        "approach_and",
+        "search_scan",
+        "look",
+        "stand",
+        "perform",
+        "grip",
+    }
+    bare = toddlerbot_manifest("bridge", camera=False, neck=False, gripper=False, walk=False)
+    assert set(bare.verb_names()) == {"report_state", "stop", "stand", "perform"}
+
+
+def test_a_kicking_task_is_refused_against_this_body_with_the_validators_words() -> None:
+    problems = validate_duck(load_duck("find-and-kick"), [describe("mock", "toddlerbot-01")])
+    assert any("does not provide it" in p.message for p in problems), [p.message for p in problems]
+    cli = runner.invoke(app, ["validate", "ducks/find-and-kick.duck", "--robot", "toddlerbot:mock"])
+    assert cli.exit_code == 1 and "does not provide it" in cli.output
+
+
+def test_list_verbs_shows_the_real_set() -> None:
+    result = runner.invoke(app, ["list-verbs", "--robot", "toddlerbot:mock"])
+    assert result.exit_code == 0
+    names = _verb_column(result.output)
+    assert {"look", "stand", "perform", "observe"} <= names, names
+    assert not names & {"kick", "quack", "say", "relax", "stand_up", "sit_toggle"}, names

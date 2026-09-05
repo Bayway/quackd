@@ -73,7 +73,13 @@ API needs; this one has one.
 
 The robot's own fast tier is 0.3 m/s and 90 deg/s, but quackd's schema caps `vy` at 0.2 and
 `wz` at 1.5 rad/s and `limits` may only narrow, so on two of the three axes the schema binds
-rather than the robot. `move` opens at upstream's slow tier.
+rather than the robot.
+
+`move`'s own default `vx` is quackd's shared 0.15 m/s, which sits between upstream's
+slow tier (0.1 m/s, 30 deg/s) and its medium one, and upstream's teleop opens at slow
+with `speed_index` at zero. quackd does not vary a core verb's defaults per robot, so
+the verb's description tells the model to ask for 0.1 explicitly on a first run. On a
+12 kg cart that difference is worth knowing about before you find out.
 
 **`safety_authority` is `native: none` with `deadman: true`.** The host's 500 ms watchdog is
 real, but it calls `stop_base()`, which zeroes the three wheels and nothing else: the fourteen
@@ -104,6 +110,40 @@ a wrist one, whose bearing means nothing for navigation, and the choice is recor
 
 Note that the commented config has `right_wrist` and `head(RGDB)` both pointing at
 `/dev/video2`, so an owner enabling cameras has to edit it regardless.
+
+### Enabling a camera makes the whole robot depend on it
+
+This is the hazard to know before you uncomment that block, because the symptom looks nothing
+like the cause.
+
+Once a camera is configured, the host's `is_connected` is `all(cam.is_connected for cam in
+self.cameras.values())`, so a device that is not there stops the whole host rather than one
+sensor. Worse, `async_read()` raises `TimeoutError` at **200 ms**, and the host reads every
+camera inside the same loop that publishes the observation. A single stalled or flaky USB
+camera therefore takes down the entire observation stream, including the joint state.
+
+From quackd's side that is indistinguishable from the host being gone: the observations stop,
+nothing on the wire is timestamped, and the heartbeat fires. The message you get will talk
+about the host not answering and its one hour lifetime, because that is the far more common
+cause. **If a cart goes quiet shortly after you enabled a camera, unplug the camera before you
+debug anything else.**
+
+The 500 ms watchdog handles the robot end of this correctly: the base stops. The arms keep
+holding their last goal under torque, which is what you want and is not a stop.
+
+### Colour order
+
+quackd assumes the frames arrive BGR and swaps them, which is OpenCV's own order and what
+upstream's capture path produces. It is listed UNVERIFIED because nobody has held a red ball in
+front of a real cart. If your frames come back with red and blue reversed, pass
+`?swap_colour=0` on the address:
+
+```
+--address tcp://xlerobot.local:5555?swap_colour=0
+```
+
+The detector `observe`, `go_to` and `search_scan` steer by is a colour blob detector, so a
+swapped frame does not fail loudly. It quietly stops finding the thing you asked for.
 
 ## Before it will answer
 
