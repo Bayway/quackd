@@ -987,7 +987,7 @@ def build_core(args: argparse.Namespace) -> BridgeCore:
     caps = capabilities_from(config)
     # `expression_features.camera` says who owns the *device*, not whether quackd can see.
     # When it is true the robot's own runtime constructs a Cam and owns it, so
-    # quackd_duck_camd.py refuses to start rather than fight for it — which is why an owner
+    # quackd_duck_camd.py warns about it — which is why an owner
     # who wants frames sets it false. Reading the capability from that same flag therefore
     # meant a correctly configured duck reported no camera and lost `observe`, `go_to`,
     # `search_scan` and `approach_and` at connect, with no configuration that produced both
@@ -1010,7 +1010,7 @@ def build_core(args: argparse.Namespace) -> BridgeCore:
     elif runtime_owns_camera and args.camera_url:
         log.warning(
             "duck_config.json says expression_features.camera is true, so the robot's own "
-            "runtime owns the camera and quackd_duck_camd.py will refuse to start — nothing "
+            "runtime claims the camera; quackd_duck_camd.py warns but starts — check nothing "
             "will be serving %s. Set that flag false and let camd have the device. See "
             "docs/adapters/open_duck.md.",
             args.camera_url,

@@ -45,7 +45,8 @@ and turns the camera verbs on).
 Every verb here is a core verb: the adapter adds no extension, it only says what it has.
 The `limits` are what `move`, `go_to` and the turn used by `search_scan` clamp to (since
 0.4 the core verbs read a manifest's `max_vx`, `max_vy` and `max_wz`); they are quackd's
-caution, not the base's capability, and a manifest can raise them.
+caution, not the base's capability. A manifest can lower them, but not raise them past
+`move`'s own schema bounds (±0.3 m/s, ±0.2 m/s, ±1.5 rad/s), which reject a larger request.
 
 ## Safety
 

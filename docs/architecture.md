@@ -85,7 +85,8 @@ sequenceDiagram
    one tool call.
 3. **Enforce.** Zero tool calls → one re-prompt, then failure. Several → the first. Then
    `Executor.run_verb`: abort flag → allowlist → params → confirm → budget → machine-enforced
-   `abort_when` → preconditions → dry-run → execute with timeout.
+   `abort_when` → preconditions → dry-run → execute, racing the timeout against the abort.
+   `stop` is exempt from the abort gate, so the brake still works after one.
 4. **Act.** The verb runs; composites loop on the camera at 10 Hz; `move` re-sends its
    velocity every 100 ms to feed the robot's deadman.
 5. **Record.** `transcript.jsonl` gets `observation`, `llm` (with usage), `verb` events

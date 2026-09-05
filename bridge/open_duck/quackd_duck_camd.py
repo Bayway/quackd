@@ -16,8 +16,8 @@ camera and answers GET requests. That is the entire program.
 
 Two processes cannot own one camera. If your `duck_config.json` says
 `expression_features.camera` is true, the robot's own runtime constructs a `Cam` and owns
-it, and this server refuses to start rather than fight for the device. Set that flag false
-and let this serve the camera instead.
+it. Upstream's walk loop opens none, so this server warns and starts anyway; setting that
+flag false is still the tidier setup.
 
     python quackd_duck_camd.py --fake            # a synthetic frame, no camera needed
     python quackd_duck_camd.py --bind 0.0.0.0    # a real camera, on the duck

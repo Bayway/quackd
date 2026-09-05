@@ -1,6 +1,6 @@
 # ADR-0012: One executor between every LLM and the transport
 
-**Status:** accepted · **Date:** 2026-08-28
+**Status:** accepted · **Date:** 2026-08-28 · **Amended 2026-09-05:** gate 1 exempts `stop` (the abort is set exactly when the pilot reaches for the brake), and gate 9 races the abort event as well as the clock, so a kill switch cancels the running verb. `RobotSession` exempts `stop` the same way.
 
 ## Context
 
