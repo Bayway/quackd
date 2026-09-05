@@ -49,9 +49,9 @@ build has no depth sensor at all.
 **How do I tune the detector for a real orange ball?** `ColorBlobDetector` takes
 `targets=(Target("ball", HSVRange(h_lo, h_hi, s_lo, v_lo), size_m=radius, round=True), …)`
 in OpenCV HSV (H 0–180). Photograph the ball under your light, sample its hue, give ±8, and
-set `fov_deg=62` for the IMX219. Distance comes from apparent size: measure the pixel radius
-at 1 m once and adjust `size_m` until it reads 1.00. Or install `quackd[yolo]` and use
-`YoloDetector`.
+pass `--fov-deg 62` to `quackd run` for the IMX219. Distance comes from apparent size:
+measure the pixel radius at 1 m once and adjust `size_m` until it reads 1.00. Or install
+`quackd[yolo]` and use `YoloDetector`.
 
 **Does it remember anything between runs?** Since 0.6, a little, per robot. Each
 `adapter:backend` has a JSONL file under `~/.quackd/memory/` holding two kinds of line: the
@@ -80,7 +80,7 @@ is POSIX-only; forward it with `ssh -L 9870:/run/robotd.sock <robot>` and use
 `--address tcp://127.0.0.1:9870`.
 
 **Can I run it on my Microduck today?** `--robot microduck:jsonrpc` speaks the verified
-`duck-ipc-proto` v16 vocabulary but has never touched hardware. Start with `--dry-run`,
+`duck-ipc-proto` v23 vocabulary but has never touched hardware. Start with `--dry-run`,
 read [adapter-status.md](adapter-status.md), and tell us what happened.
 
 **Can I drive it from the Claude mobile app?** Not yet. `quackd serve-mcp` speaks `stdio`
@@ -131,9 +131,10 @@ makes the power switch the only thing that always wins ([safety.md](safety.md)).
 model's judgment: every verb call is checked against the loaded `.duck`'s allowlist,
 budgets and confirm gates before anything is sent, and machine-enforced `abort_when` rules
 and preconditions (not fallen, not sitting) run right after — a refusal is enforced code,
-not a request the model can talk its way around. That's still only the software layer; on
-hardware the robot's own controller keeps the final word regardless (fall detection,
-thermal clamps, and on the Microduck a deadman) — see [safety.md](safety.md).
+not a request the model can talk its way around. That's still only the software layer, and
+what the body adds under it varies: the Microduck's `robotd` has fall detection, thermal
+clamps and a deadman, while an Open Duck Mini v2 declares `none` and the watching human is
+its fall detector — see [safety.md](safety.md).
 
 **Does my data ever leave my machine?** Only if you choose a cloud provider. Claude,
 OpenAI, Gemini and Grok each send the camera frame and prompt to that provider's API over

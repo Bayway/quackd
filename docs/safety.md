@@ -13,13 +13,15 @@ A biped falls in 0.3 s; an LLM answers in 3 s. Everything here follows from that
 ## The executor (mirrors upstream's own rules)
 
 Every verb call — from the agent loop or an MCP session — passes `Executor.run_verb`, in
-this order: abort flag → **allowlist** (`verbs.allow`; `stop` always allowed) → param
-validation (errors are feedback to the model, not crashes) → **confirm gate**
-(`verbs.confirm` or `safety_class` ∈ {confirm, dangerous}; y/N in the terminal, `--yes` to
-auto-accept, MCP refuses unless `--yes`) → **budgets** (`max_steps` here; `max_llm_calls`
-and `max_minutes` in the loop) → machine-enforced **`abort_when`** (battery threshold,
-consecutive failures) → **preconditions** (not fallen, not sitting) → `--dry-run` → execute
-with a **timeout**. A verb that times out or raises stops the duck and reports a failure.
+this order: abort flag (`stop` is exempt, so the brake still works) → **allowlist**
+(`verbs.allow`; `stop` always allowed) → param validation (errors are feedback to the
+model, not crashes) → **confirm gate** (`verbs.confirm` or `safety_class` ∈ {confirm,
+dangerous}; y/N in the terminal, `--yes` to auto-accept, MCP refuses unless `--yes`) →
+**budgets** (`max_steps` here; `max_llm_calls` and `max_minutes` in the loop) →
+machine-enforced **`abort_when`** (battery threshold, consecutive failures) →
+**preconditions** (not fallen, not sitting) → `--dry-run` → execute, racing the **timeout**
+against the abort, so a kill switch cancels the verb. A verb that times out or raises stops
+the duck and reports a failure.
 
 ## Heartbeat
 
@@ -87,18 +89,20 @@ widen it. **You are responsible for your robot.**
 
 **An Open Duck Mini v2:**
 
-- **If it falls, quackd cannot pick it up.** There is no get-up policy on this robot, so
-  `stand_up` does not exist for it and every verb that moves it refuses until a human
-  stands it up. Work with the duck on a stand until you trust the link.
+- **If it falls, quackd cannot pick it up, and on hardware it cannot tell that it has.**
+  There is no get-up policy, so `stand_up` does not exist for it, and nothing on the bridge
+  backend detects a fall: no verb refuses because the duck is down, and every observation
+  says `fall-blind`. You are the fall detector: keep it on a stand until you trust the link.
 - The deadman is quackd's own, and it runs on the robot. quackd's bridge daemon zeroes the
   velocity after 300 ms of silence, inside the call the control loop makes every tick, so a
   server thread that is starved, wedged or dead still stops the duck. Test it by pulling
   your laptop's Wi-Fi mid-walk before you rely on it.
 - Going limp is unreachable rather than forbidden: the only channel from the network to the
   body is seven floats and a few buttons, so no message reaches a torque register.
-- Head control is off unless you start the daemon with it on, and then it is clamped inside
-  the runtime's own range and rate limited. Upstream warns that head control can break the
-  head, and quackd never presses its mode button.
+- Head control is off unless you start the daemon with it on, and then it is clamped to 80
+  percent of the runtime's own range and rate limited. Upstream warns that head control can
+  break the head, and the four head values are offsets added to wherever the walk policy is
+  holding the head, not absolute angles, so that clamp bounds an offset rather than a joint.
 - The Feetech serial bus has exactly one owner. The bridge *is* the walk loop, so do not run
   it and upstream's script at the same time.
 - The bridge binds loopback and wants a token, because a port that walks a robot on a shared

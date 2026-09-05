@@ -124,7 +124,9 @@ thing that broke.
 The command, since this step never named one. `--provider fake` has no script for a free-form goal, so it needs a real model:
 
 ```bash
-quackd run --goal "walk in place with small steps, do not turn, then stop" \n    --robot microduck:jsonrpc --address unix:///run/robotd.sock \n    --provider anthropic --max-steps 6
+quackd run --goal "walk in place with small steps, do not turn, then stop" \
+    --robot microduck:jsonrpc --address tcp://127.0.0.1:9870 \
+    --provider anthropic --max-steps 6
 ```
 
 ## 9. Feet down

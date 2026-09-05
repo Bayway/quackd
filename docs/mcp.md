@@ -30,9 +30,10 @@ the default robot, which is what they did. `duck_get_frame` has no exact replace
 design: `robot_observe` does the same job but goes through the executor, so frames are
 budgeted and logged like every other verb.
 
-Without a loaded `.duck`, every verb that is not `dangerous` is allowed and there are no
-budgets. Load one to get the guard rails. Contracts, budgets and abort flags are per
-robot: loading a contract on `duck` changes nothing for `reachy`.
+Without a loaded `.duck`, every verb that is not `dangerous` is allowed and the session runs
+on a default budget of 40 verb steps and five minutes, counted from when the server started.
+Load one to get the guard rails and the task's own budget. Contracts, budgets and abort
+flags are per robot: loading a contract on `duck` changes nothing for `reachy`.
 
 Simulated robots in one fleet each get their own world; a shared arena over MCP is future
 work (a flock needs a coordinator, and one MCP pilot is not one). Run a heterogeneous task

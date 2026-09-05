@@ -91,9 +91,8 @@ fi
 say "checking who owns the camera"
 if grep -q '"camera"[[:space:]]*:[[:space:]]*true' "$DUCK_CONFIG" 2>/dev/null; then
   warn "duck_config.json has expression_features.camera true, so the robot's own runtime
-  owns the camera and quackd-duck-camd will refuse to start. Two processes cannot own one
-  camera. Set that flag false to let quackd serve frames instead, or accept no frames and
-  the verbs that need them will simply not exist."
+  claims to own the camera. Upstream's walk loop opens none, so quackd-duck-camd will warn
+  and start anyway. Setting that flag false is still tidier."
 fi
 
 # The camd unit runs under the same virtualenv as the bridge, but picamera2 and libcamera are

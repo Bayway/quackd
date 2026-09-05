@@ -108,9 +108,6 @@ Legend: ✅ done · 🔨 in progress · ⬜ todo · ⏸ blocked (with reason)
   [design](docs/design/open-duck.md)); the first quackd code that runs on a robot; four
   hardware-path blockers fixed; `--transport` and the `duck_*` tools removed as promised;
   457 tests, five seeded sweeps at 10 of 10, still offline
-- ⏸ Only a human can: run `open_duck:bridge` against a duck they built, work the checklist
-  in `docs/open-duck-hardware-checklist.md`, and confirm the deadman by pulling Wi-Fi
-  mid-walk. Flip the `bridge` row in `docs/adapter-status.md` only after
 - ✅ Tagged `v0.5.0` (annotated) and pushed `main`, GitHub Release
   `v0.5.0 "open duck"` created on `main` with the wheel and sdist attached (2026-09-03).
   A pre-release audit of the note against the code fixed a half-applied detector fix, two

@@ -54,7 +54,7 @@ You do not need a robot to try it. A bundled simulator runs on any laptop in sec
 
 > **"Find the ball and kick it."** · **"Find the ball, walk up to it and say where it is."** *(an Open Duck Mini v2, which cannot kick)* · **"Find the ball with your gaze and say where it is."** *(a Reachy Mini head, no legs)* · **"Split the search, the closest duck kicks."** *(a flock)* · **"The head spots, the duck kicks, the head judges."** *(two bodies, one contract)*
 
-Five more starters ship. `hello-world` is the smoke test (quack, one step, quack) and the scripted pilot completes it, and `open-duck-lookout` stands still and reports what it can see, which is the task to point at a real duck first because nothing in it moves a leg. `patrol-and-quack`, `follow-me` and `fetch` carry a strategy in their body written for a real model, and no pilot has completed one yet: the scripted pilot has no script for `follow-me` or `fetch` (it declares success after two steps without attempting the task), its patrol script runs to the budget on every seed, and no model run has been recorded.
+Six more starters ship. `hello-world` is the smoke test (quack, one step, quack) and the scripted pilot completes it, and `open-duck-lookout` and `microduck-lookout` stand still and report what they can see, which are the tasks to point at real hardware first because nothing in them moves a leg. `patrol-and-quack`, `follow-me` and `fetch` carry a strategy in their body written for a real model, and no pilot has completed one yet: the scripted pilot has no script for `follow-me` or `fetch` (it declares success after two steps without attempting the task), its patrol script runs to the budget on every seed, and no model run has been recorded.
 
 Runs with a cloud model or with an open source model on your own machine (Ollama, vLLM, llama.cpp, LM Studio). The local path needs no API key.
 
@@ -205,7 +205,6 @@ The eight `duck_*` tools from 0.3 were aliases of the default robot and were rem
 - Real model code paths for Claude, OpenAI, Gemini and Grok are implemented and tested offline. The hero GIF is the scripted pilot because this repo was built without an API key.
 - Run a flock: multiple simulated robots coordinate over a message bus and a deterministic auction, each acting only through the verbs it already has. Two choreographies ship today, `flock-kick` (ducks) and `reachy-spots-duck-kicks` (a head and a duck), both 10 of 10 seeds with the scripted pilots, and every message lands in `flock.jsonl`.
 - Drive other bodies. Robots are adapters that declare a manifest, and the verbs come from the manifest. Five adapters ship: the Microduck, an Open Duck Mini v2 that runs `open-duck-scout` in the simulator on 10 of 10 seeds, a Reachy Mini head that runs `reachy-spotter` on 10 of 10, an SO-101 class arm through LeRobot and any wheeled base over rosbridge, the last two as offline mocks, each with an experimental backend (`open_duck:bridge`, `reachy_mini:sdk`, `lerobot:real`, `rosbridge:ws`) that has never run against its target. `quackd list-adapters` shows them, `quackd list-verbs --robot` shows a body's vocabulary, and `quackd validate --robot` tells you which verbs a task needs that a robot does not have.
-- Mix bodies in one flock. In `reachy-spots-duck-kicks` a Reachy Mini head spots the ball and judges the kick from its own frames while a Microduck kicks, 10 of 10 seeds with the scripted pilots, with bids that carry a capability term so each robot only bids for a role its manifest can fill.
 - Find robots on the LAN with `quackd discover` and `quackd announce` (zeroconf, behind `quackd[lan]`), and carry a flock's messages over an MQTT broker as a library. Each was exercised once for real on one machine, never across two.
 
 **Going (see [Roadmap](#roadmap)):** a first run of `open_duck:bridge` on a duck somebody built, which is the nearest of these and the one with a checklist waiting for it, then `reachy_mini:sdk`, `lerobot:real` and `rosbridge:ws` on the bodies they target, the five Microduck starter tasks on a real duck once it ships, upstream's WebSocket agent surface, and *learned verbs*, new skills trained from LLM written rewards that register as one more verb. Eventually, a small robot in a real room that you can ask to find, fetch, follow and check on things.
@@ -219,7 +218,7 @@ The eight `duck_*` tools from 0.3 were aliases of the default robot and were rem
 | Providers: anthropic, openai, gemini, grok, fake | ✅ implemented, tested offline, real model hero recording pending an API key |
 | Local models (Ollama, vLLM, llama.cpp, LM Studio, any OpenAI compatible server) | ✅ implemented and tested against the OpenAI wire format, 🧪 one live run by a contributor (Qwen 2.5 Coder 14B on LM Studio, two seeds), never on this machine and no transcript in the repo, more welcome |
 | Flock mode (multiple cooperating robots, sim2d) | ✅ deterministic auction and bus, one planner LLM call at most, ground truth checked in tests, 🧪 experimental and simulator only |
-| Real Microduck over JSON RPC (`--robot microduck:jsonrpc`) | 🧪 experimental, method names verified against upstream `duck-ipc-proto` v16, never run on hardware |
+| Real Microduck over JSON RPC (`--robot microduck:jsonrpc`) | 🧪 experimental, method names verified against upstream `duck-ipc-proto` v23, never run on hardware |
 | WebSocket agent gateway (`--robot microduck:websocket`) | ⏳ stub tracking upstream's draft ([architecture.md §5.3](https://github.com/pollen-robotics/microduck/blob/main/docs/design/architecture.md)) |
 | Reachy Mini adapter (`--robot reachy_mini:sim2d`, `mock`, `sdk`) | ✅ sim2d and mock, `reachy-spotter` 10 of 10 seeds, 🧪 sdk behind `quackd[reachy]` with every SDK name verified against a pinned commit and the 1.10.0 wheel, exercised with a fake client, never run on a robot ([docs/adapters/reachy_mini.md](docs/adapters/reachy_mini.md)) |
 | LeRobot adapter (`--robot lerobot:mock`, `real`) | ✅ mock, an SO-101 class arm with `move_joints`, `gripper`, `place` and `pick` as one skill intent (confirm gated, present only when a policy is available), 🧪 real behind `quackd[lerobot]` (Python 3.12 or newer) with every LeRobot name verified against a pinned commit, exercised with a fake arm and a fake policy, never run on an arm ([docs/adapters/lerobot.md](docs/adapters/lerobot.md)) |
@@ -371,7 +370,7 @@ uvx quackd run --goal "find the ball and kick it" --provider fake
 # the same goal with Claude
 uvx --from "quackd[anthropic]" quackd run --goal "find the ball and kick it" --provider anthropic
 
-# a task file (ten ship with the package, the starter table below lists them)
+# a task file (eleven ship with the package, the starter table below lists them)
 uvx quackd run find-and-kick --provider fake --seed 3
 ```
 
@@ -396,7 +395,7 @@ The four cloud providers see the camera frame as an image. Local models get the 
 
 | Command | What it does |
 |---|---|
-| `quackd run <duck>` or `quackd run --goal "..."` | Run a task. `--provider`, `--robot <adapter>:<backend>`, `--robots name=<adapter>:<backend>,...` for a flock of mixed bodies, `--address` for a real robot, `--model`, `--seed`, `--max-steps`, `--dry-run`, `--yes`, `--live`, `--gif-size`, `--camera-url` for a robot whose camera is an HTTP snapshot, `--token` for a robot that wants one, `--flock N` (2 to 4, sim2d), `--no-memory` and `--memory-dir` for what it carries between runs |
+| `quackd run <duck>` or `quackd run --goal "..."` | Run a task. `--provider`, `--robot <adapter>:<backend>`, `--robots name=<adapter>:<backend>,...` for a flock of mixed bodies, `--address` for a real robot, `--model`, `--seed`, `--max-steps`, `--dry-run`, `--yes`, `--live`, `--gif-size`, `--camera-url` for a robot whose camera is an HTTP snapshot, `--fov-deg` for your camera's field of view (without it, distances on hardware are a rough guess), `--token` for a robot that wants one, `--flock N` (2 to 4, sim2d), `--no-memory` and `--memory-dir` for what it carries between runs |
 | `quackd validate ducks/*.duck` | Check task files against the spec and a robot's manifest (`--robot`, repeatable, `--robots` for a fleet, or the file's own `robots:` if it has one). Exits 1 with field level errors such as `requires kick, but reachy-01 (reachy-mini) does not provide it` |
 | `quackd serve-mcp` | Expose a robot (`--robot <adapter>:<backend>`), or a fleet with `--robots name=<adapter>:<backend>,...`, as MCP tools over stdio. `--duckfile` starts with a contract loaded on the default robot, `--yes` allows confirm-gated verbs, `--seed`, `--address`, `--dry-run`, `--no-memory` and `--memory-dir` |
 | `quackd doctor` | Keys, extras, adapters, local LLM servers, and every upstream assumption on this machine (`--robot` for one robot's manifest) |
@@ -576,7 +575,7 @@ Measured on the simulator with the scripted pilot (no model latency): `find-and-
 
 Why a task can refuse a body, whether two robots can share a task, and more: [docs/faq.md](docs/faq.md).
 
-**Non goals for now, on purpose:** no RL training or reward generation (that is v2, and only the registry hook exists), no features that require hardware (the real robot backends ship experimental and have never run: `microduck:jsonrpc`, `reachy_mini:sdk`, `lerobot:real`, `rosbridge:ws`), and no copying of Pollen Robotics assets, ever (no logos, no 3D meshes, no videos).
+**Non goals for now, on purpose:** no RL training or reward generation (that is v2, and only the registry hook exists), no features that require hardware (the real robot backends ship experimental and have never run: `microduck:jsonrpc`, `open_duck:bridge`, `reachy_mini:sdk`, `lerobot:real`, `rosbridge:ws`), and no copying of Pollen Robotics assets, ever (no logos, no 3D meshes, no videos).
 
 <br>
 
