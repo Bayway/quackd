@@ -134,6 +134,29 @@ upstream, which is what CI does. The daemon **refuses to actuate without a zero 
 (`motors.yml`), because without it every commanded angle is offset by however that particular
 robot was assembled.
 
+## The contract job, and what a green one means
+
+`.github/workflows/toddlerbot-contract.yml` runs nightly and on demand, and it is the only
+thing in this repository that installs upstream. It takes a blobless sparse checkout of about
+70 MB out of upstream's 1.2 GB, starts quackd's real daemon with `--sim mujoco`, and drives it
+with quackd's real client over a real socket.
+
+It is deliberately not part of `ci`. The main suite has to stay installable on Windows with
+nothing but quackd's own dependencies, and this needs MuJoCo, jax, OpenCV and a 30-motor
+model. It is also `continue-on-error`, because what it watches for is upstream drift rather
+than a regression here.
+
+Two things the plan for this adapter got wrong, corrected by reading the source. There is no
+need for `MUJOCO_GL=osmesa` or `xvfb`: the headless path builds neither a viewer nor a
+renderer, so no GL context is created at all, and upstream never reads `MUJOCO_GL`. What is
+needed instead is that `import mujoco.viewer` succeeds, because `mujoco_sim` imports it at
+module scope before it checks `vis_type`, and that pulls in glfw's shared library. The job
+installs the X11 client libraries for that reason, and it never runs a display.
+
+**A green run still means nothing about hardware.** It means the protocol, the fifty hertz
+loop, the clamp and the deadman hold up against thirty simulated motors that push back, which
+is strictly more than the fake body could prove and strictly less than a robot.
+
 ## VERIFIED (read from upstream source on 2026-09-05, at `84e02d1`)
 
 | Thing | Value | Used for |
@@ -193,6 +216,10 @@ robot was assembled.
 | The envelope | `command_range` | rows 5, 6 and 7 are the walk velocities |
 | All three or none | `control_inputs` | a partial dict raises mid-tick |
 | Never clipped upstream | `walk_x` | out-of-envelope goes straight to the network, so the daemon clamps |
+| The simulated body | `MuJoCoSim` | takes the Robot, runs at the same fifty hertz |
+| Headless by default | `vis_type` | only render or view build anything that needs GL |
+| Do not use it | `controller_type` | the position controller's step takes the wrong arity |
+| Paths are relative | `scene.xml` | so the daemon changes directory to the checkout root |
 
 ## UNVERIFIED, and what quackd does about it
 

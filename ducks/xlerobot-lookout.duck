@@ -2,6 +2,12 @@
 # so it is what to point at a physical cart before you ever let it drive. It stands still and
 # says what it can see. This robot has no head control and no voice, so it cannot look around
 # and it cannot speak: a human aims it, and it reports in text.
+#
+# `search_scan` is deliberately not here, though the plan for this adapter listed it. On a
+# body with a neck, scanning turns a head. On this one there is no head control, so it would
+# turn a 12 kg cart on the spot, which is the one thing a bring-up task must not do the
+# first time anybody points quackd at real hardware. If nothing is in view, saying so is the
+# correct answer.
 ---
 duck: 1
 name: xlerobot-lookout

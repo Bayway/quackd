@@ -70,7 +70,7 @@ no longer are.
   it travelling. And the lift's two keys are not symmetric, so a payload carrying both freezes
   it instead. One function builds every payload and holds all three invariants, and the fake
   host reproduces the bugs so the tests mean something: `test_stop_zeroes_the_lift` fails
-  against the naive three-key stop that upstream's own replay example sends.
+  against the naive three-key stop that the shape of the driver invites.
 - **The XLeRobot: a dual-arm mobile manipulator on an IKEA cart, about $660 to build**
   (`--robot xlerobot:mock` or `xlerobot:zmq`). Two five-joint arms with grippers on a
   three-omniwheel base that really can drive sideways, so `move` here carries a `vy` that

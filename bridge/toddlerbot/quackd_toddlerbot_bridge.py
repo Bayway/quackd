@@ -813,6 +813,38 @@ def build_walk_policy(ckpt: str, robot: Any, init_pos: Any, root: str) -> tuple[
 # ── wiring it up ────────────────────────────────────────────────────────────────────────
 
 
+def build_mujoco(robot_name: str, root: str) -> tuple[Any, Any]:
+    """Construct upstream's Robot and its MuJoCo body, headless.
+
+    This is the contract path: upstream's own physics, upstream's own model, and no
+    hardware anywhere. It exists so the client, the protocol and the fifty hertz loop can
+    be exercised against something that pushes back, which the fake body cannot do.
+
+    Three things about it are not obvious and all three were read at the pin.
+
+    `vis_type` is left at its default, which is the only value that builds neither a
+    viewer nor a renderer, so nothing on this path needs a display or a GL context.
+    Upstream never reads MUJOCO_GL, so setting it changes nothing here.
+
+    `controller_type` stays at torque because the position controller's `step` takes
+    three arguments and the sim calls it with four, so the other setting raises on the
+    first tick.
+
+    And the working directory has to be the checkout root, because the model path and
+    every path `Robot` reads are relative and it offers no way to override them.
+    """
+    os.chdir(root)
+    sys.path.insert(0, root)
+    from toddlerbot.sim.mujoco_sim import MuJoCoSim  # late: needs mujoco, cv2 and jax
+    from toddlerbot.sim.robot import Robot
+
+    robot = Robot(robot_name)
+    # A simulated body has no assembly for a zero to be offset by, so the calibration
+    # the real path refuses to run without does not apply and must not block this one.
+    robot.quackd_calibrated = True
+    return robot, MuJoCoSim(robot)
+
+
 def build_real(robot_name: str, root: str) -> tuple[Any, Any]:
     """Construct upstream's Robot and RealWorld, under a watchdog.
 
@@ -866,6 +898,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--token", default=os.environ.get(TOKEN_ENV))
     parser.add_argument("--fake", action="store_true", help="Run with a simulated body.")
     parser.add_argument(
+        "--sim",
+        choices=("real", "mujoco"),
+        default="real",
+        help="Which body to drive. mujoco is upstream's own physics, headless, no robot.",
+    )
+    parser.add_argument(
         "--camera",
         choices=("left", "right"),
         default=None,
@@ -890,8 +928,9 @@ def main(argv: list[str] | None = None) -> int:
         robot: Any = FakeRobot(args.robot)
         sim: Any = FakeSim(robot)
     else:
+        build = build_mujoco if args.sim == "mujoco" else build_real
         try:
-            robot, sim = build_real(args.robot, os.path.abspath(args.toddlerbot))
+            robot, sim = build(args.robot, os.path.abspath(args.toddlerbot))
         except ImportError as e:
             sys.stderr.write(
                 "quackd's ToddlerBot daemon needs upstream installed on this robot:\n"

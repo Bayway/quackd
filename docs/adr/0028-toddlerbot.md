@@ -56,6 +56,17 @@ torqued holding its last target instead.
   shutdown freezes every thread that might have supervised it. The daemon reaches the safe pose
   first, then arms a hard-exit timer and calls `close()`. A torqued robot and a dead process is
   worse than a clean shutdown and better than a frozen process nobody can signal.
+- **`safety_authority` is `native: none`, and `deadman` is true only on `:bridge`.**
+  There is no watchdog, no timeout, no e-stop, no reset and no current limit anywhere
+  upstream, and the motors are in multi-turn mode so the firmware's own position
+  limits are off too. The robot is therefore not a safety authority in any sense the
+  manifest can name, and `native` says so. The only deadman that can exist here is
+  the one quackd's own daemon runs, so `deadman` is true exactly when that daemon is
+  on the other end and false on `mock`. `heartbeat_hz` is 5, an order of magnitude
+  below the control rate, because quackd's heartbeat only has to notice that the
+  daemon stopped answering: the fifty hertz loop and its own deadman are the
+  daemon's job. `extras.deadman_scope` says what tripping it actually does, which is
+  slew to a safe pose and hold, never go limp.
 - **The deadman is a trajectory, not a message.** On a duck it is one word, because zero
   velocity is a safe state. Here the command is an absolute pose, so the three things available
   at the hardware boundary are hold the last target, jump to a new one, and go limp, and none of

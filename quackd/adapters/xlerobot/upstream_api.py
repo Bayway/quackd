@@ -121,7 +121,10 @@ STATE_FEATURES = UpstreamRef(
     "VERIFIED",
     src(_ROBOT, 131),
     "the 17 flat dotted keys (lines 134-150): twelve <side>_arm_<joint>.pos, two "
-    "head_motor_N.pos, and x.vel / y.vel / theta.vel.",
+    "head_motor_N.pos, and x.vel / y.vel / theta.vel. Spelled out because quackd refuses "
+    "any joint name it does not recognise and a typo here would refuse every "
+    "`move_joints`: side is left or right, and joint is shoulder_pan, shoulder_lift, "
+    "elbow_flex, wrist_flex, wrist_roll or gripper.",
 )
 ACTION_FEATURES = UpstreamRef(
     "XLerobot.action_features",

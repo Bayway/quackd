@@ -213,8 +213,14 @@ async def test_an_arm_command_commands_zero_base_velocity() -> None:
 
 
 async def test_stop_zeroes_the_wheels_and_holds_the_arms_where_they_are() -> None:
-    """Stop is a hold, never a collapse: quackd re-commands each arm joint to where it is and
-    never sends the disconnect that would disable torque and drop what is held."""
+    """Stop is a hold, never a collapse.
+
+    It zeroes the three wheels and leaves every arm goal exactly where it already was. It
+    deliberately does not re-command the arms from the latest observation: that reading can be
+    several cycles behind, nothing on the wire is timestamped, and sending a stale position to
+    a servo does not hold an arm, it moves one (ADR-0026). The hold is the servos keeping their
+    last goal under torque, and what makes that safe is that quackd never sends the disconnect
+    that would disable it."""
     with FakeXLerobotHost() as host:
         link = await _connected(host)
         await link.send_intent(Intent.joint({"left_arm_shoulder_pan": 33.0}, 0.2))

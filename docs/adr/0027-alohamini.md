@@ -85,7 +85,8 @@ would zero it is commented out.
 - The wire is exercised end to end against a fake host quackd wrote from upstream's source, on
   real loopback sockets, on every CI platform. That fake reproduces the bugs deliberately, and
   it is what makes `test_stop_zeroes_the_lift` mean something: the naive three-key stop, which
-  upstream's own replay example sends, fails it.
+  a naive three-key stop, which is what the shape of
+  the driver invites, fails it.
 - Two real bugs were caught before any hardware could see them. `get_state` polled for zero
   milliseconds on a request/reply wire, so it sent a request, gave up before a reply could
   arrive, and would have served a stale reading every single time. And `lift` sent once and let
