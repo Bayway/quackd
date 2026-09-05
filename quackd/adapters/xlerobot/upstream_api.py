@@ -143,8 +143,10 @@ SEND_ACTION_PARTIAL = UpstreamRef(
     "VERIFIED",
     src(_ROBOT, 567),
     "filters by prefix and suffix (lines 583-586) and guards each bus write with `if <dict>:` "
-    "(lines 619-626), so a partial action is supported by design and quackd needs no state "
-    "mirror: `move` is a three-key push.",
+    "(lines 619-626), so a partial action is supported by design and a three-key velocity "
+    "push touches no arm joint. quackd sends a whole desired action anyway, not because "
+    "the robot needs it but because the command socket is CONFLATE: two intents in one "
+    "tick collapse into the newest, so the newest has to carry both.",
 )
 SEND_ACTION_ALWAYS_WRITES_BASE = UpstreamRef(
     "_body_to_wheel_raw(...)",

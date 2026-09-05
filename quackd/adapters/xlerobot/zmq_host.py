@@ -39,12 +39,15 @@ from urllib.parse import parse_qs, urlsplit
 from PIL import Image, UnidentifiedImageError
 
 from quackd.adapters.base import AdapterNotInstalled
+from quackd.adapters.xlerobot import upstream_api as up
 from quackd.adapters.xlerobot.verbs import ARMS, GRIPPER_CLOSED, GRIPPER_OPEN, JOINTS
 from quackd.transport.base import Ack, DuckState, HeartbeatError, Intent, TransportError
 
 DEFAULT_HOST = "127.0.0.1"
-CMD_PORT = 5555
-OBS_PORT = 5556
+CMD_PORT = int(up.PORT_ZMQ_CMD.name)
+OBS_PORT = int(up.PORT_ZMQ_OBSERVATIONS.name)
+"""Both from `upstream_api`, not retyped here. A port spelled twice is a port that
+can disagree with itself, and this one is read from upstream's own host config."""
 STALE_LIMIT_MS = 500.0
 """The host's own watchdog window: by now it has already stopped the base."""
 POLL_MS = 50

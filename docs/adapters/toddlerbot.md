@@ -72,6 +72,16 @@ file, so none of it was ever machine-verified by anyone.
   `move`, `go_to` and `approach_and` **do not exist**, and `mobility` is `none`. They appear
   only when the daemon reports one staged.
 - **Get up.** There is no recovery policy for this body, so `stand_up` is not declared and a
+  fall ends the run. Do not confuse it with `stand`, which is a different verb for a
+  different situation: `stand` slews an upright robot to the safe pose and holds it, at
+  upstream's own reset rate and waist first. It is not a way back up from the floor and it
+  will refuse once the robot has fallen. quackd calls it `stand` rather than `posture`
+  because what it does is reach one specific pose, not choose among several.
+- **Read its own IMU.** The daemon never touches `ThreadedIMU`. Orientation arrives in the
+  observation as a quaternion on `rot`, which both the real body and the simulated one
+  fill, so the shape that upstream's threaded IMU returns is not a fact quackd depends on
+  and is not cited here. If a future verb ever needs the IMU directly, that is the point at
+  which somebody has to read it at the pin.
   fall ends the run. Every moving verb refuses afterwards and asks for a human.
 - **Report a battery.** Bus voltage is read in C++ and only printed, so a battery abort can
   never fire here.
@@ -103,8 +113,15 @@ shorter list is better than a verb that refuses on a robot.
 
 ## Running the daemon
 
-It needs upstream installed on the robot, in upstream's own environment. Note that `mujoco` is
-not a declared dependency there and arrives transitively, unpinned, so pin it yourself.
+It needs upstream installed on the robot, **in upstream's own environment**, and that
+separation is the first of the three reasons this is a daemon rather than a library call.
+Upstream hard-pins `numpy==1.26.4`, `jax==0.4.28`, `jaxlib==0.4.28`, `setuptools==75.6.0`,
+`moviepy==1.0.3` and `opencv-python==4.9.0.80`. Those cannot share a process with quackd's
+own dependencies, and quackd is not going to ask anyone to downgrade numpy to drive a
+robot. The daemon runs over there and speaks a socket, so neither environment has to win.
+
+Note also that `mujoco` is not a declared dependency there at all: it arrives transitively
+through `brax`, unpinned, so pin it yourself.
 
 ```bash
 git clone https://github.com/hshi74/toddlerbot && cd toddlerbot

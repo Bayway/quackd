@@ -118,7 +118,10 @@ a bus it shares with the lift, so quackd sends its stop more than once.
 Three SKUs. `alohamini1` has six joints per arm; `alohamini2` and `alohamini2pro` have seven,
 inserting `wrist_yaw`. quackd derives which from the observed key set, never from config,
 because the host defaults to `alohamini2` while upstream's own client defaults to `alohamini1`
-and nothing cross-checks them. A `--no_follower` host runs the base and the lift alone, and the
+and nothing cross-checks them. A `--no_follower` host runs the base and the lift alone. quackd detects that from the
+first observation's key set and drops `move_joints`, `gripper` and `home_arms`, leaving
+eight verbs rather than eleven: `report_state`, `stop`, `move`, `lift`, `observe`, `go_to`,
+`search_scan` and `approach_and`. The lift survives because it is not an arm. And the
 manifest collapses to the non-arm verbs automatically.
 
 ## VERIFIED (read from upstream source on 2026-09-05, at `ab4462b`)
