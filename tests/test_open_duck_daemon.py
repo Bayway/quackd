@@ -907,8 +907,14 @@ while True:
     cmds, buttons, lt, rt = pad.get_last_command()
     seen.append([float(c) for c in cmds])
     buttons.a_button_upstream_added_later.triggered
-    with open(os.environ["TICKS"], "w") as fh:
+    # Written to a sibling and moved into place, because the reader is another process
+    # polling this path. Truncating in place let it observe a half-written file, which is
+    # a JSONDecodeError on a good day and a flaky CI job on a bad one. os.replace is
+    # atomic on POSIX and Windows alike.
+    tmp = os.environ["TICKS"] + ".part"
+    with open(tmp, "w") as fh:
         json.dump(seen[-40:], fh)
+    os.replace(tmp, os.environ["TICKS"])
     time.sleep(0.02)
 """
 
