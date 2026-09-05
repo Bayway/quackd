@@ -40,6 +40,7 @@ EXTRAS = {
     "lerobot": ("lerobot", "quackd[lerobot]"),
     "rosbridge": ("roslibpy", "quackd[rosbridge]"),
     "microduck camera (webrtc)": ("aiortc", "quackd[microduck-camera]"),
+    "xlerobot": ("zmq", "quackd[xlerobot]"),
 }
 # Robot SDKs are looked up by distribution metadata only: importing reachy_mini pulls
 # onnxruntime and GStreamer, and lerobot pulls torch, into a diagnostics command, which is
@@ -352,12 +353,14 @@ def run_doctor(
     from quackd.adapters.open_duck import upstream_api as open_duck_api
     from quackd.adapters.reachy_mini import upstream_api as reachy
     from quackd.adapters.rosbridge import upstream_api as rosbridge_api
+    from quackd.adapters.xlerobot import upstream_api as xlerobot_api
 
     for name, api, backend, target in (
         ("reachy_mini", reachy, "sdk", "a robot"),
         ("lerobot", lerobot_api, "real", "an arm"),
         ("rosbridge", rosbridge_api, "ws", "a bridge"),
         ("open_duck", open_duck_api, "bridge", "a duck"),
+        ("xlerobot", xlerobot_api, "zmq", "a cart"),
     ):
         unverified = api.refs_by_status("UNVERIFIED")
         t = Table(

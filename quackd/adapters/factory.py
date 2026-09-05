@@ -44,14 +44,24 @@ _ADAPTERS: dict[str, tuple[tuple[str, ...], str, str | None, str | None]] = {
         "quackd[rosbridge]",
         "roslibpy",
     ),
-    # Appended last on purpose: the doctor and list-adapters tables are order-sensitive.
-    # No extra: the client is stdlib, and the robot's own runtime is not installable here.
+    # Appended, never inserted: the doctor and list-adapters tables are order-sensitive, and
+    # tests/test_adapters.py pins the order. No extra: the client is stdlib, and the robot's
+    # own runtime is not installable here.
     "open_duck": (
         ("sim2d", "mock", "bridge"),
         "✅ built-in: sim2d, mock · 🧪 bridge (quackd's own daemon on the duck's Pi, "
         "never run on a robot)",
         None,
         None,
+    ),
+    # XLeRobot is not an installable package, so quackd speaks its ZeroMQ host protocol
+    # rather than importing it: the extra is pyzmq and nothing else (ADR-0026).
+    "xlerobot": (
+        ("mock", "zmq"),
+        "✅ built-in: mock · 🧪 zmq (wire format VERIFIED at a pinned commit, exercised "
+        "against a fake host over loopback, never run on a cart)",
+        "quackd[xlerobot]",
+        "zmq",
     ),
 }
 ADAPTER_NAMES = tuple(_ADAPTERS)

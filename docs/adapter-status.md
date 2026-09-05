@@ -23,6 +23,8 @@ it). A test proves UNVERIFIED names are only reachable from the experimental bac
 | Open Duck Mini v2 | `open_duck:sim2d` | ✅ `open-duck-scout` 10 of 10 seeds | | [adapters/open_duck.md](adapters/open_duck.md) |
 | | `open_duck:mock` | ✅ | | |
 | | `open_duck:bridge` | 🧪 every runtime name VERIFIED at a pinned commit, the protocol exercised against the real daemon over loopback, never run on a duck | [`quackd/adapters/open_duck/upstream_api.py`](../quackd/adapters/open_duck/upstream_api.py) | |
+| XLeRobot | `xlerobot:mock` | ✅ | | [adapters/xlerobot.md](adapters/xlerobot.md) |
+| | `xlerobot:zmq` | 🧪 the whole wire format VERIFIED at a pinned commit, the client exercised against a fake host quackd wrote from that source over loopback, never run on a cart | [`quackd/adapters/xlerobot/upstream_api.py`](../quackd/adapters/xlerobot/upstream_api.py) | |
 
 **Flocks** (`--flock`, `flock.roles`) run N in-process views of one simulated world on
 one lockstep clock. The MQTT bus implements the same `Bus` protocol and was exercised

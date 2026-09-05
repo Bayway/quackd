@@ -7,9 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The Microduck's hardware path, audited against upstream rather than against itself. Still
-nothing has run on a robot; what changed is that several things which could not have worked
-now can, and several claims that were not true no longer are.
+A sixth robot, and the first with both wheels and arms. The Microduck's hardware path is also
+audited against upstream rather than against itself. Still nothing has run on a robot; what
+changed is that several things which could not have worked now can, and several claims that
+were not true no longer are.
+
+### Added
+
+- **The XLeRobot: a dual-arm mobile manipulator on an IKEA cart, about $660 to build**
+  (`--robot xlerobot:mock` or `xlerobot:zmq`). Two five-joint arms with grippers on a
+  three-omniwheel base that really can drive sideways, so `move` here carries a `vy` that
+  means something for the first time. It is also the first body quackd talks to **without
+  importing anything from it**: XLeRobot is not a package — no PyPI entry, no `pyproject.toml`,
+  and its documented install is copying files into an existing lerobot tree — but it already
+  ships a ZeroMQ host, so quackd speaks that wire and its extra is `pyzmq` and nothing else.
+  That keeps the 3.11 floor and works on Windows, unlike `quackd[lerobot]`. Design:
+  `docs/adr/0026-xlerobot.md`, with the page at
+  [docs/adapters/xlerobot.md](docs/adapters/xlerobot.md).
+- **The whole wire format is exercised against a fake host over loopback**, on every CI
+  platform. Upstream ships no test, no CI and no simulator that runs — its ManiSkill host
+  imports `xlerobot_single`, which is defined nowhere in the repository — so the other end of
+  the protocol is written from upstream's source at a pinned commit and quackd's real client is
+  driven against it. That caught a bug no reading would have: `stop` rebuilt its hold from the
+  latest observation, which is several cycles behind and carries no timestamp, so stopping
+  would have commanded an arm back towards zero. A stop that moves an arm is the failure this
+  project exists to prevent. `stop` now zeroes the wheels and leaves every arm goal exactly
+  where it already was.
+- **`xlerobot-lookout`**, the task to point at a real cart first: nothing in its allowlist
+  moves a wheel or an arm. It is the thinnest starter quackd ships, and honestly so — without
+  a head to turn and without a voice, a task that moves nothing can only look and report.
+
+### Changed
+
+- **This robot's manifest says no to more than it says yes to, and each no is upstream's.**
+  There is no speaker and no microphone in the bill of materials, so the `sound` intent is not
+  declared and `say` does not exist here. Which head motor is yaw is stated nowhere upstream,
+  so quackd never commands the head and `search_scan` turns the whole cart. The power station
+  has no data link, so `battery_percent` is permanently `None`. There is no odometry, so
+  `go_to` closes the loop on the camera alone. And a stock cart ships with every camera
+  commented out of its config, so `observe`, `go_to`, `search_scan` and `approach_and` exist
+  only once a camera has actually been seen on the wire.
+- Arm positions on this robot are **normalised −100..100, not degrees**, because upstream's
+  `use_degrees` defaults to False. That is a different contract from the SO-101 arm next door,
+  which sets degrees: the same number means a different angle, so `move_joints` here validates
+  against `joint_norm` and never against `lerobot`'s `joint_deg`. Turn rate is converted too —
+  the wire is deg/s and quackd is rad/s, and a pass-through would be a 57× error on a 12 kg
+  cart.
+- `pyzmq` joins the `dev` extra. CI installs only `dev`, and the fake-host test is what the
+  `zmq` backend's 🧪 rests on, so a status claim CI could not check would not have been honest.
 
 ### Fixed
 
