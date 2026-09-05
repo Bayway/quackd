@@ -15,7 +15,7 @@ ships the daemon that runs on it, so the only untested thing left is the duck.
 
 | Channel | One line |
 |---|---|
-| GitHub | Pilot a small robot with any LLM through `.duck` skill files and MCP. Six robots supported, two of them open hardware you can build, a built-in simulator, no hardware needed. |
+| GitHub | Pilot a small robot with any LLM through `.duck` skill files and MCP. Seven robots supported, three of them open hardware you can build, a built-in simulator, no hardware needed. |
 | Hacker News | A `.duck` file is a SKILL.md for a robot: the frontmatter is enforced, the body is the prompt, the executor never trusts the model. Point it at the wrong robot and it refuses before anything moves. |
 | X / Twitter | Give your Microduck a brain. Your Open Duck Mini, your Reachy Mini, your arm and your wheeled base too. Any LLM, one `.duck` file. 🦆🧠 |
 | Pollen Discord | We built the brain daemon that was missing from `robotd / mediad / padd / tofd`, and it now drives the Reachy Mini too. We'd like you to tell us what we got wrong about both SDKs. |
@@ -40,12 +40,12 @@ mocks now, every hardware backend experimental and never run), and the ask ("add
 ## X thread (7 posts)
 
 1. **Hook + GIF.** "A robot head spots a ball. A robot duck kicks it. Neither could do the other's half, and they're both following the same contract. Simulator, runs in 60 seconds. 🧵" *(hetero.gif)*
-2. **What.** quackd: pilot a small robot with any LLM. One `.duck` file per task, any provider, MCP so Claude Code/Desktop can drive it. Six robots today: Microduck, an Open Duck Mini v2 you can print and build, Reachy Mini, an SO-101 class arm via LeRobot, any base over rosbridge, and an XLeRobot dual-arm cart. Apache-2.0.
+2. **What.** quackd: pilot a small robot with any LLM. One `.duck` file per task, any provider, MCP so Claude Code/Desktop can drive it. Seven robots today: Microduck, an Open Duck Mini v2 you can print and build, Reachy Mini, an SO-101 class arm via LeRobot, any base over rosbridge, an XLeRobot dual-arm cart and an AlohaMini with two arms on a lift. Apache-2.0.
 3. **The manifest.** "Every robot hands over a manifest: this is my body, these are my intents, these are my verbs. The model is only ever offered what's in it. A head is never offered `kick`. An arm is never offered `move`." *(the five-body table from the README's Which robots work)*
 4. **The `.duck` file.** Screenshot of `find-and-kick.duck` plus the refusal: `quackd validate find-and-kick --robot reachy_mini:sim2d` → `requires kick, but reachy-01 (reachy-mini) does not provide it`, exit 1, before anything connects.
 5. **MCP demo.** Short screen capture: `claude mcp add quackd -- uvx quackd serve-mcp --robots duck=microduck:sim2d,reachy=reachy_mini:mock`, then "list my robots and make the duck find the ball". One executor, budget and heartbeat per robot.
 6. **Roadmap tease.** "v2: learned verbs. An LLM writes a reward (DrEureka-style), the training stack produces a policy, and it registers as one more verb. The hook exists today; the loop doesn't. Yet." Plus: an HTTP transport so the MCP server is a remote connector and you can poke the robot from your phone.
-7. **CTA.** "Simulator-first and honest about it: nothing here has run on hardware, on any of the six bodies, and the README says so in a table. The Open Duck Mini is the one you can build, so it is the one most likely to change that. If you write a `.duck`, PR it to `ducks/`. If you own a robot we don't support, an adapter is a manifest and a mock. Repo: github.com/rokbenko/quackd"
+7. **CTA.** "Simulator-first and honest about it: nothing here has run on hardware, on any of the seven bodies, and the README says so in a table. The Open Duck Mini is the one you can build, so it is the one most likely to change that. If you write a `.duck`, PR it to `ducks/`. If you own a robot we don't support, an adapter is a manifest and a mock. Repo: github.com/rokbenko/quackd"
 
 ## Pollen Discord post (draft)
 

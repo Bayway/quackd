@@ -201,6 +201,19 @@ def xlerobot_lookout_strategy(obs: Observation, step: int, history: list[Exchang
     )
 
 
+def alohamini_lookout_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+    """One frame, then the answer. Like the XLeRobot, this body has no voice and no head, so
+    the report has nowhere to go but the reason it succeeds with."""
+    if _count_calls(history, "observe") == 0:
+        return ToolCall(name="observe", arguments={})
+    if balls := _detections(obs, "ball"):
+        return ToolCall(name="declare_success", arguments={"reason": _where(balls[0])})
+    return ToolCall(
+        name="declare_success",
+        arguments={"reason": "nothing in view, and this robot cannot turn to look further"},
+    )
+
+
 def generic_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
     allowed = obs.features.get("allowed", [])
     if step == 0 and "quack" in allowed:
@@ -221,6 +234,7 @@ STRATEGIES: dict[str, Strategy] = {
     "open-duck-lookout": open_duck_lookout_strategy,
     "microduck-lookout": microduck_lookout_strategy,
     "xlerobot-lookout": xlerobot_lookout_strategy,
+    "alohamini-lookout": alohamini_lookout_strategy,
 }
 
 

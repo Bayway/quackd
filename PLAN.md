@@ -161,3 +161,15 @@ Legend: ✅ done · 🔨 in progress · ⬜ todo · ⏸ blocked (with reason)
   `xlerobot-lookout` at it, then flip the `zmq` row in `docs/adapter-status.md`. What most
   needs a real cart: the camera colour order, whether `+x` is really forward, and whether the
   head motors are what upstream's agent library implies
+- ✅ The AlohaMini adapter (ADR-0027, [docs/adapters/alohamini.md](docs/adapters/alohamini.md)):
+  two arms on a lift on a wheeled base, reached by speaking its ZeroMQ host protocol because
+  upstream is a fork of LeRobot that calls itself `lerobot` and is not installable. quackd also
+  ships `bridge/alohamini/`, a host wrapper that enables the arm torque upstream disables and
+  never re-enables. The wire is exercised against a fake host over loopback in CI, which caught
+  a `get_state` that would have served stale readings forever and a `lift` the watchdog stopped
+  mid-travel
+- ⏸ Only a human can: run `alohamini:zmq` against a robot they built. Start
+  `bridge/alohamini/quackd_alohamini_host.py` rather than upstream's host, point
+  `alohamini-lookout` at it, then flip the `zmq` row in `docs/adapter-status.md`. What most
+  needs a real robot: whether `+x` is physically forward, the camera colour order, how fast the
+  lift travels in mm/s, and whether the wrapper really does leave the arms holding

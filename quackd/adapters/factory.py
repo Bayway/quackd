@@ -63,6 +63,15 @@ _ADAPTERS: dict[str, tuple[tuple[str, ...], str, str | None, str | None]] = {
         "quackd[xlerobot]",
         "zmq",
     ),
+    # Also not an installable package: a fork of LeRobot that calls itself lerobot and is not
+    # on PyPI, so quackd speaks its ZeroMQ host protocol too (ADR-0027).
+    "alohamini": (
+        ("mock", "sim2d", "zmq"),
+        "✅ built-in: mock, sim2d · 🧪 zmq (wire format VERIFIED at a pinned commit, "
+        "exercised against a fake host over loopback, never run on a robot)",
+        "quackd[alohamini]",
+        "zmq",
+    ),
 }
 ADAPTER_NAMES = tuple(_ADAPTERS)
 BACKENDS = {name: info[0] for name, info in _ADAPTERS.items()}

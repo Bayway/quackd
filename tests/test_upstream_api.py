@@ -13,6 +13,7 @@ from types import ModuleType
 
 import pytest
 
+from quackd.adapters.alohamini import upstream_api as alohamini_api
 from quackd.adapters.lerobot import upstream_api as lerobot_api
 from quackd.adapters.open_duck import upstream_api as open_duck_api
 from quackd.adapters.reachy_mini import upstream_api as reachy_api
@@ -80,8 +81,20 @@ UPSTREAMS: list[tuple[ModuleType, set[str], tuple[str, ...]]] = [
         },
         ("https://github.com/Vector-Wangel/XLeRobot",),
     ),
+    (
+        alohamini_api,
+        {
+            "adapters/alohamini/upstream_api.py",
+            "adapters/alohamini/zmq_host.py",
+            "doctor.py",
+        },
+        (
+            "https://github.com/liyiteng/lerobot_alohamini",
+            "https://github.com/liyiteng/AlohaMini",
+        ),
+    ),
 ]
-IDS = ["microduck", "reachy_mini", "lerobot", "rosbridge", "open_duck", "xlerobot"]
+IDS = ["microduck", "reachy_mini", "lerobot", "rosbridge", "open_duck", "xlerobot", "alohamini"]
 
 
 def _unverified_identifiers(module: ModuleType) -> list[str]:

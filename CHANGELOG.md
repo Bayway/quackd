@@ -7,13 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-A sixth robot, and the first with both wheels and arms. The Microduck's hardware path is also
-audited against upstream rather than against itself. Still nothing has run on a robot; what
-changed is that several things which could not have worked now can, and several claims that
-were not true no longer are.
+A sixth and a seventh robot, both of which quackd drives without importing anything from them,
+because neither is an installable package. The Microduck's hardware path is also audited
+against upstream rather than against itself. Still nothing has run on a robot; what changed is
+that several things which could not have worked now can, and several claims that were not true
+no longer are.
 
 ### Added
 
+- **The AlohaMini: two arms on a motorised lift, on a wheeled base** (`--robot alohamini:mock`,
+  `sim2d` or `zmq`). quackd's second bimanual body and its first with a vertical axis. Like the
+  XLeRobot it is reached by speaking its ZeroMQ host protocol rather than importing it, and for
+  a stronger reason: upstream is a fork of LeRobot that *calls itself* `lerobot`, is not on
+  PyPI, and installs only from a large git clone on Python 3.12 with torch. Speaking the wire is
+  also more correct than importing would have been, because upstream's own client throws away
+  the camera list the host sends and its robot-model default disagrees with the host's, with
+  nothing cross-checking either. quackd reads both off the wire, so neither can be silently
+  wrong. Design: `docs/adr/0027-alohamini.md`, with the page at
+  [docs/adapters/alohamini.md](docs/adapters/alohamini.md).
+- **A host wrapper for the robot, because upstream's own host leaves the arms limp.**
+  `configure()` disables arm torque and both of its `enable_torque()` calls are commented out;
+  nothing else in the driver turns it on. So `bridge/alohamini/` holds a wrapper that runs
+  upstream's loop with torque enabled and the lift stopped, and adds three fields so quackd can
+  tell it from a stock host. Without it, `move_joints`, `gripper` and `home_arms` refuse and say
+  why, rather than commanding joints that would not move.
+- **A stop that actually stops this robot.** Three upstream behaviours conspire against one.
+  All three velocity keys are mandatory in every payload, because `send_action` indexes them
+  with no default and would otherwise discard the whole action, arms included, without
+  refreshing its own watchdog. The lift latches, so a payload that says nothing about it leaves
+  it travelling. And the lift's two keys are not symmetric, so a payload carrying both freezes
+  it instead. One function builds every payload and holds all three invariants, and the fake
+  host reproduces the bugs so the tests mean something: `test_stop_zeroes_the_lift` fails
+  against the naive three-key stop that upstream's own replay example sends.
 - **The XLeRobot: a dual-arm mobile manipulator on an IKEA cart, about $660 to build**
   (`--robot xlerobot:mock` or `xlerobot:zmq`). Two five-joint arms with grippers on a
   three-omniwheel base that really can drive sideways, so `move` here carries a `vy` that
@@ -39,7 +64,7 @@ were not true no longer are.
 
 ### Changed
 
-- **This robot's manifest says no to more than it says yes to, and each no is upstream's.**
+- **The XLeRobot's manifest says no to more than it says yes to, and each no is upstream's.**
   There is no speaker and no microphone in the bill of materials, so the `sound` intent is not
   declared and `say` does not exist here. Which head motor is yaw is stated nowhere upstream,
   so quackd never commands the head and `search_scan` turns the whole cart. The power station
@@ -47,14 +72,15 @@ were not true no longer are.
   `go_to` closes the loop on the camera alone. And a stock cart ships with every camera
   commented out of its config, so `observe`, `go_to`, `search_scan` and `approach_and` exist
   only once a camera has actually been seen on the wire.
-- Arm positions on this robot are **normalised −100..100, not degrees**, because upstream's
+- Arm positions on **both** new robots are **normalised −100..100, not degrees**, because their
   `use_degrees` defaults to False. That is a different contract from the SO-101 arm next door,
-  which sets degrees: the same number means a different angle, so `move_joints` here validates
-  against `joint_norm` and never against `lerobot`'s `joint_deg`. Turn rate is converted too —
-  the wire is deg/s and quackd is rad/s, and a pass-through would be a 57× error on a 12 kg
-  cart.
-- `pyzmq` joins the `dev` extra. CI installs only `dev`, and the fake-host test is what the
-  `zmq` backend's 🧪 rests on, so a status claim CI could not check would not have been honest.
+  which sets degrees: the same number means a different angle, so `move_joints` validates
+  against `joint_norm` and never against `lerobot`'s `joint_deg`. Turn rate is converted on both
+  too, because each wire is deg/s while quackd is rad/s, and a pass-through would be a 57× error
+  on a robot heavy enough to hurt someone.
+- `pyzmq` joins the `dev` extra, and is the extra for both new robots. CI installs only
+  `dev`, and the fake-host tests are what the two `zmq` backends' 🧪 rest on, so a status claim
+  CI could not check would not have been honest.
 
 ### Fixed
 
