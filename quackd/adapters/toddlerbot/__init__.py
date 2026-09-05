@@ -1,0 +1,374 @@
+"""The ToddlerBot adapter: a small humanoid, and a long list of things it will not be asked.
+
+The first full humanoid in quackd. It has legs and arms on one body, which makes it the Open
+Duck and the LeRobot arm at once, and it is the third robot whose robot side quackd ships,
+because upstream has no network API of any kind: no socket, no daemon, no IPC, just a Python
+library that opens serial ports in-process (ADR-0028).
+
+Three capabilities are decided at connect rather than declared up front, because all three
+depend on what the owner actually has:
+
+- **a camera**, which is not in upstream's observation contract at all, so the daemon owns it;
+- **a neck**, which every shipped build has but the teleop leader does not;
+- **a walk policy**, which is an ONNX checkpoint from a wandb artifact that upstream does not
+  publish and does not check in. Without one there is no locomotion at all, so `move`, `go_to`
+  and `approach_and` do not exist rather than being gated off.
+
+`say` is absent for good: the speaker plays audio and nothing at this pin synthesises speech.
+A battery is absent too, so a battery abort can never fire here.
+
+Backends: `mock` and `sim2d` run offline; `bridge` talks to the daemon quackd ships in
+`bridge/toddlerbot/`, which is the only thing that ever touches a motor.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Callable
+from typing import Any
+
+from PIL import Image
+
+from quackd.adapters.manifest import (
+    Frame,
+    Health,
+    RobotManifest,
+    SafetyAuthority,
+    verb_spec,
+)
+from quackd.adapters.toddlerbot.verbs import (
+    MOTIONS,
+    toddlerbot_conditions,
+    toddlerbot_verbs,
+)
+from quackd.transport.base import Ack, DuckState, DuckTransport, HeartbeatError, Intent
+from quackd.verbs.core import CORE
+from quackd.verbs.registry import Precondition, Verb
+
+BACKENDS = ("mock", "sim2d", "bridge")
+DEFAULT_ID = "toddlerbot"
+
+ROBOTS: tuple[str, ...] = (
+    "toddlerbot_2xc",
+    "toddlerbot_2xc_gripper",
+    "toddlerbot_2xm",
+    "toddlerbot_2xm_gripper",
+)
+"""The builds quackd will drive. Upstream also ships `teleop_leader`, which is the fourteen
+motor arm a human holds, not a robot to pilot."""
+DEFAULT_ROBOT = "toddlerbot_2xc"
+
+# The walk policy's gin file at this pin says forward -0.2 to +0.3, which is asymmetric, and
+# sideways +/- 0.1. quackd's schema caps vy at 0.2 and wz at 1.5, and `limits` may only
+# narrow, so the robot binds on vx and vy and the schema binds on nothing here. The range
+# actually enforced comes from the checkpoint, so the daemon reports it and connect() uses it.
+MAX_VX = 0.2
+MAX_VY = 0.1
+MAX_WZ = 1.0
+
+CONTROL_HZ = 50.0
+HEARTBEAT_HZ = 5.0
+"""The daemon owns the fifty hertz loop and its own deadman. quackd's heartbeat only has to
+notice that the daemon stopped answering, so it runs an order of magnitude slower."""
+STALE_LIMIT_MS = 1000.0
+
+BLURB = (
+    "a small open source humanoid about 56 cm tall, with two arms, two legs, a two joint "
+    "neck and thirty servos, which cannot get up by itself if it falls"
+)
+_MOVE_DESCRIPTION = (
+    "Walk with a velocity for a duration: vx forward m/s (backwards is slower than forwards "
+    "on this robot), vy left m/s, wz rad/s (+ = left). The robot's own learned gait does the "
+    "walking. It cannot get up if it falls, so ask for less than you think."
+)
+
+
+def toddlerbot_manifest(
+    backend: str,
+    robot_id: str | None = None,
+    *,
+    camera: bool = False,
+    neck: bool = True,
+    gripper: bool = False,
+    walk: bool = False,
+    robot: str = DEFAULT_ROBOT,
+    deadman: bool = False,
+    motors: int = 30,
+) -> RobotManifest:
+    """The robot as data. Every flag is what the daemon reported, not what a config claimed."""
+    own = toddlerbot_verbs(neck=neck, gripper=gripper)
+    verbs = [
+        verb_spec(CORE["report_state"], core=True),
+        verb_spec(CORE["stop"], core=True),
+        *[verb_spec(v, core=False) for v in own.values()],
+    ]
+    preconditions: dict[str, list[str]] = {
+        "stand": ["link_fresh", "calibrated"],
+        "perform": ["link_fresh", "calibrated", "not_fallen"],
+    }
+    if neck:
+        preconditions["look"] = ["link_fresh", "not_fallen"]
+    if gripper:
+        preconditions["grip"] = ["link_fresh", "calibrated"]
+    if camera:
+        verbs.insert(0, verb_spec(CORE["observe"], core=True))
+    # Locomotion is not gated off when there is no checkpoint, it does not exist: `move`,
+    # `go_to` and `approach_and` all need the twist intent, and there is no walk without one.
+    if walk:
+        verbs.append(verb_spec(CORE["move"], core=True, description=_MOVE_DESCRIPTION))
+        preconditions["move"] = ["link_fresh", "calibrated", "not_fallen"]
+        if camera:
+            verbs += [
+                verb_spec(CORE["go_to"], core=True),
+                verb_spec(CORE["approach_and"], core=True),
+            ]
+            preconditions |= {
+                "go_to": ["link_fresh", "calibrated", "not_fallen"],
+                "approach_and": ["link_fresh", "calibrated", "not_fallen"],
+            }
+    # search_scan needs a camera and either twist or gaze. The neck is the gaze, and turning a
+    # humanoid on the spot to look around is not something to do without a fall recovery.
+    if camera and neck:
+        verbs.append(verb_spec(CORE["search_scan"], core=True))
+        preconditions["search_scan"] = ["link_fresh", "not_fallen"]
+
+    intents: list[Any] = ["skill"]
+    if neck:
+        intents.append("gaze")
+    if gripper:
+        intents.append("gripper")
+    if walk:
+        intents.append("twist")
+    sensors: list[Any] = ["imu", "joint_state"] + (["camera"] if camera else [])
+    return RobotManifest(
+        id=robot_id or DEFAULT_ID,
+        vendor="hshi74",
+        model=robot,
+        embodiment="humanoid",
+        mobility="legged" if walk else "none",
+        intents=intents,
+        sensors=sensors,
+        verbs=verbs,
+        preconditions=preconditions,
+        # There is no watchdog, no timeout, no e-stop and no deadman anywhere upstream, and
+        # silence on this robot means "hold the last target forever" rather than "stop". The
+        # only deadman that can exist is the one quackd's own daemon runs, so `deadman` is
+        # true exactly when that daemon is the thing on the other end.
+        safety_authority=SafetyAuthority(native="none", deadman=deadman, heartbeat_hz=HEARTBEAT_HZ),
+        frame=Frame(
+            reference="body",
+            note=(
+                "+x forward, joint space in radians. There is no odometry and no pose on "
+                "hardware: the observation carries motor positions and an orientation, and "
+                "nothing else. Orientation comes from an IMU quaternion, scalar first."
+            ),
+        ),
+        limits={
+            "max_vx": MAX_VX,
+            "max_vy": MAX_VY,
+            "max_wz": MAX_WZ,
+            "control_hz": CONTROL_HZ,
+        },
+        backend=backend,
+        blurb=BLURB,
+        extras={
+            "robot": robot,
+            "motors": motors,
+            "motions": list(MOTIONS),
+            "walk_policy": walk,
+            "neck": neck,
+            "gripper": gripper,
+            "speech": "none",
+            "no_recovery": (
+                "there is no get-up policy for this body, so a fall ends the run and needs a human"
+            ),
+            "no_battery": "nothing reports a battery to Python, so a battery abort cannot fire",
+            "deadman_scope": "the daemon slews to a safe pose and holds it; it never goes limp",
+            "assumptions": [
+                "a fall is detected from the gravity vector past a tilt threshold that nobody "
+                "has calibrated against a real robot",
+                "which neck motor is yaw and which is pitch is inferred from the motor names",
+                "holding is what quackd commanded, never what the robot felt",
+                "the safe pose is upstream's default pose, and whether it is safe to reach "
+                "from a crawling or prone start is untested",
+                "no odometry exists, so go_to closes the loop on the camera alone",
+            ],
+        },
+    )
+
+
+class ToddlerBotAdapter:
+    """A `RobotAdapter` over the mock, sim2d or bridge backend."""
+
+    name = "toddlerbot"
+
+    def __init__(self, transport: DuckTransport, *, robot_id: str | None = None) -> None:
+        self.transport = transport
+        self.backend = transport.name
+        self.robot_id = robot_id or DEFAULT_ID
+        self.manifest: RobotManifest | None = None
+
+    async def connect(self) -> RobotManifest:
+        await self.transport.connect()
+        # Everything below is what the daemon reported about the robot in front of it: which
+        # build, whether a neck and grippers are on it, whether a camera answered, and whether
+        # a walk checkpoint is staged. None of it is taken from configuration.
+        self.manifest = toddlerbot_manifest(
+            self.backend,
+            self.robot_id,
+            camera=bool(getattr(self.transport, "camera_available", False)),
+            neck=bool(getattr(self.transport, "neck_available", True)),
+            gripper=bool(getattr(self.transport, "gripper_available", False)),
+            walk=bool(getattr(self.transport, "walk_available", False)),
+            robot=str(getattr(self.transport, "robot_name", DEFAULT_ROBOT)),
+            deadman=bool(getattr(self.transport, "deadman", False)),
+            motors=int(getattr(self.transport, "motors", 30)),
+        )
+        return self.manifest
+
+    async def disconnect(self) -> None:
+        await self.transport.close()
+
+    async def close(self) -> None:
+        await self.disconnect()
+
+    async def get_state(self) -> DuckState:
+        return await self.transport.get_state()
+
+    async def get_frame(self) -> Image.Image | None:
+        return await self.transport.get_frame()
+
+    async def send_intent(self, intent: Intent) -> Ack:
+        return await self.transport.send_intent(intent)
+
+    async def health(self) -> Health:
+        try:
+            await self.transport.heartbeat()
+        except HeartbeatError as e:
+            return Health(ok=False, reason=str(e))
+        state = await self.transport.get_state()
+        return Health(
+            ok=not state.fallen,
+            reason="the robot has fallen and needs a human" if state.fallen else None,
+            # nothing reports a battery to Python on this robot
+            battery_percent=None,
+            extras={
+                "posture": state.posture,
+                "stale_ms": state.extras.get("stale_ms"),
+                "loop_hz": state.extras.get("loop_hz"),
+                "calibrated": state.extras.get("calibrated"),
+                "deadman_tripped": state.extras.get("deadman_tripped"),
+            },
+        )
+
+    async def heartbeat(self) -> None:
+        await self.transport.heartbeat()
+
+    async def stop(self) -> None:
+        await self.transport.stop()
+
+    def subscribe(self, topic: str) -> AsyncIterator[dict[str, Any]]:
+        return self.transport.subscribe(topic)
+
+    def now(self) -> float:
+        return self.transport.now()
+
+    async def sleep(self, seconds: float) -> None:
+        await self.transport.sleep(seconds)
+
+    def preconditions(self) -> dict[str, Precondition]:
+        return toddlerbot_conditions()
+
+    def implementations(self) -> dict[str, Verb]:
+        return toddlerbot_verbs(neck=True, gripper=True)
+
+    @property
+    def mobility(self) -> str:
+        return str(self.manifest.mobility) if self.manifest else "legged"
+
+    @property
+    def world(self) -> Any:
+        """The simulated world, for the GIF recorder. None on the backends that have none."""
+        return getattr(self.transport, "world", None)
+
+    @property
+    def duck_index(self) -> int:
+        return int(getattr(self.transport, "duck_index", 0))
+
+    @property
+    def post_sleep(self) -> Callable[[], None] | None:
+        return getattr(self.transport, "post_sleep", None)
+
+    @post_sleep.setter
+    def post_sleep(self, hook: Callable[[], None] | None) -> None:
+        self.transport.post_sleep = hook  # type: ignore[attr-defined]
+
+
+# ── what the factory calls ──────────────────────────────────────────────────────────────
+
+
+def describe(backend: str, robot_id: str | None = None) -> RobotManifest:
+    """Static: the offline backends describe a fully built robot with a staged walk policy;
+    the bridge claims nothing until the daemon has said what is actually there."""
+    offline = backend in ("mock", "sim2d")
+    return toddlerbot_manifest(
+        backend,
+        robot_id,
+        camera=offline,
+        neck=offline,
+        gripper=False,
+        walk=offline,
+        deadman=offline,
+    )
+
+
+def implementations() -> dict[str, Verb]:
+    return toddlerbot_verbs(neck=True, gripper=True)
+
+
+def conditions() -> dict[str, Precondition]:
+    return toddlerbot_conditions()
+
+
+def make(
+    backend: str,
+    *,
+    robot_id: str | None = None,
+    seed: int | None = None,
+    address: str | None = None,
+    live: bool = False,
+    camera_url: str | None = None,
+    token: str | None = None,
+) -> ToddlerBotAdapter:
+    if backend == "mock":
+        from quackd.adapters.toddlerbot.mock import ToddlerBotMock
+
+        return ToddlerBotAdapter(ToddlerBotMock(), robot_id=robot_id)
+    if backend == "sim2d":
+        from quackd.adapters.toddlerbot.sim2d import ToddlerBotSim2D
+
+        return ToddlerBotAdapter(ToddlerBotSim2D(seed=seed or 0), robot_id=robot_id)
+    if backend == "bridge":
+        from quackd.adapters.toddlerbot.bridge import ToddlerBotBridge
+
+        return ToddlerBotAdapter(ToddlerBotBridge(address=address, token=token), robot_id=robot_id)
+    raise ValueError(f"unknown toddlerbot backend {backend!r}; choose one of {BACKENDS}")
+
+
+__all__ = [
+    "BACKENDS",
+    "CONTROL_HZ",
+    "DEFAULT_ID",
+    "DEFAULT_ROBOT",
+    "HEARTBEAT_HZ",
+    "MAX_VX",
+    "MAX_VY",
+    "MAX_WZ",
+    "ROBOTS",
+    "STALE_LIMIT_MS",
+    "ToddlerBotAdapter",
+    "conditions",
+    "describe",
+    "implementations",
+    "make",
+    "toddlerbot_manifest",
+]

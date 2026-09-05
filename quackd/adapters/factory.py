@@ -72,6 +72,15 @@ _ADAPTERS: dict[str, tuple[tuple[str, ...], str, str | None, str | None]] = {
         "quackd[alohamini]",
         "zmq",
     ),
+    # No network API of any kind upstream: no socket, no daemon, no IPC. So quackd ships
+    # the daemon, as it does for the Open Duck Mini, and the client is stdlib (ADR-0028).
+    "toddlerbot": (
+        ("mock", "sim2d", "bridge"),
+        "✅ built-in: mock, sim2d · 🧪 bridge (quackd's own daemon on the robot, "
+        "never run on a robot)",
+        None,
+        None,
+    ),
 }
 ADAPTER_NAMES = tuple(_ADAPTERS)
 BACKENDS = {name: info[0] for name, info in _ADAPTERS.items()}

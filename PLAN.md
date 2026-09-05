@@ -173,3 +173,17 @@ Legend: ✅ done · 🔨 in progress · ⬜ todo · ⏸ blocked (with reason)
   `alohamini-lookout` at it, then flip the `zmq` row in `docs/adapter-status.md`. What most
   needs a real robot: whether `+x` is physically forward, the camera colour order, how fast the
   lift travels in mm/s, and whether the wrapper really does leave the arms holding
+- ✅ The ToddlerBot adapter (ADR-0028, [docs/adapters/toddlerbot.md](docs/adapters/toddlerbot.md)):
+  quackd's first full humanoid, pinned at the commit the `v2.0.0` tag points at. It has no
+  network API at all, so `bridge/toddlerbot/` runs the fifty hertz loop and carries the seven
+  things upstream does not: a clamp, a rate limit, an all-zeros detector, a fault guard, a
+  safe-pose slew, signal handlers and a construction watchdog. Verified before a line was
+  written: `set_motor_kps` raises on hardware, `enable_motors` is not bound to Python, the
+  atexit handler de-torques a standing robot, and there is no walk checkpoint anywhere
+- ⏸ Only a human can: put a ToddlerBot on its safety stand, run
+  `bridge/toddlerbot/quackd_toddlerbot_bridge.py`, work through
+  [docs/toddlerbot-hardware-checklist.md](docs/toddlerbot-hardware-checklist.md) and point
+  `toddlerbot-lookout` at it, then flip the `bridge` row in `docs/adapter-status.md`. What most
+  needs a real robot: whether the safe-pose slew is safe from a crawl, what tilt really means
+  fallen, whether the neck axes are what the motor names imply, and whether a calibrated zero
+  survives a restart

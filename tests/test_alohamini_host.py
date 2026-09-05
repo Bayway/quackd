@@ -156,7 +156,12 @@ async def test_silence_stops_the_base_and_the_lift_but_not_the_arms() -> None:
         await link.send_intent(Intent.joint({"arm_right_wrist_roll": 15.0}, 0.2))
         await link.send_intent(Intent.move(vx=0.2))
         await _until(lambda: host.state["x.vel"] == pytest.approx(0.2))
-        await _until(lambda: host.watchdog_trips >= 1)
+        # The counter is cumulative, and home()'s stray descent velocity already tripped it
+        # once before the client even connected. Waiting for `>= 1` therefore returns
+        # immediately, under load before the move above has been zeroed. Wait for a trip that
+        # happens after this move landed, which is the one that zeroes these keys.
+        tripped = host.watchdog_trips
+        await _until(lambda: host.watchdog_trips > tripped)
         assert all(host.state[k] == 0.0 for k in VEL_KEYS)
         assert host.lift_goal_velocity == 0
         assert host.state["arm_right_wrist_roll.pos"] == pytest.approx(15.0), "arms are untouched"

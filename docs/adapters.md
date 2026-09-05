@@ -3,8 +3,8 @@
 An adapter is how a robot joins quackd. It answers one question, "what is this body and
 what can it do", as a `RobotManifest`, and it moves the body through intents the robot's
 own controllers execute. Everything else (the loop, the executor, the `.duck` contract,
-the MCP server, flocks) is shared. quackd ships seven: `microduck`, `reachy_mini`,
-`lerobot`, `rosbridge`, `open_duck`, `xlerobot` and `alohamini`. This page is the recipe; [ADR-0017](adr/0017-robot-adapters-and-manifest.md),
+the MCP server, flocks) is shared. quackd ships eight: `microduck`, `reachy_mini`,
+`lerobot`, `rosbridge`, `open_duck`, `xlerobot`, `alohamini` and `toddlerbot`. This page is the recipe; [ADR-0017](adr/0017-robot-adapters-and-manifest.md),
 [ADR-0018](adr/0018-core-verbs-extensions-aliases.md) and
 [ADR-0022](adr/0022-per-adapter-upstream-refs.md) are the reasons.
 

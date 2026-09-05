@@ -46,7 +46,8 @@ def test_adapter_guide_and_manifest_spec_match_the_code() -> None:
 
 
 @pytest.mark.parametrize(
-    "adapter", ["reachy_mini", "lerobot", "rosbridge", "open_duck", "xlerobot", "alohamini"]
+    "adapter",
+    ["reachy_mini", "lerobot", "rosbridge", "open_duck", "xlerobot", "alohamini", "toddlerbot"],
 )
 def test_adapter_doc_lists_every_upstream_ref(adapter: str) -> None:
     api = importlib.import_module(f"quackd.adapters.{adapter}.upstream_api")

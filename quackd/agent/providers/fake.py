@@ -214,6 +214,28 @@ def alohamini_lookout_strategy(obs: Observation, step: int, history: list[Exchan
     )
 
 
+def toddlerbot_lookout_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+    """Head only, no legs, and no voice to report with.
+
+    This robot cannot get up if it falls, so the strategy never walks, and there is no text
+    to speech on it at all, so the answer goes in the reason it succeeds with."""
+    if balls := _detections(obs, "ball"):
+        return ToolCall(name="declare_success", arguments={"reason": _where(balls[0])})
+    looks = _count_calls(history, "look")
+    if looks >= len(_TODDLER_SWEEP):
+        return ToolCall(
+            name="declare_success",
+            arguments={"reason": "nothing in view after looking left, right and centre"},
+        )
+    if _count_calls(history, "observe") <= looks:
+        return ToolCall(name="observe", arguments={})
+    return ToolCall(name="look", arguments={"yaw_deg": _TODDLER_SWEEP[looks]})
+
+
+#: Gentle on purpose: the neck is two small servos and this body has no fall recovery.
+_TODDLER_SWEEP = (30.0, -30.0, 0.0)
+
+
 def generic_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
     allowed = obs.features.get("allowed", [])
     if step == 0 and "quack" in allowed:
@@ -235,6 +257,7 @@ STRATEGIES: dict[str, Strategy] = {
     "microduck-lookout": microduck_lookout_strategy,
     "xlerobot-lookout": xlerobot_lookout_strategy,
     "alohamini-lookout": alohamini_lookout_strategy,
+    "toddlerbot-lookout": toddlerbot_lookout_strategy,
 }
 
 

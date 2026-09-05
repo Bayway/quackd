@@ -5,13 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "quackd"
 dynamic = ["version", "readme"]
-description = "Give your small robot a brain. Any LLM, one .duck file. Microduck, Open Duck Mini, Reachy Mini, LeRobot arms, XLeRobot carts, AlohaMini and ROS bases."
+description = "Give your small robot a brain. Any LLM, one .duck file. Microduck, Open Duck Mini, Reachy Mini, LeRobot arms, XLeRobot carts, AlohaMini, ToddlerBot and ROS bases."
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 authors = [{ name = "Rok Benko" }]
 keywords = [
-  "microduck", "open-duck-mini", "reachy-mini", "lerobot", "xlerobot", "alohamini", "ros", "rosbridge",
+  "microduck", "open-duck-mini", "reachy-mini", "lerobot", "xlerobot", "alohamini", "toddlerbot", "humanoid", "ros", "rosbridge",
   "robotics", "embodied-ai", "physical-ai", "llm-agents",
   "mcp", "model-context-protocol", "reinforcement-learning", "sim2real",
   "claude", "openai", "ollama", "vllm", "llama-cpp", "local-llm",

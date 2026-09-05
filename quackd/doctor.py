@@ -355,6 +355,7 @@ def run_doctor(
     from quackd.adapters.open_duck import upstream_api as open_duck_api
     from quackd.adapters.reachy_mini import upstream_api as reachy
     from quackd.adapters.rosbridge import upstream_api as rosbridge_api
+    from quackd.adapters.toddlerbot import upstream_api as toddlerbot_api
     from quackd.adapters.xlerobot import upstream_api as xlerobot_api
 
     for name, api, backend, target in (
@@ -364,6 +365,7 @@ def run_doctor(
         ("open_duck", open_duck_api, "bridge", "a duck"),
         ("xlerobot", xlerobot_api, "zmq", "a cart"),
         ("alohamini", alohamini_api, "zmq", "a robot"),
+        ("toddlerbot", toddlerbot_api, "bridge", "a humanoid"),
     ):
         unverified = api.refs_by_status("UNVERIFIED")
         t = Table(

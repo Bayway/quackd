@@ -1,0 +1,102 @@
+# quackd's ToddlerBot daemon
+
+Run this on the robot's Jetson, in upstream's own conda environment. It is the only quackd
+code that ever touches a motor on this robot.
+
+## Why it exists
+
+ToddlerBot has no network API of any kind. No socket, no daemon, no IPC: it is a Python
+library whose control loop opens serial ports in-process. Something has to be on the robot,
+so quackd ships this, the way it ships one for the Open Duck Mini.
+
+Two reasons it is a daemon rather than a thin shim, and the second is the important one.
+
+**A verb is episodic and this robot is not.** `RealWorld.step()` is a no-op, so nothing times
+out and nothing re-arms: the last commanded pose is held forever. A humanoid frozen mid-stride
+while a language model thinks is a humanoid on the floor. So the fifty hertz loop lives here,
+and quackd's intents only nudge what it is already doing.
+
+**Upstream protects nothing, and its shutdown drops the robot.** `set_motor_target` clamps
+nothing and never reads the joint limits that exist; the motors are in `extended_position`
+mode, so the firmware limits are off too; there is no watchdog, no timeout, no e-stop and no
+reset anywhere; a dropped packet returns an all-zeros observation that looks exactly like
+every joint at zero; and a C level `atexit` handler disconnects every client on any normal
+interpreter exit, which disables torque and drops a standing robot. There is no Python signal
+handler anywhere upstream, so `SIGTERM` does not even reach that.
+
+## What it does
+
+Seven things upstream has not got:
+
+1. **Signal handlers** that reach a safe pose before anything is allowed to exit.
+2. **A hard-exit timer around `close()`**, which is bound without releasing the GIL and can
+   block forever on an unresponsive bus, freezing every thread that might have supervised it.
+   A torqued robot and a dead process beats a frozen process nobody can signal.
+3. **A safe-pose slew**, since no reset exists: upstream's own default pose at upstream's own
+   0.3 rad/s, waist first, because a position command here is a full-torque snap.
+4. **A last-known-good observation cache** with an all-zeros detector, so a dropped packet
+   cannot be mistaken for a reading.
+5. **Its own clamp** against the joint limits, plus a per-tick rate limit.
+6. **A construction watchdog**, because upstream's constructor busy-waits forever on a silent
+   IMU with the motors already live.
+7. **Capability dispatch by type** rather than by testing whether a class name contains
+   "real".
+
+The deadman is the opposite of the Open Duck Mini's. A duck that stops walking stands still.
+A humanoid that stops walking mid-stride falls. So on silence this slews to the safe pose and
+**holds**, and it never torque-offs. `stop` means hold the last verified-good pose, because
+there is no velocity at this hardware boundary at all.
+
+## The protocol
+
+Line delimited JSON-RPC 2.0 over TCP on port **9872**, which is quackd's own at both ends. The
+Open Duck Mini's bridge has 9871; a robot that is not that robot gets its own port. The
+handshake reports what this particular robot actually has, and quackd narrows its manifest
+from the answer, so a build with no walk checkpoint loses locomotion entirely rather than
+being offered it and refused.
+
+Set `QUACKD_TODDLERBOT_TOKEN` (or pass `--token`) and the daemon refuses unauthenticated
+clients. It travels in the handshake and never in the address, because addresses get printed
+and land in transcripts.
+
+## Running it
+
+```bash
+git clone https://github.com/hshi74/toddlerbot && cd toddlerbot
+git checkout 84e02d14261292eec5d06f896e3145b35c54856c
+pip install -e . && pip install 'mujoco==3.3.4' 'scipy>=1.14'
+python quackd_toddlerbot_bridge.py --robot toddlerbot_2xc --toddlerbot .
+```
+
+`mujoco` is not a declared dependency upstream. It arrives transitively and unpinned, so pin
+it yourself.
+
+`--camera`, `--walk` and `--gripper` declare what this robot has, and the handshake passes
+them to quackd. Nothing is assumed: a walk checkpoint is a wandb artifact upstream does not
+publish, so `--walk` is a claim you make about your own robot.
+
+`--fake` runs the whole daemon and protocol against a simulated body, with no robot and no
+upstream installed, which is what CI does. `--once` sets up, reports what it found, and exits.
+
+**The daemon refuses to actuate without a zero calibration** (`motors.yml`, which is
+gitignored upstream so a fresh clone has none). Without it every commanded angle is offset by
+however that particular robot was assembled. Run upstream's `calibrate_zero` first.
+
+## Rules this file lives by
+
+- **It never imports quackd.** quackd's dependencies do not belong on a robot, and a test
+  enforces this by reading the file.
+- **It ships in the sdist and never in the wheel**, so `packages` stays `["quackd"]`.
+- **It is testable with no hardware.** Everything above the `Robot` boundary is pure and takes
+  plain arrays, so the clamp, the rate limit, the dropped-read detector and the slew are all
+  unit tested, and `--fake` exercises the loop and the protocol end to end.
+
+## Safety
+
+Read `docs/toddlerbot-hardware-checklist.md` before the first bring-up and follow its order.
+It puts the robot on a stand with its feet off the ground until the last two steps, and the
+last two steps are the ones that matter: pull the network cable mid-move and confirm the
+deadman slews rather than drops, then send `SIGTERM` and confirm the same.
+
+This robot cannot get up by itself. There is no get-up policy for this body at this pin, so a
+fall ends the run and needs a human. Ask for less than you think.

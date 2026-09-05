@@ -7,14 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-A sixth and a seventh robot, both of which quackd drives without importing anything from them,
-because neither is an installable package. The Microduck's hardware path is also audited
+A sixth, a seventh and an eighth robot. Two of them quackd drives without importing anything
+from them, because neither is an installable package, and the third has no network API at all,
+so quackd ships the loop it runs on. The Microduck's hardware path is also audited
 against upstream rather than against itself. Still nothing has run on a robot; what changed is
 that several things which could not have worked now can, and several claims that were not true
 no longer are.
 
 ### Added
 
+- **The ToddlerBot: a small open source humanoid, and the first body here that can hurt
+  itself** (`--robot toddlerbot:mock`, `sim2d` or `bridge`). Two arms, two legs, a two joint
+  neck and thirty servos, on a machine with no network API of any kind, so quackd ships the
+  daemon that runs on it. That is the Open Duck Mini's shape, but for a second reason that
+  matters more: a verb is episodic and this body is not. Its `step()` is a no-op, so nothing
+  times out and nothing re-arms, and a humanoid frozen mid-stride while a model thinks is a
+  humanoid on the floor. The daemon runs the fifty hertz loop and quackd's intents steer what
+  it is already doing. Design: `docs/adr/0028-toddlerbot.md`, with the page at
+  [docs/adapters/toddlerbot.md](docs/adapters/toddlerbot.md).
+- **Seven things upstream does not do, because reading it at the pin said so.** It clamps
+  nothing and never reads the joint limits that exist, on motors in multi-turn mode where the
+  firmware limits are off too. A dropped packet returns an all-zeros reading indistinguishable
+  from every joint at zero, which fed to a position controller commands a full-scale move to
+  zero. A controller fault arrives as a bare `KeyError`. There is no reset anywhere, no
+  watchdog, no timeout and no e-stop. So the daemon carries a clamp, a rate limit, an
+  all-zeros detector, a fault guard, a safe-pose slew, signal handlers and a construction
+  watchdog, and every one of them is exercised in CI against a fake body over a real socket.
+- **A shutdown that does not drop the robot.** Upstream's does: a C level `atexit` handler
+  disconnects every client and disconnecting disables torque, so any unhandled exception or
+  plain Ctrl-C de-torques a standing humanoid with no lowering and no ramp. `SIGTERM` does not
+  even reach that handler, and upstream installs no Python one, so systemd stopping it leaves
+  the robot fully torqued holding its last target instead. quackd's daemon settles to a safe
+  pose first, then closes under a hard deadline, because `close()` holds the GIL and retries
+  forever on a dead bus.
+- **A deadman that is a trajectory rather than a message.** On a duck, silence is safe and
+  zero velocity is a stop. Here the command is an absolute pose, so holding the last target,
+  jumping to a new one and going limp are the only three options and none of them is safe. The
+  daemon slews to upstream's own default pose at upstream's own rate, waist first as its own
+  reset does, and holds.
+- **`toddlerbot-lookout`**, the task to point at a real humanoid first, on its safety stand:
+  nothing in its allowlist moves a leg, an arm or the waist.
 - **The AlohaMini: two arms on a motorised lift, on a wheeled base** (`--robot alohamini:mock`,
   `sim2d` or `zmq`). quackd's second bimanual body and its first with a vertical axis. Like the
   XLeRobot it is reached by speaking its ZeroMQ host protocol rather than importing it, and for
@@ -64,6 +96,18 @@ no longer are.
 
 ### Changed
 
+- **The ToddlerBot's manifest is mostly absences, and every one of them is upstream's.** There
+  is no text to speech at this pin, so `say` does not exist. There is no get-up policy, so
+  `stand_up` is not declared and a fall ends the run with a message that names no verb and
+  asks for a human. Nothing reports a battery to Python, so a battery abort cannot fire. And
+  the walk policy is an ONNX checkpoint from a wandb artifact that upstream neither publishes
+  nor checks in, so on a bare install **there is no locomotion at all**: `move`, `go_to` and
+  `approach_and` are not gated off, they do not exist, and `mobility` reads `none` until the
+  daemon reports a checkpoint staged.
+- **No raw joint verb on the humanoid.** Thirty unclamped radians from a language model, on a
+  machine in multi-turn mode with no current limit and no position limit, is the exact failure
+  this project exists to prevent. quackd offers named moves and the daemon owns every
+  trajectory.
 - **The XLeRobot's manifest says no to more than it says yes to, and each no is upstream's.**
   There is no speaker and no microphone in the bill of materials, so the `sound` intent is not
   declared and `say` does not exist here. Which head motor is yaw is stated nowhere upstream,

@@ -29,6 +29,7 @@ assert [r["name"] for r in rows] == [
     "open_duck",
     "xlerobot",
     "alohamini",
+    "toddlerbot",
 ], rows
 assert not any(r["installed"] for r in rows if r["extra"] != "built-in"), rows
 for adapter, backends in BACKENDS.items():
