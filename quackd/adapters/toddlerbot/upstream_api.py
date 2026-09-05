@@ -45,6 +45,12 @@ _MCH = "toddlerbot/actuation/src/dynamixel_mch.cpp"
 _CLIENT = "toddlerbot/actuation/src/dynamixel_control/dynamixel_client.cpp"
 _CTRL = "toddlerbot/actuation/src/dynamixel_control/dynamixel_control.cpp"
 _CAM = "toddlerbot/sensing/camera.py"
+_WALK = "toddlerbot/policies/walk.py"
+_REPLAY = "toddlerbot/policies/replay.py"
+_PULLUP = "toddlerbot/policies/pull_up.py"
+_MIGRATE = "motion/migrate_pkl.py"
+_ZMPREF = "toddlerbot/reference/walk_zmp_ref.py"
+_GIN = "toddlerbot/locomotion/walk.gin"
 _SPK = "toddlerbot/sensing/speaker.py"
 _PROJ = "pyproject.toml"
 _CI = ".github/workflows/pytest_ci.yml"
@@ -411,6 +417,145 @@ MOTION_KEYFRAMES = UpstreamRef(
     "cuddle, hold, kneel, pull_up_grasp, pull_up_pull, push_up and walk_zmp. These are the "
     "only motion that ships in the repository and therefore the only motion that needs no "
     "download.",
+)
+
+
+# ── playing a motion, which upstream has no loader for ──────────────────────────────────
+
+MOTION_FILES_ARE_PER_VARIANT = UpstreamRef(
+    "robot_suffix",
+    "VERIFIED",
+    src(_PULLUP, 72),
+    "there is no bare cuddle.lz4: every motion is written twice, once per variant, and the "
+    'suffix is chosen at runtime as "_2xc" if "_2xc" in robot.name else "_2xm". The daemon '
+    "picks the same way, from the robot name it was started with.",
+)
+MOTION_HAS_NO_LOADER = UpstreamRef(
+    "joblib.load",
+    "VERIFIED",
+    src(_REPLAY, 42),
+    "there is no load_motion() anywhere upstream: ReplayPolicy and every other reader calls "
+    "joblib.load(path) inline on a full path, so quackd's daemon does the same. The files are "
+    "lz4-framed pickles, so joblib and lz4 are both needed and pickle alone is not enough.",
+)
+MOTION_ACTION_ARRAY = UpstreamRef(
+    "action",
+    "VERIFIED",
+    src(_REPLAY, 44),
+    "the per-frame motor targets, shaped (frames, 30), float32, in radians, in "
+    "robot.motor_ordering, at fifty hertz, which is this daemon's own rate. ReplayPolicy "
+    "accepts either this schema or an obs_list/action_list one.",
+)
+MOTION_ORDERING_IS_THE_ROBOTS = UpstreamRef(
+    "motor_ordering",
+    "VERIFIED",
+    src(_MIGRATE, 36),
+    "dict(zip(robot.motor_ordering, motor_pos)) is what proves the frames are in the robot's "
+    "own motor order rather than the file's, so quackd only ever sends a whole array.",
+)
+CARTWHEEL_CANNOT_BE_REPLAYED = UpstreamRef(
+    "cartwheel",
+    "VERIFIED",
+    src(_REPLAY, 44),
+    "its file carries action=None because it is qpos-interpolated and meant to run as its own "
+    'RL policy. ReplayPolicy\'s own `"action" in data_dict` check passes and then fails on the '
+    "shape. quackd does not offer it, and its loader skips any motion whose action is None.",
+)
+WALK_ZMP_IS_NOT_A_MOTION = UpstreamRef(
+    "walk_zmp",
+    "VERIFIED",
+    src(_ZMPREF, 39),
+    "it sits in the same directory with the same extension and is not a keyframe file at all: "
+    "it is a two-tuple gait lookup table used at training time. Replaying it fails at once. "
+    "quackd does not offer it, and walking is the ONNX policy's job.",
+)
+
+# ── the camera, which the daemon owns because no observation carries one ────────────────
+
+CAMERA_TAKES_A_SIDE = UpstreamRef(
+    "Camera.__init__",
+    "VERIFIED",
+    src(_CAM, 115),
+    "def __init__(self, side, width=640, height=480), untyped. `side` is only ever compared "
+    '== "left", so any other value silently means right. The constructor is synchronous and '
+    "Linux only: it scans /dev, shells out to v4l2-ctl, and unpickles a calibration file by a "
+    "relative path, so the working directory has to be the checkout root.",
+)
+CAMERA_GET_FRAME_IS_BGR = UpstreamRef(
+    "Camera.get_frame",
+    "VERIFIED",
+    src(_CAM, 178),
+    "returns OpenCV's own uint8 (height, width, 3) BGR array, and raises rather than "
+    "returning None on a failed read. quackd reads it on its own thread for exactly that "
+    "reason, and encodes this array, which is already the order imencode wants.",
+)
+CAMERA_GET_JPEG_SWAPS_RED_AND_BLUE = UpstreamRef(
+    "Camera.get_jpeg",
+    "VERIFIED",
+    src(_CAM, 194),
+    "it returns a (buffer, array) pair rather than bytes, and it hands an RGB array to "
+    "cv2.imencode, which expects BGR, so its JPEG comes out with red and blue swapped. quackd "
+    "does not call it: a swapped frame would quietly break every colour the detector looks "
+    "for. Its docstring also says quality 90 while the code sets 50.",
+)
+
+# ── the walk policy, whose interface is not what a reader would guess ───────────────────
+
+WALK_LOADER_RETURNS_A_DIRECTORY = UpstreamRef(
+    "load_wandb_policy",
+    "VERIFIED",
+    src(_MJX, 27),
+    "its annotation says Dict[str, Any] and it returns a str directory, ckpts/<name>, and it "
+    "downloads from wandb when the file is missing. The argument is a run name, not a path. "
+    "quackd checks for model_best.onnx and env_config.json itself and refuses when either is "
+    "absent, because a robot should not silently download the thing that decides how it walks.",
+)
+WALK_STEP_TAKES_THE_OBSERVATION = UpstreamRef(
+    "WalkPolicy.step",
+    "VERIFIED",
+    src(_WALK, 73),
+    "def step(self, obs: Obs, sim: BaseSim) -> Tuple[Dict[str, float], NDArray]: the whole "
+    "observation and the sim, answering with (control_inputs, motor_target). The target is "
+    "(30,) float32 radians in motor_ordering, already clipped to motor_limits. There is no "
+    "method that takes only the current pose.",
+)
+WALK_COMMAND_ROWS_ARE_FIVE_SIX_SEVEN = UpstreamRef(
+    "command_range",
+    "VERIFIED",
+    src(_MJX, 93),
+    "shaped (num_commands, 2) and read from the checkpoint's own env_config.json, so it is "
+    "the envelope this policy was really trained on. The walk velocities are rows 5, 6 and 7: "
+    "the first five are upper-body pose commands. walk.gin's training defaults are vx "
+    "[-0.2, 0.3], vy [-0.1, 0.1] and yaw [-1.0, 1.0], asymmetric in forward speed.",
+)
+WALK_INPUTS_ARE_ALL_THREE_OR_NONE = UpstreamRef(
+    "control_inputs",
+    "VERIFIED",
+    src(_MJX, 143),
+    "a plain dict attribute that takes precedence over the joystick when non-empty. All three "
+    "of walk_x, walk_y and walk_turn are indexed unconditionally, so a partial dict raises "
+    "KeyError mid-tick, and an empty one means use the fixed command rather than stop. quackd "
+    "always sends all three, and sends explicit zeros to stand still.",
+)
+WALK_INPUTS_ARE_NEVER_CLIPPED = UpstreamRef(
+    "walk_x",
+    "VERIFIED",
+    src(_GIN, 1),
+    "walk_x and walk_y are not clipped anywhere on the control_inputs path, so an "
+    "out-of-envelope command reaches the network as out-of-distribution input. quackd clamps "
+    "against the envelope it read at connect. walk_turn is separately overwritten by a yaw "
+    "correction integrator and re-clipped, so the commanded turn rate is not passed through.",
+)
+
+WALK_POLICY_IS_STATEFUL = UpstreamRef(
+    "WALK_POLICY_IS_STATEFUL",
+    "UNVERIFIED",
+    src(_MJX, 202),
+    "the policy keeps an observation history and an action buffer, expects to be stepped at "
+    "a fixed fifty hertz, and ignores its commands for the first seven seconds while it plays "
+    "a prep trajectory. quackd's daemon steps it only while `move` is running, so that window "
+    "opens on the first walk command rather than at startup. Whether a gait driven this way "
+    "behaves like one driven continuously has not been tested on a robot.",
 )
 
 # ── what quackd assumes ─────────────────────────────────────────────────────────────────

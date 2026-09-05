@@ -49,8 +49,9 @@ there is no velocity at this hardware boundary at all.
 
 ## The protocol
 
-Line delimited JSON-RPC 2.0 over TCP on port **9872**, which is quackd's own at both ends. The
-Open Duck Mini's bridge has 9871; a robot that is not that robot gets its own port. The
+Line delimited JSON-RPC 2.0 over TCP on port **9873**, which is quackd's own at both ends. The
+Open Duck Mini already takes 9871 for its bridge and 9872 for its camera daemon, and
+SECURITY.md tells people to tunnel that pair, so this robot starts after both. The
 handshake reports what this particular robot actually has, and quackd narrows its manifest
 from the answer, so a build with no walk checkpoint loses locomotion entirely rather than
 being offered it and refused.

@@ -22,7 +22,7 @@ own shutdown path disables torque with no lowering and no ramp. Read
 4. `python quackd_toddlerbot_bridge.py --robot toddlerbot_2xc --fake --once`
    Confirms the daemon imports and reports its capabilities. Nothing is energised.
 5. `python quackd_toddlerbot_bridge.py --robot toddlerbot_2xc --fake` and, from your laptop,
-   `uv run quackd doctor --robot toddlerbot:bridge --address tcp://<host>:9872`.
+   `uv run quackd doctor --robot toddlerbot:bridge --address tcp://<host>:9873`.
    Confirms the socket, the handshake, the token and the version check, still with no robot.
 
 ## The daemon, on the robot, not moving
@@ -31,10 +31,10 @@ own shutdown path disables torque with no lowering and no ramp. Read
    every motor the moment it returns.** Expect the robot to stiffen. If it hangs here, its
    constructor is busy-waiting on a silent IMU with the motors already live: kill it and check
    the IMU before anything else.
-7. `uv run quackd list-verbs --robot toddlerbot:bridge --address tcp://<host>:9872`
+7. `uv run quackd list-verbs --robot toddlerbot:bridge --address tcp://<host>:9873`
    Read the verb list back. If `move` is absent, you have no walk checkpoint staged, which is
    the normal state of a fresh install. Everything else should be there.
-8. `uv run quackd run toddlerbot-lookout --robot toddlerbot:bridge --address tcp://<host>:9872`
+8. `uv run quackd run toddlerbot-lookout --robot toddlerbot:bridge --address tcp://<host>:9873`
    Nothing in this task's allowlist moves a leg, an arm or the waist. It looks around with the
    head and reports. **This is the first thing to point at a real robot.**
 

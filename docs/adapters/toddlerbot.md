@@ -19,7 +19,7 @@ uv run quackd run toddlerbot-lookout --robot toddlerbot:sim2d --provider fake
 
 # a real robot, once quackd's daemon is running on it
 uv run quackd run toddlerbot-lookout --robot toddlerbot:bridge \
-  --address tcp://toddlerbot.local:9872
+  --address tcp://toddlerbot.local:9873
 ```
 
 ## Backends
@@ -87,8 +87,19 @@ The other four are excluded on judgement rather than capability, and the distinc
 the robot can do all of them. `pull_up_grasp` and `pull_up_pull` assume the robot is hanging
 from a bar, so asking for one on a robot standing on a table is a fall. `walk_zmp` is a gait
 reference rather than a performance, and locomotion belongs to `move` where the deadman covers
-it. `cartwheel` is excluded because this body has no fall recovery and a cartwheel is not
-something to discover a language model can trigger.
+it. `cartwheel` is excluded twice over. This body has no fall recovery, and a cartwheel is not
+something to discover a language model can trigger, but it also *cannot* be replayed: its file
+carries `action=None` because it is qpos-interpolated and meant to run as its own RL policy.
+`walk_zmp` cannot be replayed either, for a different reason: despite sitting in the same
+directory with the same extension it is not a keyframe file at all, it is a gait lookup table
+used at training time.
+
+Upstream ships no loader for any of this. Every call site there reads the file with
+`joblib.load` inline, so the daemon does the same. Each motion is written twice, once per
+variant, and the daemon picks `_2xc` or `_2xm` from the robot name it was started with. A
+keyframe file that is missing, unreadable or carries no action array is **not offered**: the
+handshake reports the motions that actually loaded, and quackd's manifest lists those. A
+shorter list is better than a verb that refuses on a robot.
 
 ## Running the daemon
 
@@ -101,6 +112,22 @@ git checkout 84e02d14261292eec5d06f896e3145b35c54856c
 pip install -e . && pip install 'mujoco==3.3.4' 'scipy>=1.14'
 python quackd_toddlerbot_bridge.py --robot toddlerbot_2xc --toddlerbot .
 ```
+
+Three flags decide what this robot can do, and **each one is checked rather than believed**.
+A capability the daemon reports is a verb quackd will offer, so the daemon only reports what
+it actually loaded.
+
+| Flag | What it needs | If it is not there |
+|---|---|---|
+| `--camera left` or `--camera right` | upstream's `Camera`, which needs `cv2`, the `v4l2-ctl` binary and a real device | logged, and the robot simply has no camera: `observe`, `go_to`, `search_scan` and `approach_and` never appear |
+| `--walk-policy NAME` | `ckpts/NAME/model_best.onnx` **and** `env_config.json` beside it | the daemon refuses to start rather than reaching for a wandb artifact from a robot |
+| `--gripper` | the gripper build | `grip` does not appear |
+
+There is no `--walk` flag any more, and that is the point: walking needs a checkpoint upstream
+neither publishes nor checks in, so it is a file you supply and the daemon loads. It reads that
+checkpoint's own `command_range` at startup and reports the velocity envelope it was really
+trained on, which is what quackd's `limits` then narrow to. Nothing is hardcoded from a gin
+file.
 
 `--fake` runs the whole daemon and protocol against a simulated body, with no robot and no
 upstream, which is what CI does. The daemon **refuses to actuate without a zero calibration**
@@ -153,6 +180,19 @@ robot was assembled.
 | The only joint limits | `motor_limits` | parsed from the MJCF, never from YAML |
 | Calibration is absent | `motors.yml` | gitignored, so a fresh clone has none |
 | The only offline motion | `motion` | eighteen keyframes, nine motions |
+| No loader exists | `joblib.load` | every reader upstream loads the file inline |
+| Motions are per variant | `robot_suffix` | `_2xc` or `_2xm`, chosen from the robot name |
+| The frames | `action` | (frames, 30) float32 radians, in `motor_ordering`, at 50 Hz |
+| Not replayable | `cartwheel` | `action=None`: it is an RL policy, not a keyframe |
+| Not a motion at all | `walk_zmp` | a gait lookup table that shares the extension |
+| The camera takes a side | `Camera.__init__` | untyped, Linux only, and synchronous |
+| Frames are BGR | `Camera.get_frame` | raises rather than returning None |
+| Its JPEG is wrong | `Camera.get_jpeg` | hands RGB to `imencode`, which wants BGR |
+| The walk loader | `load_wandb_policy` | returns a directory, not the dict it annotates |
+| The walk step | `WalkPolicy.step` | takes the observation and the sim, returns a pair |
+| The envelope | `command_range` | rows 5, 6 and 7 are the walk velocities |
+| All three or none | `control_inputs` | a partial dict raises mid-tick |
+| Never clipped upstream | `walk_x` | out-of-envelope goes straight to the network, so the daemon clamps |
 
 ## UNVERIFIED, and what quackd does about it
 
@@ -163,6 +203,7 @@ robot was assembled.
 | `FALL_DETECTION` | a tilt past 50 degrees is a fall | there is no fall detection upstream at all; the threshold is a guess until somebody tips a real robot |
 | `NECK_AXES` | which neck motor is yaw | inferred from the motor names rather than stated anywhere |
 | `ZERO_LATCHING` | a calibrated zero survives `initialize` | reading did not settle whether the configured zero is re-latched at every startup; the daemon refuses to actuate without the file either way |
+| `WALK_POLICY_IS_STATEFUL` | the gait policy can be driven only while `move` runs | it keeps a history and a buffer, expects a fixed fifty hertz, and ignores its commands for the first seven seconds. quackd steps it only while walking, so that window opens on the first command rather than at startup, and whether a gait driven that way behaves like one driven continuously is untested |
 | `THREAD_SAFETY` | the C++ is not safe across threads | two of eight bindings release the GIL and six do not, so every call is serialised onto the control thread and the camera stays on another |
 
 ## How to help

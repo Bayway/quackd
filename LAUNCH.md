@@ -28,7 +28,7 @@ ships the daemon that runs on it, so the only untested thing left is the duck.
 
 ## Show HN title candidates
 
-1. **Show HN: One LLM brain, five robots — each one decides what it may be asked to do**
+1. **Show HN: One LLM brain, eight robots — each one decides what it may be asked to do**
 2. Show HN: quackd – a SKILL.md-style file that makes an LLM drive a robot, and refuses the wrong robot
 3. Show HN: I gave a $399 robot duck a brain, then taught it to work with a robot head
 
@@ -41,7 +41,7 @@ mocks now, every hardware backend experimental and never run), and the ask ("add
 
 1. **Hook + GIF.** "A robot head spots a ball. A robot duck kicks it. Neither could do the other's half, and they're both following the same contract. Simulator, runs in 60 seconds. 🧵" *(hetero.gif)*
 2. **What.** quackd: pilot a small robot with any LLM. One `.duck` file per task, any provider, MCP so Claude Code/Desktop can drive it. Eight robots today: Microduck, an Open Duck Mini v2 you can print and build, Reachy Mini, an SO-101 class arm via LeRobot, any base over rosbridge, an XLeRobot dual-arm cart, an AlohaMini with two arms on a lift and a ToddlerBot humanoid. Apache-2.0.
-3. **The manifest.** "Every robot hands over a manifest: this is my body, these are my intents, these are my verbs. The model is only ever offered what's in it. A head is never offered `kick`. An arm is never offered `move`." *(the five-body table from the README's Which robots work)*
+3. **The manifest.** "Every robot hands over a manifest: this is my body, these are my intents, these are my verbs. The model is only ever offered what's in it. A head is never offered `kick`. An arm is never offered `move`." *(the eight-body table from the README's Which robots work)*
 4. **The `.duck` file.** Screenshot of `find-and-kick.duck` plus the refusal: `quackd validate find-and-kick --robot reachy_mini:sim2d` → `requires kick, but reachy-01 (reachy-mini) does not provide it`, exit 1, before anything connects.
 5. **MCP demo.** Short screen capture: `claude mcp add quackd -- uvx quackd serve-mcp --robots duck=microduck:sim2d,reachy=reachy_mini:mock`, then "list my robots and make the duck find the ball". One executor, budget and heartbeat per robot.
 6. **Roadmap tease.** "v2: learned verbs. An LLM writes a reward (DrEureka-style), the training stack produces a policy, and it registers as one more verb. The hook exists today; the loop doesn't. Yet." Plus: an HTTP transport so the MCP server is a remote connector and you can poke the robot from your phone.

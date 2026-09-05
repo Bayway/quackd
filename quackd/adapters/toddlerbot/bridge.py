@@ -44,8 +44,9 @@ STATUS = "EXPERIMENTAL - quackd's own protocol, never run against a robot"
 PROTOCOL = "quackd-toddlerbot-bridge"
 PROTOCOL_VERSION = 1
 JSONRPC_VERSION = "2.0"
-DEFAULT_PORT = 9872
-"""9871 is the Open Duck Mini's. A robot that is not that robot gets its own port."""
+DEFAULT_PORT = 9873
+"""The Open Duck Mini takes 9871 for its bridge and 9872 for its camera daemon, and
+SECURITY.md tells people to tunnel that pair, so this robot starts after both."""
 
 TOKEN_ENV = "QUACKD_TODDLERBOT_TOKEN"
 
@@ -109,6 +110,12 @@ class ToddlerBotBridge:
         self.neck_available = True
         self.gripper_available = False
         self.walk_available = False
+        #: The motions the daemon actually loaded, which is at most the five quackd
+        #: offers and fewer if a keyframe file was missing or unreadable.
+        self.motions: tuple[str, ...] = ()
+        #: The velocity envelope the loaded walk checkpoint was trained on, read
+        #: from its own config rather than assumed.
+        self.walk_envelope: dict[str, float] | None = None
         self.deadman = False
         self.robot_name = "toddlerbot_2xc"
         self.motors = 30
@@ -157,6 +164,11 @@ class ToddlerBotBridge:
         # No walk checkpoint means no locomotion at all: it is an ONNX artifact upstream does
         # not publish, so the adapter drops move, go_to and approach_and rather than gate them.
         self.walk_available = bool(caps.get("walk", False))
+        self.motions = tuple(caps.get("motions") or ())
+        envelope = caps.get("walk_envelope")
+        self.walk_envelope = (
+            {k: float(v) for k, v in envelope.items()} if isinstance(envelope, dict) else None
+        )
         self.deadman = bool(caps.get("deadman", False))
         self.robot_name = str(self.hello.get("robot") or self.robot_name)
         self.motors = int(self.hello.get("motors") or self.motors)

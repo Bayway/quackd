@@ -17,14 +17,20 @@ import importlib.util
 import socket
 import sys
 import threading
+import time
 from types import ModuleType
 
 import numpy as np
 import pytest
 
 from quackd.adapters.toddlerbot import ToddlerBotAdapter
-from quackd.adapters.toddlerbot.bridge import PROTOCOL, PROTOCOL_VERSION, ToddlerBotBridge
-from quackd.transport.base import Intent, TransportError
+from quackd.adapters.toddlerbot.bridge import (
+    DEFAULT_PORT,
+    PROTOCOL,
+    PROTOCOL_VERSION,
+    ToddlerBotBridge,
+)
+from quackd.transport.base import HeartbeatError, Intent, TransportError
 from tests.conftest import REPO
 
 DAEMON = REPO / "bridge" / "toddlerbot" / "quackd_toddlerbot_bridge.py"
@@ -52,6 +58,17 @@ def _free_port() -> int:
 def _daemon(**kwargs: object) -> object:
     robot = D.FakeRobot()
     return D.Daemon(robot, D.FakeSim(robot), fake=True, **kwargs)  # type: ignore[arg-type]
+
+
+async def _until(predicate: object, limit_s: float = 5.0) -> None:
+    """The daemon's loop is a real thread on a real clock, so these waits are real waits."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + limit_s
+    while loop.time() < deadline:
+        if predicate():  # type: ignore[operator]
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("the daemon never reached the expected state")
 
 
 # ── 1. the clamp, because set_motor_target has none ────────────────────────────────────
@@ -217,7 +234,10 @@ class _Serving:
             "gripper": caps.get("gripper", False),
             "walk": caps.get("walk", False),
             "deadman": True,
+            "motions": list(caps.get("motions", D.MOTIONS)),  # type: ignore[call-overload]
         }
+        if caps.get("envelope"):
+            D.Handler.capabilities["walk_envelope"] = caps["envelope"]
         D.Handler.robot_name = "toddlerbot_2xc"
         D.Handler.motors = robot.nu
         self.server = D.Server(("127.0.0.1", self.port), D.Handler)
@@ -343,7 +363,8 @@ async def test_no_daemon_says_what_to_start() -> None:
 def test_the_daemon_never_imports_quackd() -> None:
     """quackd's dependencies do not belong on a robot, and this file is the proof."""
     for line in DAEMON.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
+        # the statement only: a late import's comment may well say the word
+        stripped = line.split("#", 1)[0].strip()
         if stripped.startswith(("import ", "from ")):
             assert "quackd" not in stripped, f"the daemon imports quackd: {stripped}"
 
@@ -374,3 +395,199 @@ def test_it_ships_in_the_sdist_and_never_in_the_wheel() -> None:
     ]["targets"]
     assert build["wheel"]["packages"] == ["quackd"]
     assert "bridge" in build["sdist"]["include"]
+
+
+# ── 7. the loop that must not die quietly ──────────────────────────────────────────────
+
+
+def test_a_loop_that_faults_keeps_running_and_recovers() -> None:
+    """`tick()` never raises for a bad reading, but `set_motor_target` can raise for a bad
+    bus. If that killed the loop thread the socket would go on answering healthy while
+    nothing at all drove the robot."""
+    d = _daemon()
+    seen = {"n": 0}
+    good = d.sim.set_motor_target
+
+    def flaky(target: object) -> None:
+        seen["n"] += 1
+        if seen["n"] <= 3:
+            raise RuntimeError("bus fault")
+        good(target)
+
+    d.sim.set_motor_target = flaky  # type: ignore[method-assign]
+    thread = threading.Thread(target=d.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and seen["n"] < 8:
+        time.sleep(0.01)
+    d.running = False
+    thread.join(timeout=2.0)
+    assert seen["n"] >= 8, "the loop went on ticking through the fault"
+    assert d.fault is None, "and stopped reporting one once the bus came back"
+
+
+def test_a_loop_that_never_recovers_gives_up_rather_than_spinning() -> None:
+    d = _daemon()
+
+    def gone(target: object) -> None:
+        raise RuntimeError("the servo bus is gone")
+
+    d.sim.set_motor_target = gone  # type: ignore[method-assign]
+    thread = threading.Thread(target=d.run, daemon=True)
+    thread.start()
+    thread.join(timeout=10.0)
+    assert not thread.is_alive(), "it stopped instead of failing fifty times a second forever"
+    assert d.faults >= D.FAULT_LIMIT
+    assert d.fault is not None and "servo bus is gone" in d.fault
+
+
+def test_shutdown_is_safe_to_call_twice() -> None:
+    """The excepthook and main's `finally` can both reach it, and closing a real bus twice
+    is not a thing to discover on hardware."""
+    d = _daemon()
+    closes = {"n": 0}
+    once = d.sim.close
+
+    def counted() -> None:
+        closes["n"] += 1
+        once()
+
+    d.sim.close = counted  # type: ignore[method-assign]
+    d.shutdown()
+    d.shutdown()
+    assert closes["n"] == 1, "the bus is closed once, however many things ask"
+
+
+async def test_a_faulted_loop_fails_the_heartbeat_rather_than_looking_healthy() -> None:
+    with _Serving() as s:
+
+        def gone(target: object) -> None:
+            raise RuntimeError("the servo bus is gone")
+
+        s.daemon.sim.set_motor_target = gone
+        link = ToddlerBotBridge(address=s.address)
+        await link.connect()
+        await _until(lambda: s.daemon.fault is not None)
+        with pytest.raises(HeartbeatError, match="faulted"):
+            await link.heartbeat()
+        await link.close()
+
+
+async def test_a_client_that_dies_mid_move_trips_the_deadman() -> None:
+    """The failure the deadman exists for is not a polite stop. It is a client that stops
+    existing while the robot is walking, because silence on this body means hold the last
+    gait target forever, and that is a humanoid mid-stride with nobody driving it."""
+    with _Serving(walk=True) as s:
+        link = ToddlerBotBridge(address=s.address)
+        await link.connect()
+        assert (await link.send_intent(Intent.move(vx=0.1))).accepted
+        await _until(lambda: s.daemon.command.mode == D.Command.WALK)
+        assert link._writer is not None
+        link._writer.close()  # not a close(): the client stops existing, mid-move
+        await _until(lambda: s.daemon.deadman_tripped)
+        assert s.daemon.command.mode == D.Command.DEADMAN
+        await _until(lambda: float(np.max(np.abs(s.daemon.target))) < 0.05)
+        assert not s.daemon.sim.closed, "it slewed to the safe pose and never went limp"
+
+
+def test_the_token_is_compared_in_constant_time() -> None:
+    """A plain `!=` returns as soon as two bytes differ, which hands the token to anyone who
+    can time the reply. The Open Duck Mini's daemon has always used `compare_digest`."""
+    src = DAEMON.read_text(encoding="utf-8")
+    assert "hmac.compare_digest" in src
+    assert 'params.get("token") != self.token' not in src
+
+
+def test_this_robot_does_not_take_the_open_ducks_ports() -> None:
+    """The Open Duck Mini already has 9871 for its bridge and 9872 for its camera daemon,
+    and SECURITY.md tells people to tunnel that pair."""
+    taken = set()
+    for name in ("quackd_duck_bridge.py", "quackd_duck_camd.py"):
+        text = (REPO / "bridge" / "open_duck" / name).read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.startswith("DEFAULT_PORT"):
+                taken.add(int(line.split("=")[1].strip()))
+    assert taken == {9871, 9872}, f"the Open Duck's ports moved: {taken}"
+    assert D.DEFAULT_PORT not in taken, f"{D.DEFAULT_PORT} is already an Open Duck port"
+    assert DEFAULT_PORT == D.DEFAULT_PORT, "the client and the daemon must agree on the port"
+
+
+# ── 8. capabilities are what loaded, never what was asked for ──────────────────────────
+
+
+def test_a_fake_body_still_has_motions_to_play() -> None:
+    """`--fake` has to exercise `perform` end to end, so the fake gets a synthetic library.
+    A real one gets its frames from upstream's keyframe files and nothing is synthesised."""
+    d = _daemon()
+    assert set(d.motion_library) == set(D.MOTIONS)
+    assert all(len(frames) > 0 for frames in d.motion_library.values())
+
+
+def test_a_real_body_offers_no_motion_it_could_not_load(tmp_path: object) -> None:
+    """A missing or unreadable keyframe file must shorten the list rather than produce a verb
+    that refuses on a robot. There is nothing at this path, so nothing loads."""
+    library = D.load_motions(str(tmp_path), "toddlerbot_2xc")
+    assert library == {}
+
+
+def test_the_motion_files_are_looked_for_per_variant(tmp_path: object) -> None:
+    """There is no bare `cuddle.lz4` upstream: every motion is written once per variant, and
+    the daemon picks the suffix from the robot name it was started with. A 2xc robot handed
+    only 2xm files finds nothing, which is the correct answer rather than a wrong motion."""
+    import pathlib
+
+    root = pathlib.Path(str(tmp_path)) / "motion"
+    root.mkdir(parents=True)
+    for name in D.MOTIONS:
+        (root / f"{name}_2xm.lz4").write_bytes(b"not a real keyframe file")
+    assert D.load_motions(str(tmp_path), "toddlerbot_2xc") == {}, "it looked for _2xc"
+
+
+async def test_the_manifest_offers_only_the_motions_the_daemon_reported() -> None:
+    with _Serving(motions=["hold", "kneel"]) as s:
+        adapter = ToddlerBotAdapter(ToddlerBotBridge(address=s.address))
+        manifest = await adapter.connect()
+        assert manifest.extras["motions"] == ["hold", "kneel"]
+        assert adapter.transport.motions == ("hold", "kneel")
+        await adapter.transport.close()
+
+
+async def test_the_envelope_comes_from_the_checkpoint_rather_than_a_gin_file() -> None:
+    """`command_range` is read off the checkpoint that is actually loaded, so a policy trained
+    tighter than quackd's own caps narrows the manifest to what it can really do."""
+    with _Serving(walk=True, envelope={"max_vx": 0.12, "max_vy": 0.05, "max_wz": 0.4}) as s:
+        adapter = ToddlerBotAdapter(ToddlerBotBridge(address=s.address))
+        manifest = await adapter.connect()
+        assert manifest.limits["max_vx"] == pytest.approx(0.12)
+        assert manifest.limits["max_vy"] == pytest.approx(0.05)
+        assert manifest.limits["max_wz"] == pytest.approx(0.4)
+        await adapter.transport.close()
+
+
+async def test_an_envelope_wider_than_the_schema_is_narrowed_not_believed() -> None:
+    """`limits` may only ever narrow. A checkpoint trained wider than quackd's caps does not
+    get to widen them."""
+    with _Serving(walk=True, envelope={"max_vx": 9.0, "max_vy": 9.0, "max_wz": 9.0}) as s:
+        adapter = ToddlerBotAdapter(ToddlerBotBridge(address=s.address))
+        manifest = await adapter.connect()
+        assert manifest.limits["max_vx"] == pytest.approx(0.2)
+        assert manifest.limits["max_vy"] == pytest.approx(0.1)
+        assert manifest.limits["max_wz"] == pytest.approx(1.0)
+        await adapter.transport.close()
+
+
+def test_the_daemon_reports_the_camera_it_opened_rather_than_the_flag() -> None:
+    """A `--camera` that could not open must not become an `observe` the robot cannot do."""
+    src = DAEMON.read_text(encoding="utf-8")
+    assert '"camera": daemon.camera is not None' in src
+    assert '"walk": daemon.walk_policy is not None' in src
+    assert '"camera": bool(args.camera)' not in src
+
+
+def test_the_walk_policy_is_driven_through_upstreams_own_interface() -> None:
+    """`step_target` does not exist upstream. The real method takes the whole observation and
+    the sim and answers with a pair, and inventing an upstream name is what ADR-0022 exists
+    to stop."""
+    src = DAEMON.read_text(encoding="utf-8")
+    assert "step_target" not in src
+    assert "self.walk_policy.step(self.last_obs, self.sim)" in src

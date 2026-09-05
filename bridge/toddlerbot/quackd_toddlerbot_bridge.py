@@ -49,6 +49,8 @@ Rules this file lives by, the same three as `bridge/open_duck/`:
 from __future__ import annotations
 
 import argparse
+import base64
+import hmac
 import json
 import logging
 import math
@@ -70,7 +72,9 @@ VERSION = "1"
 PROTOCOL = "quackd-toddlerbot-bridge"
 PROTOCOL_VERSION = 1
 JSONRPC_VERSION = "2.0"
-DEFAULT_PORT = 9872
+DEFAULT_PORT = 9873
+"""The Open Duck Mini takes 9871 for its bridge and 9872 for its camera daemon, and
+SECURITY.md tells people to tunnel that pair, so this robot starts after both."""
 TOKEN_ENV = "QUACKD_TODDLERBOT_TOKEN"
 
 CONTROL_HZ = 50.0
@@ -86,6 +90,20 @@ WAIST_THRESHOLD = 0.5
 MAX_STEP_RAD = RESET_VEL * CONTROL_DT * 4.0
 """The most any joint may move in one tick, whatever asked for it."""
 CLOSE_TIMEOUT_S = 5.0
+FAULT_LIMIT = 10
+CAMERA_PERIOD_S = 0.1
+"""Ten frames a second. quackd asks for one when it wants one, so this only bounds how
+stale the newest can be, and a USB read is expensive enough not to do at fifty."""
+
+MOTIONS = ("hold", "kneel", "cuddle", "push_up", "crawl")
+"""The keyframe motions quackd offers, out of the nine that ship.
+
+`cartwheel` is excluded because this body has no fall recovery, and because its file
+carries `action=None`: it is qpos-interpolated and meant to run as its own RL policy, so
+replaying it would fail. `walk_zmp` is excluded because it is not a keyframe file at all,
+it is a gait lookup table used at training time. The two `pull_up` motions need a bar."""
+"""Consecutive failing ticks before the loop gives up and settles. One is a glitch on a
+serial bus; ten in a row at fifty hertz is a fifth of a second of a robot nobody drives."""
 """`close()` holds the GIL and retries torque-off forever on a dead bus. If it has not
 returned by now, leave hard: a torqued robot beats a frozen supervisor that cannot be killed."""
 CONSTRUCT_TIMEOUT_S = 30.0
@@ -248,8 +266,15 @@ class Daemon:
         self.fallen = False
         self.tilt_deg = 0.0
         self.deadman_tripped = False
+        self.fault: str | None = None
+        self.faults = 0
+        self._shut = False
         self.calibrated = bool(getattr(robot, "quackd_calibrated", False))
         self.motion_library: dict[str, list[Any]] = {}
+        self.walk_policy: Any = None
+        self.walk_envelope: dict[str, float] | None = None
+        self.camera: Any = None
+        self.last_obs: Any = None
         n = int(getattr(robot, "nu", 30))
         order = list(getattr(robot, "motor_ordering", [f"m{i}" for i in range(n)]))
         self.order = order
@@ -263,6 +288,10 @@ class Daemon:
         self.command = Command(default)
         self.command.last_client = time.monotonic()
         self.target = default.copy()
+        if fake:
+            # So --fake exercises perform end to end. On a robot these frames come from
+            # upstream's keyframe files and nothing here is synthesised.
+            self.motion_library = {n: [default.copy()] * 10 for n in MOTIONS}
 
     # -- one tick ------------------------------------------------------------------
 
@@ -310,19 +339,22 @@ class Daemon:
             cmd.frame_index += 1
             return frame
         if cmd.mode == Command.WALK:
-            # the policy owns the gait; the daemon only feeds it and clamps what comes back
-            policy = getattr(self, "walk_policy", None)
-            if policy is None:
+            # The policy owns the gait. quackd feeds it and clamps what comes back, because
+            # upstream never clips walk_x or walk_y on this path: an out-of-envelope command
+            # reaches the network as out-of-distribution input. `step` wants the whole
+            # observation and the sim, and answers with (control_inputs, motor_target).
+            if self.walk_policy is None or self.last_obs is None:
                 cmd.hold(current)
                 return current
-            policy.control_inputs = dict(cmd.walk)
-            return np.asarray(policy.step_target(current), dtype=np.float32)
+            self.walk_policy.control_inputs = dict(cmd.walk)
+            _, motor_target = self.walk_policy.step(self.last_obs, self.sim)
+            return np.asarray(motor_target, dtype=np.float32)
         return cmd.goal
 
     def tick(self, dt: float = CONTROL_DT) -> Any:
         """One control step: read, decide, clamp, write. Never raises for a bad reading."""
         with self.lock:
-            self.observe()
+            self.last_obs = self.observe()
             if time.monotonic() - self.command.last_client > DEADMAN_S:
                 if not self.deadman_tripped:
                     log.warning("quackd went quiet; slewing to the safe pose and holding")
@@ -343,7 +375,25 @@ class Daemon:
         start = time.monotonic()
         step = 0
         while self.running:
-            self.tick()
+            try:
+                self.tick()
+            except Exception as e:
+                # A tick that raises must not kill this thread and leave the socket answering
+                # healthy while nothing drives the robot. Upstream surfaces a controller fault
+                # as a bare KeyError, so this is a live path rather than a theoretical one.
+                # Record it, force the deadman so the next good tick slews to safety, and stop
+                # claiming health. If the bus never comes back, settle and give up.
+                self.faults += 1
+                self.fault = f"{type(e).__name__}: {e}"
+                log.exception("tick failed (%d in a row)", self.faults)
+                with self.lock:
+                    self.command.trip(self.command.default_pose)
+                if self.faults >= FAULT_LIMIT:
+                    log.error("%d ticks failed in a row; settling and stopping", self.faults)
+                    self.running = False
+            else:
+                self.faults = 0
+                self.fault = None
             step += 1
             self.loop_hz = step / max(1e-6, time.monotonic() - start)
             slack = start + CONTROL_DT * step - time.monotonic()
@@ -377,7 +427,12 @@ class Daemon:
         `close()` is bound without releasing the GIL and retries torque-off forever on an
         unresponsive bus, so a stuck shutdown freezes every thread including this one. A
         torqued robot and a dead process beats a frozen process nobody can signal."""
+        if self._shut:
+            return
+        self._shut = True
         self.running = False
+        if self.camera is not None:
+            self.camera.close()
         try:
             self.settle()
         except Exception:  # never let settling stop the close
@@ -461,7 +516,9 @@ class Handler(socketserver.StreamRequestHandler):
     ) -> tuple[Any, bool]:
         d = self.daemon_ref
         if method == "bot.hello":
-            if self.token is not None and params.get("token") != self.token:
+            if self.token is not None and not hmac.compare_digest(
+                str(params.get("token") or ""), self.token
+            ):
                 raise _Refused(ERR_BAD_TOKEN, "bad or missing token")
             return {
                 "protocol": PROTOCOL,
@@ -477,9 +534,14 @@ class Handler(socketserver.StreamRequestHandler):
         if method == "bot.state":
             return d.state(), authed
         if method == "bot.health":
+            reason = None
+            if d.fault is not None:
+                reason = f"the control loop faulted: {d.fault}"
+            elif d.fallen:
+                reason = "the robot has fallen"
             return {
-                "ok": not d.fallen,
-                "reason": "the robot has fallen" if d.fallen else None,
+                "ok": reason is None,
+                "reason": reason,
                 "loop_hz": round(d.loop_hz, 1),
             }, authed
         if method == "bot.stop":
@@ -523,8 +585,7 @@ class Handler(socketserver.StreamRequestHandler):
                 return {"accepted": False, "reason": "this build has no grippers"}, authed
             return {"accepted": True}, authed
         if method == "bot.frame":
-            frame = getattr(d, "camera_jpeg", None)
-            return {"jpeg": frame() if callable(frame) else None}, authed
+            return {"jpeg": d.camera.latest() if d.camera is not None else None}, authed
         raise _Refused(ERR_UNKNOWN, f"unknown method {method!r}")
 
     def _reply(self, req_id: Any, result: Any) -> None:
@@ -611,6 +672,144 @@ class FakeSim:
         self.closed = True
 
 
+def load_motions(root: str, robot_name: str) -> dict[str, list[Any]]:
+    """Read the keyframes upstream ships. There is no loader upstream to call.
+
+    Every call site there does `joblib.load(path)` inline, so this does the same. The
+    files are lz4-framed pickles carrying an `action` array of per-frame motor positions,
+    in radians, in `robot.motor_ordering`, at fifty hertz, which is this loop's own rate.
+
+    A motion that is missing, unreadable, or carries no action array is not offered.
+    quackd would rather publish a shorter list than a verb that refuses on a robot.
+    """
+    suffix = "_2xc" if "_2xc" in robot_name else "_2xm"
+    paths = {n: os.path.join(root, "motion", f"{n}{suffix}.lz4") for n in MOTIONS}
+    present = {n: q for n, q in paths.items() if os.path.exists(q)}
+    for name in MOTIONS:
+        if name not in present:
+            log.warning("motion %r is not at %s, so it is not offered", name, paths[name])
+    if not present:
+        return {}
+    try:
+        import joblib  # late: upstream's own dependency, and not one this side has
+    except ImportError:
+        log.error("joblib is not installed beside upstream, so no motion can be loaded")
+        return {}
+
+    library: dict[str, list[Any]] = {}
+    for name, path in present.items():
+        try:
+            data = joblib.load(path)
+            action = data["action"] if isinstance(data, dict) else None
+            if action is None:
+                log.warning("motion %r has no action array, so it is not offered", name)
+                continue
+            frames = np.asarray(action, dtype=np.float32)
+        except Exception:
+            log.exception("motion %r failed to load, so it is not offered", name)
+            continue
+        if frames.ndim != 2:
+            log.error("motion %r is shaped %s, not frames of motors", name, frames.shape)
+            continue
+        library[name] = [frames[i] for i in range(len(frames))]
+        log.info("motion %r: %d frames", name, len(frames))
+    return library
+
+
+class CameraFeed:
+    """Upstream's `Camera`, on its own thread, because it cannot be called from the loop.
+
+    Its constructor scans `/dev`, shells out to `v4l2-ctl` and unpickles a calibration
+    file relative to the working directory, and `get_frame` raises rather than returning
+    None on a failed read. A stalled USB device on the control thread would cost ticks on
+    a robot that falls over when the ticks stop.
+
+    quackd encodes the frame itself rather than calling upstream's `get_jpeg`, for two
+    reasons. That returns a `(buffer, array)` pair rather than bytes. And it hands an RGB
+    array to `cv2.imencode`, which expects BGR, so its JPEG comes out with red and blue
+    swapped, which would quietly break every colour the detector looks for.
+    """
+
+    def __init__(self, side: str) -> None:
+        from toddlerbot.sensing.camera import Camera  # late: needs cv2 and a real device
+
+        self.camera = Camera(side)
+        self.lock = threading.Lock()
+        self.jpeg: bytes | None = None
+        self.running = True
+        self.thread = threading.Thread(target=self._loop, daemon=True, name="quackd-camera")
+        self.thread.start()
+
+    def _loop(self) -> None:
+        import cv2  # late: upstream's own dependency, beside the Camera above
+
+        while self.running:
+            try:
+                frame = self.camera.get_frame()  # BGR, which is what imencode wants
+                ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            except Exception:
+                log.exception("camera read failed; keeping the last frame")
+                time.sleep(0.5)
+                continue
+            if ok:
+                with self.lock:
+                    self.jpeg = buf.tobytes()
+            time.sleep(CAMERA_PERIOD_S)
+
+    def latest(self) -> str | None:
+        with self.lock:
+            jpeg = self.jpeg
+        return base64.b64encode(jpeg).decode("ascii") if jpeg else None
+
+    def close(self) -> None:
+        self.running = False
+
+
+def build_walk_policy(ckpt: str, robot: Any, init_pos: Any, root: str) -> tuple[Any, Any]:
+    """Load a local ONNX walk checkpoint, and read the envelope it was really trained on.
+
+    Upstream's only loader reaches for a wandb artifact when the file is missing, so quackd
+    checks for the file first: a robot should not silently download the thing that decides
+    how it walks. That loader's annotation says it returns a dict and it returns the
+    directory, and the checkpoint is unusable without the `env_config.json` beside it.
+
+    The envelope is why this is read here rather than hardcoded. `command_range` comes
+    from the checkpoint's own config, so it is the range this policy was actually trained
+    on, and the walk velocities are rows five, six and seven: the first five are
+    upper-body pose commands.
+    """
+    ckpt_dir = os.path.join(root, "ckpts", ckpt)
+    for path in (
+        os.path.join(ckpt_dir, "model_best.onnx"),
+        os.path.join(ckpt_dir, "env_config.json"),
+    ):
+        if not os.path.exists(path):
+            raise SystemExit(
+                f"--walk-policy {ckpt!r} needs {path}, which is not there. Upstream "
+                "publishes no checkpoint and checks none in, so this is a file you "
+                "supply. quackd will not reach for a wandb artifact from a robot."
+            )
+    from toddlerbot.policies.walk import WalkPolicy  # late: onnxruntime, jax and wandb
+
+    policy = WalkPolicy(ckpt, robot, init_pos, ckpt_dir)
+    rows = np.asarray(policy.command_range, dtype=np.float32)
+    if rows.ndim != 2 or len(rows) < 8:
+        raise SystemExit(
+            f"the checkpoint at {ckpt_dir} reports a command_range shaped {rows.shape}, "
+            "and quackd expected at least eight rows with the walk velocities at five, "
+            "six and seven. Refusing to guess which rows are the velocities."
+        )
+    # The trained range is asymmetric (forward further than backward) and quackd's limits
+    # are symmetric, so the honest reading of each row is its tighter half.
+    envelope = {
+        "max_vx": float(min(abs(rows[5][0]), abs(rows[5][1]))),
+        "max_vy": float(min(abs(rows[6][0]), abs(rows[6][1]))),
+        "max_wz": float(min(abs(rows[7][0]), abs(rows[7][1]))),
+    }
+    log.info("walk checkpoint %s loaded; envelope %s", ckpt, envelope)
+    return policy, envelope
+
+
 # ── wiring it up ────────────────────────────────────────────────────────────────────────
 
 
@@ -666,8 +865,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--token", default=os.environ.get(TOKEN_ENV))
     parser.add_argument("--fake", action="store_true", help="Run with a simulated body.")
-    parser.add_argument("--camera", action="store_true", help="Offer a camera.")
-    parser.add_argument("--walk", action="store_true", help="A walk checkpoint is staged.")
+    parser.add_argument(
+        "--camera",
+        choices=("left", "right"),
+        default=None,
+        help="Open this camera. Upstream's Camera takes a side, not an index.",
+    )
+    parser.add_argument(
+        "--walk-policy",
+        default=None,
+        metavar="NAME",
+        help="Run name under ckpts/ holding model_best.onnx and env_config.json.",
+    )
     parser.add_argument("--gripper", action="store_true", help="This build has grippers.")
     parser.add_argument("--once", action="store_true", help="Set up, report, and exit.")
     args = parser.parse_args(argv)
@@ -693,13 +902,33 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     daemon = Daemon(robot, sim, fake=args.fake)
-    capabilities = {
-        "camera": bool(args.camera),
+    if not args.fake:
+        daemon.motion_library = load_motions(os.path.abspath(args.toddlerbot), args.robot)
+    if args.camera:
+        try:
+            daemon.camera = CameraFeed(args.camera)
+        except Exception:
+            # Not fatal, and not something to paper over either: the robot simply has no
+            # camera, and the handshake will say so, so quackd never declares `observe`.
+            log.exception("the %s camera did not open, so this robot has none", args.camera)
+    if args.walk_policy and not args.fake:
+        daemon.walk_policy, daemon.walk_envelope = build_walk_policy(
+            args.walk_policy, robot, daemon.target, os.path.abspath(args.toddlerbot)
+        )
+
+    # Every one of these is what actually loaded, never what the operator claimed. A
+    # capability quackd reports is a verb quackd will offer, and a verb it offers is one it
+    # has to be able to deliver.
+    capabilities: dict[str, Any] = {
+        "camera": daemon.camera is not None,
         "neck": bool(daemon.neck),
         "gripper": bool(args.gripper),
-        "walk": bool(args.walk),
+        "walk": daemon.walk_policy is not None,
         "deadman": True,
+        "motions": sorted(daemon.motion_library),
     }
+    if daemon.walk_envelope is not None:
+        capabilities["walk_envelope"] = daemon.walk_envelope
     if args.once:
         log.info("robot=%s motors=%d capabilities=%s", args.robot, robot.nu, capabilities)
         return 0
@@ -713,6 +942,24 @@ def main(argv: list[str] | None = None) -> int:
 
     for sig in (signal.SIGINT, getattr(signal, "SIGTERM", signal.SIGINT)):
         signal.signal(sig, on_signal)
+
+    # A signal handler is not enough. Upstream's C level atexit disconnects every client
+    # on any interpreter exit, and disconnecting disables torque, so an unhandled
+    # exception anywhere drops a standing robot before Python gets a say. These settle
+    # first, then let the original hook print the traceback that says why.
+    def settle_first(original: Any) -> Any:
+        def hook(*args: Any) -> None:
+            log.error("unhandled exception; settling to the safe pose before anything else")
+            try:
+                daemon.shutdown()
+            except Exception:
+                log.exception("settling failed on the way out; closing anyway")
+            original(*args)
+
+        return hook
+
+    sys.excepthook = settle_first(sys.excepthook)
+    threading.excepthook = settle_first(threading.excepthook)
 
     loop = threading.Thread(target=daemon.run, daemon=True, name="quackd-control")
     loop.start()

@@ -128,6 +128,62 @@ no longer are.
 
 ### Fixed
 
+- **The ToddlerBot daemon stopped claiming three things it could not do.** An audit of the
+  three new adapters against their own plan found the same shape of bug three times, and it
+  is the shape this project exists to prevent: a capability flag the operator sets, a
+  manifest that promises verbs because of it, and a daemon with no implementation behind it.
+  `--camera` declared `observe`, `search_scan`, `go_to` and `approach_and` while the frame
+  handler read an attribute that was never defined, so every frame came back empty and
+  `toddlerbot-lookout`, the one task shipped for the first hardware day, could not have run.
+  `--walk` declared locomotion and returned `accepted: True` for every command while the
+  policy attribute it consulted was never assigned, so the robot would have stood still and
+  reported success. And `perform` refused every motion because the keyframe library was
+  initialised empty and never filled. All three are now loaded for real, and **the handshake
+  reports what actually loaded rather than what was asked for**: a camera that will not open
+  means the camera verbs never appear, and a walk checkpoint is a file you supply rather than
+  a claim you make.
+- **`policy.step_target()` never existed upstream.** It was quackd's invention, which is the
+  exact failure ADR-0022 is written to prevent. The real interface takes the whole
+  observation and the sim and answers with a pair, and it is now cited at a pinned line
+  along with sixteen other names the daemon needed and did not have: that motions carry a
+  per-variant suffix, that upstream ships no loader at all, that `cartwheel` cannot be
+  replayed because its file holds no action array, that `walk_zmp` is a lookup table rather
+  than a motion, and that `Camera.get_jpeg` hands RGB to an encoder that wants BGR and so
+  returns a picture with red and blue swapped.
+- **The walk envelope comes from the checkpoint now.** `command_range` is read at connect off
+  the policy that is actually loaded, rather than hardcoded from a gin file, so a robot whose
+  gait was trained tighter than quackd's caps gets the tighter number. It can only ever
+  narrow: a checkpoint trained wider does not get to widen `limits`.
+- **A daemon fault no longer looks like a healthy robot.** A raising tick used to kill the
+  control thread while the socket went on answering `ok`. It is now caught: the deadman is
+  forced, `bot.health` reports the fault so quackd's heartbeat trips, and a bus that never
+  comes back settles and stops rather than failing fifty times a second forever. The
+  `sys.excepthook` and `threading.excepthook` that Part C of the plan asked for are installed
+  too, because upstream's C level `atexit` disables torque on any interpreter exit and would
+  otherwise drop a standing robot before Python got a say.
+- **The ToddlerBot daemon moved off port 9872 to 9873.** The Open Duck Mini already had it:
+  9871 for its bridge and 9872 for its camera daemon, and `SECURITY.md` tells people to
+  tunnel that pair. The comment justifying the old choice named only the bridge. Its token is
+  also compared with `hmac.compare_digest` now, as the Open Duck's always was, rather than a
+  plain `!=` that returns as soon as two bytes differ.
+- **Two simulator rows earned the tick they were claiming.** `alohamini:sim2d` and
+  `toddlerbot:sim2d` were marked ✅ while their own text admitted no seeded sweep, on a page
+  where ✅ means exactly that. Both now run their lookout task on ten of ten seeds in CI, with
+  the ground truth checked: the AlohaMini never moves a wheel, an arm or the lift, and the
+  ToddlerBot never takes a step or turns its body. The `alohamini:zmq` row was also sitting
+  under the ToddlerBot's heading rather than its own robot's.
+- **`quackd[alohamini]` was never locked.** The extra shipped in `pyproject.toml` and never
+  reached `uv.lock`, so `uv sync --locked` refused it. `NOTICE` also credited every other
+  upstream and none of the three new ones, including the fact that ToddlerBot's design files
+  are non-commercially licensed and quackd therefore distributes none of them.
+- **The five-to-eight sweep reached the places the tests do not police.** `test_docs.py`
+  checks three exact phrases, so everything phrased differently had gone stale: `SECURITY.md`
+  counted five bodies and scoped on-robot code to the Open Duck's two daemons, `docs/safety.md`
+  had five rows in the table that answers "what stops this body when quackd goes quiet",
+  `docs/faq.md` listed five adapters, and the README said five in four more places while
+  saying eight in a fifth. The architecture pages also still said quackd hosts a control loop
+  on one body when it now does on two, and in very different ways.
+
 - **The API version quackd was written against had moved on.** `upstream_api.py` was the one
   adapter ADR-0022 let cite `main` instead of a commit hash, and in the week after it was
   read upstream went from `API_VERSION` 16 to 23. The handshake refuses on mismatch rather

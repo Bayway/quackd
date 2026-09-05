@@ -71,6 +71,23 @@ HEARTBEAT_HZ = 5.0
 notice that the daemon stopped answering, so it runs an order of magnitude slower."""
 STALE_LIMIT_MS = 1000.0
 
+
+def _limits(envelope: dict[str, float] | None = None) -> dict[str, float]:
+    """The velocity envelope, from the checkpoint that is loaded where there is one.
+
+    `limits` may only ever narrow relative to the schema, so a checkpoint trained
+    wider than quackd's own caps is clamped to them rather than believed. With no
+    daemon to ask, these are the walk gin file's numbers at the pin, which are what
+    upstream trained its own checkpoint on and no promise about anybody else's."""
+    e = envelope or {}
+    return {
+        "max_vx": min(float(e.get("max_vx", MAX_VX)), MAX_VX),
+        "max_vy": min(float(e.get("max_vy", MAX_VY)), MAX_VY),
+        "max_wz": min(float(e.get("max_wz", MAX_WZ)), MAX_WZ),
+        "control_hz": CONTROL_HZ,
+    }
+
+
 BLURB = (
     "a small open source humanoid about 56 cm tall, with two arms, two legs, a two joint "
     "neck and thirty servos, which cannot get up by itself if it falls"
@@ -93,6 +110,8 @@ def toddlerbot_manifest(
     robot: str = DEFAULT_ROBOT,
     deadman: bool = False,
     motors: int = 30,
+    motions: tuple[str, ...] = MOTIONS,
+    envelope: dict[str, float] | None = None,
 ) -> RobotManifest:
     """The robot as data. Every flag is what the daemon reported, not what a config claimed."""
     own = toddlerbot_verbs(neck=neck, gripper=gripper)
@@ -162,18 +181,13 @@ def toddlerbot_manifest(
                 "nothing else. Orientation comes from an IMU quaternion, scalar first."
             ),
         ),
-        limits={
-            "max_vx": MAX_VX,
-            "max_vy": MAX_VY,
-            "max_wz": MAX_WZ,
-            "control_hz": CONTROL_HZ,
-        },
+        limits=_limits(envelope),
         backend=backend,
         blurb=BLURB,
         extras={
             "robot": robot,
             "motors": motors,
-            "motions": list(MOTIONS),
+            "motions": list(motions),
             "walk_policy": walk,
             "neck": neck,
             "gripper": gripper,
@@ -222,6 +236,8 @@ class ToddlerBotAdapter:
             robot=str(getattr(self.transport, "robot_name", DEFAULT_ROBOT)),
             deadman=bool(getattr(self.transport, "deadman", False)),
             motors=int(getattr(self.transport, "motors", 30)),
+            motions=tuple(getattr(self.transport, "motions", ()) or MOTIONS),
+            envelope=getattr(self.transport, "walk_envelope", None),
         )
         return self.manifest
 

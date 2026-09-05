@@ -59,5 +59,36 @@ This project builds on, interoperates with, and is grateful to:
     own robot from upstream. Method and constant names are cited as facts.
     https://github.com/apirrone/Open_Duck_Mini_Runtime
 
-No Pollen Robotics or Open Duck Mini logos, meshes, CAD, ONNX policies,
-sounds, videos, or other brand assets are distributed with quackd.
+  * XLeRobot (Vector-Wangel/XLeRobot) - the open source dual-arm mobile
+    manipulator the xlerobot adapter targets. Apache-2.0. quackd speaks its
+    ZeroMQ host protocol and imports none of it: upstream is not an
+    installable package. Nothing vendored, no kinematics copied, no CAD and
+    no meshes distributed. Names, ports and wire keys are cited as facts.
+    https://github.com/Vector-Wangel/XLeRobot
+
+  * AlohaMini (liyiteng/AlohaMini) and its driver fork
+    (liyiteng/lerobot_alohamini) - the bimanual robot on a lift the alohamini
+    adapter targets. Apache-2.0; the fork's driver files additionally carry
+    HuggingFace copyright headers, as a fork of huggingface/lerobot.
+    quackd speaks its ZeroMQ host protocol and imports none of it: the fork
+    is unpublished and calls itself `lerobot`. The host wrapper quackd ships
+    in bridge/alohamini/ wraps upstream's own host at runtime on your robot
+    and vendors no upstream code. URDF and BOM are referenced, never
+    distributed.
+    https://github.com/liyiteng/AlohaMini
+
+  * ToddlerBot (hshi74/toddlerbot) - the open source humanoid the toddlerbot
+    adapter targets. Its code is MIT. **Its design files, including
+    everything under descriptions/ (STL and MJCF), are CC BY-NC-SA 4.0 and
+    therefore non-commercial: quackd distributes none of it.** No keyframes,
+    no checkpoints, no meshes and no calibration are included. The daemon
+    quackd ships in bridge/toddlerbot/ runs on your robot inside upstream's
+    own environment, imports upstream there, and vendors nothing. Method,
+    file and config names are cited as facts.
+    https://github.com/hshi74/toddlerbot
+
+No logos, meshes, CAD, ONNX policies, keyframes, checkpoints, sounds,
+videos, or other brand assets from any of these projects are distributed
+with quackd. Where an upstream's design files are non-commercially
+licensed, as ToddlerBot's and microduck_rl's are, quackd includes none of
+them at all.

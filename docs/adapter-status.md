@@ -26,11 +26,11 @@ it). A test proves UNVERIFIED names are only reachable from the experimental bac
 | XLeRobot | `xlerobot:mock` | ✅ | | [adapters/xlerobot.md](adapters/xlerobot.md) |
 | | `xlerobot:zmq` | 🧪 the whole wire format VERIFIED at a pinned commit, the client exercised against a fake host quackd wrote from that source over loopback, never run on a cart | [`quackd/adapters/xlerobot/upstream_api.py`](../quackd/adapters/xlerobot/upstream_api.py) | |
 | AlohaMini | `alohamini:mock` | ✅ | | [adapters/alohamini.md](adapters/alohamini.md) |
-| | `alohamini:sim2d` | ✅ runs a whole task offline and every verb through an executor, but no seeded acceptance sweep yet, so it does not claim the simulator row the ducks above earned | | |
-| ToddlerBot | `toddlerbot:mock` | ✅ | | [adapters/toddlerbot.md](adapters/toddlerbot.md) |
-| | `toddlerbot:sim2d` | ✅ runs a whole task offline and every verb through an executor, but no seeded acceptance sweep yet | | |
-| | `toddlerbot:bridge` | 🧪 every upstream name VERIFIED at the commit the v2.0.0 tag points at, the protocol and the daemon's own safety machinery exercised against a fake body over loopback, never run on a robot | [`quackd/adapters/toddlerbot/upstream_api.py`](../quackd/adapters/toddlerbot/upstream_api.py) | |
+| | `alohamini:sim2d` | ✅ `alohamini-lookout` 10 of 10 seeds | | |
 | | `alohamini:zmq` | 🧪 the whole wire format VERIFIED at a pinned commit, the client exercised against a fake host quackd wrote from that source over loopback, never run on a robot. The arm verbs additionally need quackd's own host wrapper, which nobody has run either | [`quackd/adapters/alohamini/upstream_api.py`](../quackd/adapters/alohamini/upstream_api.py) | |
+| ToddlerBot | `toddlerbot:mock` | ✅ | | [adapters/toddlerbot.md](adapters/toddlerbot.md) |
+| | `toddlerbot:sim2d` | ✅ `toddlerbot-lookout` 10 of 10 seeds | | |
+| | `toddlerbot:bridge` | 🧪 every upstream name VERIFIED at the commit the v2.0.0 tag points at, the protocol and the daemon's own safety machinery exercised against a fake body over loopback, never run on a robot | [`quackd/adapters/toddlerbot/upstream_api.py`](../quackd/adapters/toddlerbot/upstream_api.py) | |
 
 **Flocks** (`--flock`, `flock.roles`) run N in-process views of one simulated world on
 one lockstep clock. The MQTT bus implements the same `Bus` protocol and was exercised
