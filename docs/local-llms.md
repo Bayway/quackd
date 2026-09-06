@@ -103,11 +103,13 @@ servers reject image parts. The text observation already carries what the camera
   | transcript | seed | outcome | steps | LLM calls | tokens in + out | text fallbacks | what it shows |
   |---|---|---|---|---|---|---|---|
   | [`…seed6-memory-read.jsonl`](assets/transcripts/qwen2.5-coder-14b-lmstudio-find-and-kick-seed6-memory-read.jsonl) | 6 | success | 8 | 9 | 29,403 + 244 | 0 | the system prompt carries the previous run's episode under *What you remember*; the model never calls `remember`; two kicks fall short before the third connects |
-  | [`…seed5-remember.jsonl`](assets/transcripts/qwen2.5-coder-14b-lmstudio-find-and-kick-seed5-remember.jsonl) | 5 | success | 4 | 6 | 17,939 + 265 | 0 | the `.duck` body now says `remember` in strategy step 5; the model calls it with a fact from the verb results, then bundles `quack` and `declare_success` in the same turn (the loop keeps the first, marks `multiple_tool_calls`) |
+  | [`…seed5-remember.jsonl`](assets/transcripts/qwen2.5-coder-14b-lmstudio-find-and-kick-seed5-remember.jsonl) | 5 | success | 4 | 6 | 17,939 + 265 | 0 | the `.duck` body now says `remember` in strategy step 5; after the kick the model returns `remember`, `quack` and `declare_success` in one response, the loop keeps the first (a fact from the verb results) and marks `multiple_tool_calls`, and the other two arrive one per turn after |
 
-  Every turn was a native tool call, none needed the JSON text fallback, and the whole
-  runs took 14 s and 11 s of wall clock. What they cannot show: anything about another
-  model, another machine, or a harder task than the starter duck. If you run one, please
+  Every turn was a native tool call, none needed the JSON text fallback. The simulator
+  clock (`elapsed_s` in `run_end`, which is what the budget counts on `sim2d`) says 14 s and
+  11 s; the transcript timestamps say 33 s and 29 s of wall clock, three to nine seconds per
+  LLM call. What they cannot show: anything about another model, another machine, or a
+  harder task than the starter duck. If you run one, please
   share the transcript in a Discussion or a PR into that folder: it is the cheapest way
   to make this section shorter.
 - The cloud providers keep their stricter settings (`tool_choice="required"`,

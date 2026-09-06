@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Local model evidence
-
-- Two transcripts of `find-and-kick` piloted by **Qwen 2.5 Coder 14B on LM Studio**, seeds
-  5 and 6, land in `docs/assets/transcripts/` with a table reading them in
-  `docs/local-llms.md`, from the contributor whose memory feature they were recorded for.
-  The README and `local-llms.md` no longer say "no transcript in this repository".
-
 Two hardware paths, each audited against upstream rather than against itself. Still nothing
 has run on a robot; what changed is that several things which could not have worked now can,
 and several claims that were not true no longer are.
@@ -138,6 +131,13 @@ that is wrong fails as a confident "not fallen".
   assumes the duck is borrowed: nothing in it installs anything or needs `sudo`.
 - CI runs on Windows. `robotd` speaks over a unix socket, Windows cannot open one, and the test
   covering quackd's `ssh -L` answer only runs there — so it had never run anywhere.
+
+### Local model evidence
+
+- Two transcripts of `find-and-kick` piloted by **Qwen 2.5 Coder 14B on LM Studio**, seeds
+  5 and 6, land in `docs/assets/transcripts/` with a table reading them in
+  `docs/local-llms.md`, from the contributor whose memory feature they were recorded for.
+  The README and `local-llms.md` no longer say "no transcript in this repository".
 
 ## [0.6.0] — 2026-09-04
 
