@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Local model evidence
+
+- Two transcripts of `find-and-kick` piloted by **Qwen 2.5 Coder 14B on LM Studio**, seeds
+  5 and 6, land in `docs/assets/transcripts/` with a table reading them in
+  `docs/local-llms.md`, from the contributor whose memory feature they were recorded for.
+  The README and `local-llms.md` no longer say "no transcript in this repository".
+
 Two hardware paths, each audited against upstream rather than against itself. Still nothing
 has run on a robot; what changed is that several things which could not have worked now can,
 and several claims that were not true no longer are.
