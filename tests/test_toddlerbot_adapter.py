@@ -325,10 +325,13 @@ async def test_the_camera_composites_run_through_the_executor() -> None:
     scanned = await ex.run_verb("search_scan", {"target": "ball", "max_steps": 4})
     assert scanned.ok, scanned.summary
 
+    before = mock.ball_relative()
+    assert before is not None
     went = await ex.run_verb("go_to", {"target": "ball", "stop_distance": 0.4})
     assert went.ok, went.summary
     rel = mock.ball_relative()
-    assert rel is not None and rel[0] < 1.3, "it actually closed the distance"
+    # Against where it started, not against a constant above the starting distance.
+    assert rel is not None and rel[0] < before[0] - 0.2, "it actually closed the distance"
 
 
 async def test_approach_and_runs_its_then_verb_through_the_executor() -> None:
@@ -469,21 +472,26 @@ async def test_search_scan_sweeps_the_head_and_never_turns_the_body() -> None:
     own implementation, and the manifest's own comment claims exactly this."""
     from quackd.verbs.core import scan_mode
 
-    adapter = ToddlerBotAdapter(ToddlerBotMock(walk=True))
+    # The ball starts BEHIND the robot, outside the camera's field of view. With it in view
+    # the verb succeeds on the first frame without sweeping anything, and this guard passes
+    # just as happily with the override reverted.
+    adapter = ToddlerBotAdapter(ToddlerBotMock(walk=True, ball_xy=(-1.2, 0.4)))
     manifest = await adapter.connect()
     mock = adapter.transport
     assert isinstance(mock, ToddlerBotMock)
     assert manifest.provides("search_scan")
+    assert mock.ball_relative() is not None
+    assert abs(mock.ball_relative()[1]) > 90.0, "the ball really is out of view to start"
     # the shared rule would turn the body here, which is the whole reason for the override
     assert scan_mode(manifest) == "turn"
 
     ex = _executor(adapter, manifest)
     start_theta = mock.theta
-    result = await ex.run_verb("search_scan", {"target": "ball", "max_steps": 4})
-    assert result.ok, result.summary
+    await ex.run_verb("search_scan", {"target": "ball", "max_steps": 6})
+    # Whether it finds a ball behind it is not the point; not turning the body is.
     assert mock.theta == pytest.approx(start_theta), "it never turned the body"
     assert not mock.intents_of("move"), "and never asked to walk"
-    assert mock.intents_of("look"), "it swept the head instead"
+    assert len(mock.intents_of("look")) > 1, "it swept the head instead"
 
 
 async def test_the_confirm_gated_verbs_are_actually_gated() -> None:

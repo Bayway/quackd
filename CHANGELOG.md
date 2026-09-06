@@ -128,7 +128,7 @@ no longer are.
 
 ### Fixed
 
-- **The ToddlerBot daemon stopped claiming three things it could not do.** An audit of the
+- **The ToddlerBot daemon stopped claiming four things it could not do.** An audit of the
   three new adapters against their own plan found the same shape of bug three times, and it
   is the shape this project exists to prevent: a capability flag the operator sets, a
   manifest that promises verbs because of it, and a daemon with no implementation behind it.
@@ -138,10 +138,12 @@ no longer are.
   `--walk` declared locomotion and returned `accepted: True` for every command while the
   policy attribute it consulted was never assigned, so the robot would have stood still and
   reported success. And `perform` refused every motion because the keyframe library was
-  initialised empty and never filled. All three are now loaded for real, and **the handshake
-  reports what actually loaded rather than what was asked for**: a camera that will not open
-  means the camera verbs never appear, and a walk checkpoint is a file you supply rather than
-  a claim you make.
+  initialised empty and never filled. A later pass found a fourth of the same shape: `grip`
+  answered accepted and commanded nothing at all, on a capability read from the command line
+  rather than from the body. All four are now real, and **the handshake reports what actually
+  loaded rather than what was asked for**: a camera that will not open means the camera verbs
+  never appear, a walk checkpoint is a file you supply rather than a claim you make, and the
+  gripper capability follows the motors.
 - **`policy.step_target()` never existed upstream.** It was quackd's invention, which is the
   exact failure ADR-0022 is written to prevent. The real interface takes the whole
   observation and the sim and answers with a pair, and it is now cited at a pinned line

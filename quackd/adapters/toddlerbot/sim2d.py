@@ -66,6 +66,12 @@ class ToddlerBotSim2D(Sim2DTransport):
             update={
                 # nothing on a ToddlerBot reports a battery to Python
                 "battery_percent": None,
+                # No pose. Neither robot has odometry, so the real backend and the mock
+                # both report None, and a simulator that knows more than the robot is a
+                # task that passes here and fails there.
+                "x": None,
+                "y": None,
+                "theta": None,
                 "extras": {
                     **extras,
                     "neck": {

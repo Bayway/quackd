@@ -225,6 +225,10 @@ class Command:
     DEADMAN = "deadman"
 
     def __init__(self, default_pose: Any) -> None:
+        #: Whether anything has actually asked for a pose yet. Until something has, the
+        #: goal is the home pose by default, and the daemon prefers to hold where the
+        #: robot really is rather than move it somewhere nobody requested.
+        self.given = False
         self.default_pose = np.array(default_pose, dtype=np.float32)
         self.mode = self.HOLD
         self.goal = np.array(default_pose, dtype=np.float32)
@@ -235,24 +239,28 @@ class Command:
         self.last_client = 0.0
 
     def hold(self, pose: Any) -> None:
+        self.given = True
         self.mode = self.HOLD
         self.goal = np.array(pose, dtype=np.float32)
         self.motion = None
         self.frames = []
 
     def stand(self) -> None:
+        self.given = True
         self.mode = self.STAND
         self.goal = self.default_pose.copy()
         self.motion = None
         self.frames = []
 
     def play(self, name: str, frames: list[Any]) -> None:
+        self.given = True
         self.mode = self.MOTION
         self.motion = name
         self.frames = frames
         self.frame_index = 0
 
     def drive(self, walk_x: float, walk_y: float, walk_turn: float) -> None:
+        self.given = True
         self.mode = self.WALK
         # all three keys or none: the walk policy indexes them unconditionally
         self.walk = {"walk_x": walk_x, "walk_y": walk_y, "walk_turn": walk_turn}
@@ -260,6 +268,7 @@ class Command:
     def trip(self, pose: Any) -> None:
         """The deadman. It is a trajectory, not a message: silence on this body means hold
         forever, and neither holding a bad target nor going limp is safe."""
+        self.given = True
         self.mode = self.DEADMAN
         self.goal = np.array(pose, dtype=np.float32)
         self.motion = None
@@ -347,6 +356,10 @@ class Daemon:
         self.command = Command(default)
         self.command.last_client = time.monotonic()
         self.target = default.copy()
+        #: Whether the first real reading has arrived. Until it has, `target` is a guess
+        #: (the home pose), and writing a guess to a servo bus is a full-scale jump from
+        #: wherever the robot actually is. Nothing is commanded before this is true.
+        self.seeded = False
         if fake:
             # So --fake exercises perform end to end. On a robot these frames come from
             # upstream's keyframe files and nothing here is synthesised.
@@ -417,6 +430,20 @@ class Daemon:
             if obs is not None:
                 self.last_obs = obs
                 self.dropped = 0
+                if not self.seeded:
+                    # Start from where the robot IS. Upstream's own policies do the same:
+                    # they take the measured pose as init_motor_pos and interpolate to home
+                    # from there, rather than commanding home outright.
+                    self.seeded = True
+                    here = np.asarray(self.safe.pose, dtype=np.float32).copy()
+                    self.target = here
+                    if not self.command.given:
+                        # Nothing has asked for anything yet, so hold where the robot is
+                        # rather than moving it to a pose nobody requested. A command that
+                        # arrived before the first reading is honoured as given.
+                        self.command.hold(here)
+                        self.command.given = False
+                    log.info("seeded from the first reading at %s", np.round(here, 3)[:4])
             else:
                 # Keep the last good reading rather than dropping to None. A single dropped
                 # packet is routine on this bus, and cancelling a gait mid-stride because of
@@ -428,9 +455,15 @@ class Daemon:
                 if not self.deadman_tripped:
                     log.warning("quackd went quiet; slewing to the safe pose and holding")
                     self.deadman_tripped = True
+                    # The safe pose is the whole body, including the head and the hands.
+                    self.neck_goal = None
+                    self.grip_goal.clear()
                     self.command.trip(self.command.default_pose)
             else:
                 self.deadman_tripped = False
+            if not self.seeded:
+                # No reading yet, so no idea where the robot is, so nothing is commanded.
+                return self.target
             wanted = self.plan(dt)
             wanted = self._with_neck(wanted)
             if not np.all(np.isfinite(wanted)):
@@ -465,6 +498,16 @@ class Daemon:
         for index, value in self.grip_goal.items():
             out[index] = value
         return out
+
+    def release_grip(self) -> None:
+        """Stop holding the gripper goal.
+
+        `grip_goal` overlays every tick, so without this a closed gripper is held against
+        its hard joint limit for the life of the process: through `stand`, through a
+        motion, through the deadman's slew and through `settle()`, which could then never
+        report the safe pose reached because the overlay keeps putting the gripper back."""
+        with self.lock:
+            self.grip_goal.clear()
 
     def set_grip(self, side: str, close: bool) -> list[str]:
         """Command the gripper motors, and say which ones moved.
@@ -549,11 +592,23 @@ class Daemon:
         Nothing upstream does this: its own shutdown disables torque with no lowering and no
         ramp, which on a standing humanoid is a fall."""
         log.info("settling to the safe pose before shutdown")
+        # The overlays are goals quackd asked for, and the safe pose is the whole body.
+        self.release_grip()
         with self.lock:
+            self.neck_goal = None
             self.command.trip(self.command.default_pose)
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            self.tick()
+            try:
+                self.tick()
+            except Exception:
+                # `tick()` swallows a bad read; a bad WRITE still propagates. Letting it out
+                # of here would abandon the slew halfway and go straight to close(), which is
+                # the torque-off this whole method exists to get in front of. Keep trying: the
+                # deadline is what ends this, not the first fault.
+                log.exception("a tick failed while settling; continuing to the deadline")
+                time.sleep(CONTROL_DT)
+                continue
             with self.lock:
                 if float(np.max(np.abs(self.command.default_pose - self.target))) < 1e-2:
                     log.info("settled")
@@ -604,12 +659,16 @@ class Daemon:
                 "joints": {
                     k: round(float(v), 3) for k, v in zip(self.order, self.target, strict=True)
                 },
+                # By name, exactly as `aim_neck` commands them. Reporting by list position
+                # while commanding by name means a robot whose motors are ordered
+                # pitch-then-yaw reports the two swapped, and `search_scan` centres its sweep
+                # on this number.
                 "neck": {
-                    "yaw_deg": round(math.degrees(float(self.target[self.neck[0]])), 1)
-                    if self.neck
+                    "yaw_deg": round(math.degrees(float(self.target[self.neck_yaw])), 1)
+                    if self.neck_yaw is not None
                     else 0.0,
-                    "pitch_deg": round(math.degrees(float(self.target[self.neck[1]])), 1)
-                    if len(self.neck) > 1
+                    "pitch_deg": round(math.degrees(float(self.target[self.neck_pitch])), 1)
+                    if self.neck_pitch is not None
                     else 0.0,
                 },
                 "holding": {},
@@ -815,7 +874,10 @@ class FakeSim:
 
     def __init__(self, robot: FakeRobot) -> None:
         self.robot = robot
-        self.pos = np.zeros(robot.nu, dtype=np.float32)
+        # Not exactly zeros. All-zeros is the sentinel a dropped packet returns on this bus,
+        # so the detector refuses it, and a fake that starts there is a fake the daemon can
+        # never seed itself from. A real robot is never at exactly zero either.
+        self.pos = np.full(robot.nu, 0.01, dtype=np.float32)
         self.writes = 0
         self.closed = False
         self.drop_next = False

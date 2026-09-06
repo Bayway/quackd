@@ -159,8 +159,10 @@ with quackd's real client over a real socket.
 
 It is deliberately not part of `ci`. The main suite has to stay installable on Windows with
 nothing but quackd's own dependencies, and this needs MuJoCo, jax, OpenCV and a 30-motor
-model. It is also `continue-on-error`, because what it watches for is upstream drift rather
-than a regression here.
+model. It runs on a schedule and on demand, so it gates no pull request and blocks no
+release by construction, and it is deliberately **not** `continue-on-error`: a red run should
+look red. What it watches for is upstream drift rather than a regression here, so a failure
+means go and look, not stop the release.
 
 Two things the plan for this adapter got wrong, corrected by reading the source. There is no
 need for `MUJOCO_GL=osmesa` or `xvfb`: the headless path builds neither a viewer nor a
@@ -253,7 +255,10 @@ is strictly more than the fake body could prove and strictly less than a robot.
 
 ## How to help
 
-If you have built a ToddlerBot, **put it on its safety stand first**. Then run quackd's daemon,
+If you have built a ToddlerBot, **put it on its safety stand first**, and work through
+[toddlerbot-hardware-checklist.md](../toddlerbot-hardware-checklist.md) in order: it is
+written so that each step can only fail in a way you can recover from, and it keeps the
+feet off the ground until step 13. Then run quackd's daemon,
 point `toddlerbot-lookout` at it, and say what happened: that task's allowlist moves no leg, no
 arm and no waist. What most needs a real robot: whether the safe-pose slew is actually safe
 from a crawl, what tilt angle really means fallen, whether the neck axes are what the motor

@@ -1,7 +1,7 @@
 # ToddlerBot: the order to try it in
 
 Nothing in quackd has run on a ToddlerBot. This is the order to find out in, written so that
-each step can only fail in a way you can recover from. **Feet off the ground until step 9.**
+each step can only fail in a way you can recover from. **Feet off the ground until step 13.**
 
 This robot is not a duck. It weighs about 3 kg, it cannot get up if it falls, and upstream's
 own shutdown path disables torque with no lowering and no ramp. Read

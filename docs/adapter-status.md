@@ -135,7 +135,7 @@ Neither route has been run against a Microduck.
 ## How to help
 
 **Built an Open Duck Mini v2?** That is the row most likely to flip this year, because it
-is the only body here you can build from scratch and the only one whose robot side quackd
+is one of three bodies here you can build from scratch, and one of three whose robot side quackd
 ships and already exercises. [open-duck-hardware-checklist.md](open-duck-hardware-checklist.md)
 is the order to try it in, and there is an issue template waiting for the result.
 

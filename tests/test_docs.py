@@ -335,8 +335,15 @@ def test_the_architecture_diagram_names_every_adapter() -> None:
 
     node = next((line for line in README.splitlines() if 'ADAPTER["robot adapter' in line), None)
     assert node is not None, "the architecture diagram's adapter node has moved or gone"
-    missing = [name for name in ADAPTER_NAMES if name not in node]
-    assert not missing, f"the architecture diagram does not name: {missing}"
+
+    # The names as a SET, split on the separator, not as substrings. `"lerobot" in node` is
+    # satisfied by the `xlerobot` entry, so a substring check cannot see `lerobot` go missing,
+    # which is the one adapter whose name is contained in another's.
+    listed = {n.strip() for n in node.split("<br/>")[1].split("·")}
+    missing = [name for name in ADAPTER_NAMES if name not in listed]
+    assert not missing, f"the architecture diagram does not name: {missing} (has {listed})"
+    extra = [name for name in listed if name and name not in ADAPTER_NAMES]
+    assert not extra, f"the architecture diagram names adapters that do not exist: {extra}"
 
     #: Backends are listed by their bare name in that node, so every distinct one must appear.
     kinds = {backend for backends in BACKENDS.values() for backend in backends}
@@ -409,3 +416,8 @@ def test_the_readme_verb_table_has_a_row_per_body_listing_its_real_verbs() -> No
         cell = row.split("|")[2]
         missing = [v for v in own if f"`{v}`" not in cell]
         assert not missing, f"the {adapter} row does not list its own verbs: {missing}"
+        # And the other direction, which is the drift that happens when a verb is deleted from
+        # an adapter and nobody remembers the README.
+        listed = {chunk.strip() for chunk in cell.split("`") if chunk.strip()}
+        gone = [v for v in listed if v not in own and v not in _CORE_VERBS]
+        assert not gone, f"the {adapter} row lists verbs the robot no longer has: {gone}"

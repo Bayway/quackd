@@ -1,6 +1,6 @@
 # The quackd daemons for an Open Duck Mini v2
 
-This directory is the only part of quackd that runs on a robot. It is not a Python package,
+This directory was the first part of quackd to run on a robot, and there are now three: `bridge/alohamini/` wraps that robot's own host, and `bridge/toddlerbot/` runs a humanoid's whole control loop. It is not a Python package,
 it is never imported by quackd, and the bridge needs nothing but the standard library and
 numpy, which your duck's Pi already has.
 

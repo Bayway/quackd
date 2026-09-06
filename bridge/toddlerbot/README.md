@@ -107,9 +107,9 @@ however that particular robot was assembled. Run upstream's `calibrate_zero` fir
 ## Safety
 
 Read `docs/toddlerbot-hardware-checklist.md` before the first bring-up and follow its order.
-It puts the robot on a stand with its feet off the ground until the last two steps, and the
-last two steps are the ones that matter: pull the network cable mid-move and confirm the
-deadman slews rather than drops, then send `SIGTERM` and confirm the same.
+It keeps the feet off the ground until step 13, and the two steps that matter most are 11 and
+12, both taken on the stand: pull the network cable mid-move and confirm the deadman slews
+rather than drops, then send `SIGTERM` and confirm the same.
 
 This robot cannot get up by itself. There is no get-up policy for this body at this pin, so a
 fall ends the run and needs a human. Ask for less than you think.

@@ -116,12 +116,13 @@ torqued holding its last target instead.
   socket, on every CI platform, including the deadman, the settle, the clamp, the rate limit,
   the all-zeros detector and the controller-fault path. "The machinery works" is a fact; "the
   robot stood up" stays a claim nobody has earned, and the `bridge` row is 🧪.
-- quackd now has a second on-robot artifact, with its own version and its own way to be out of
+- quackd now has a third on-robot artifact (after the Open Duck Mini's pair of daemons and
+  the AlohaMini's host wrapper), with its own version and its own way to be out of
   date relative to the laptop, so the handshake carries both and refuses a mismatch.
 - `search_scan` sweeps the head here rather than turning the body, which is the opposite of the
   Open Duck's choice and for the same reason in reverse: turning a humanoid with no fall
   recovery to look around is not the first thing to reach for.
 - Flock mode does not know this robot, and extending it stays out of scope.
-- Five unknowns remain and are named in `upstream_api.py` as UNVERIFIED, the largest being
+- Eight unknowns remain and are named in `upstream_api.py` as UNVERIFIED, the largest being
   whether the safe pose is safe to slew to from a crawling or prone start. Only a robot on a
   stand retires that one.

@@ -83,6 +83,12 @@ class AlohaMiniSim2D(Sim2DTransport):
             update={
                 # nothing on this robot reports a battery
                 "battery_percent": None,
+                # No pose. Neither robot has odometry, so the real backend and the mock
+                # both report None, and a simulator that knows more than the robot is a
+                # task that passes here and fails there.
+                "x": None,
+                "y": None,
+                "theta": None,
                 "posture": "unknown",
                 "holding": any(self.holding.values()),
                 "extras": {

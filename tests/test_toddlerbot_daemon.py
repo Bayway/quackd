@@ -107,9 +107,13 @@ def test_no_joint_may_move_far_in_one_tick() -> None:
 
 def test_the_daemon_clamps_and_rate_limits_every_tick() -> None:
     d = _daemon()
+    d.tick()  # the first reading seeds the target; the step is measured from there
     d.command.hold(np.ones(d.robot.nu, np.float32) * 50.0)
+    was = float(np.max(d.target))
     d.tick()
-    assert float(np.max(d.target)) == pytest.approx(D.MAX_STEP_RAD)
+    # the STEP is what is limited, not the absolute value: the daemon seeds its target from
+    # the first reading, so it starts wherever the robot was rather than at zero
+    assert float(np.max(d.target)) - was == pytest.approx(D.MAX_STEP_RAD)
     _ticks(d, 500)
     assert float(np.max(d.target)) <= 2.0, "the joint limit holds however long it is pushed"
 
@@ -144,13 +148,31 @@ def test_a_controller_fault_is_survived_rather_than_raised() -> None:
     """A per-controller fault arrives as a bare KeyError because the C++ swallows it and
     inserts an empty map. It is a hardware fault, not a transient."""
     d = _daemon()
+    d.tick()  # one good reading first, so there IS a last good pose to keep commanding
+    before = d.sim.writes
 
     def explode() -> None:
         raise KeyError("pos")
 
     d.sim.get_observation = explode  # type: ignore[method-assign]
     d.tick()  # must not raise
-    assert d.sim.writes >= 1, "the loop kept commanding the last good pose"
+    assert d.sim.writes > before, "the loop kept commanding the last good pose"
+
+
+def test_a_daemon_that_has_never_read_the_robot_commands_nothing() -> None:
+    """The other half of the same rule. Before the first reading arrives the target is a
+    guess, and writing a guess to a servo bus is a full-scale jump from wherever the robot
+    actually is."""
+    d = _daemon()
+
+    def explode() -> None:
+        raise KeyError("pos")
+
+    d.sim.get_observation = explode  # type: ignore[method-assign]
+    for _ in range(10):
+        d.tick()
+    assert not d.seeded
+    assert d.sim.writes == 0, "nothing was commanded before the robot was ever read"
 
 
 # ── 3. the safe pose, because no reset exists anywhere upstream ────────────────────────
@@ -718,6 +740,7 @@ def test_a_non_finite_target_is_refused_rather_than_latched() -> None:
     carry it into `target`, where every later tick rate-limits from NaN. One bad number off
     the wire would freeze the robot's commanded pose for the life of the process."""
     d = _daemon()
+    d.tick()  # seed from the robot first, so there is a last good pose to hold
     good = d.target.copy()
     d.command.hold(np.full(d.robot.nu, np.nan, np.float32))
     d.tick()
@@ -821,7 +844,7 @@ def test_closing_a_gripper_actually_commands_the_motor() -> None:
     assert d.set_grip("both", close=True) == ["left_gripper", "right_gripper"]
 
 
-async def test_a_gripper_flag_on_a_body_with_no_grippers_is_not_a_capability() -> None:
+async def test_a_client_told_there_is_no_gripper_refuses_to_grip() -> None:
     with _Serving(gripper=False) as s:
         link = ToddlerBotBridge(address=s.address)
         await link.connect()
