@@ -20,9 +20,9 @@ version without touching the robot.
 | `sensors` | list of `camera`, `battery`, `odometry`, `imu`, `tof`, `microphone`, `joint_state` | what it can report |
 | `verbs` | list of `VerbSpec` | the vocabulary (see below) |
 | `preconditions` | verb → list of condition names | checks the executor runs before a verb; the adapter supplies the predicates by name |
-| `safety_authority` | `{native, deadman, heartbeat_hz}` | who stops the body when quackd goes quiet: `native` is `robotd_deadman`, `lease`, `torque_limit`, `estop` or `none`; `deadman` is whether motion zeroes on silence, wherever that code lives. An Open Duck Mini declares `native: none` with `deadman: true`, because the thing doing the zeroing is quackd's own daemon running on the robot |
+| `safety_authority` | `{native, deadman, heartbeat_hz}` | who stops the body when quackd goes quiet: `native` is `robotd_deadman`, `lease`, `torque_limit`, `estop` or `none`; `deadman` is whether motion zeroes on silence, wherever that code lives. An Open Duck Mini declares `native: none` with `deadman: true`, because the thing doing the zeroing is quackd's own daemon running on the robot — on the `bridge` backend, only when that daemon reported a `deadman_ms` window at connect |
 | `frame` | `{reference, note}` | `body`, `head`, `base` or `world`; what bearings are relative to |
-| `limits` | name → number | `max_vx`, `max_vy`, `max_wz`, `gaze_yaw_deg`, `gaze_pitch_deg`, `joint_deg`, ...; the core verbs clamp to them |
+| `limits` | name → number | `max_vx`, `max_vy`, `max_wz`, `gaze_yaw_deg`, `gaze_pitch_deg`, `joint_deg`, ...; the core verbs clamp to them. `camera_fov_deg` is the exception: not a clamp but the lens the detector assumes, and without it (or `--fov-deg`) a real camera falls back to the simulator's 90° and every detection is labelled uncalibrated |
 | `backend` | string | informational: which backend produced this |
 | `blurb` | string | the prompt's one-line intro: "a small biped duck robot (25 cm, 800 g)" |
 | `extras` | object | adapter-specific facts (`speech: tones`, `camera_calibrated: false`, `policy: true`) |

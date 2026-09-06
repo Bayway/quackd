@@ -108,9 +108,6 @@ Legend: ✅ done · 🔨 in progress · ⬜ todo · ⏸ blocked (with reason)
   [design](docs/design/open-duck.md)); the first quackd code that runs on a robot; four
   hardware-path blockers fixed; `--transport` and the `duck_*` tools removed as promised;
   457 tests, five seeded sweeps at 10 of 10, still offline
-- ⏸ Only a human can: run `open_duck:bridge` against a duck they built, work the checklist
-  in `docs/open-duck-hardware-checklist.md`, and confirm the deadman by pulling Wi-Fi
-  mid-walk. Flip the `bridge` row in `docs/adapter-status.md` only after
 - ✅ Tagged `v0.5.0` (annotated) and pushed `main`, GitHub Release
   `v0.5.0 "open duck"` created on `main` with the wheel and sdist attached (2026-09-03).
   A pre-release audit of the note against the code fixed a half-applied detector fix, two
@@ -187,3 +184,19 @@ Legend: ✅ done · 🔨 in progress · ⬜ todo · ⏸ blocked (with reason)
   needs a real robot: whether the safe-pose slew is safe from a crawl, what tilt really means
   fallen, whether the neck axes are what the motor names imply, and whether a calibrated zero
   survives a restart
+
+- 🔨 The Open Duck Mini v2 hardware path, audited against upstream at its pin rather than
+  against itself (`feat/open-duck-hardware-path`, 2026-09-05). A duck set up the way
+  `install.sh` instructs could not start the bridge; if it could it would have had no camera
+  verbs; and Ctrl-C would not have stopped it. Fixed in four passes — the daemon can start,
+  the operator's stop works, it stops claiming guards it lacks, and the camera is safe to
+  steer a walking biped on — plus the deferred tail. See the CHANGELOG's Unreleased section.
+  Nine of ten upstream unknowns closed by reading source at the pin; four refs promoted to
+  VERIFIED, one corrected (the head floats are offsets, not absolute joint angles)
+- ⏸ Only a human can, on an Open Duck: the five numbers at the end of
+  `docs/open-duck-hardware-checklist.md`. Boot time against the watchdog budget, camd's peak
+  memory against its cap, the observed loop-rate floor, the camera's field of view against a
+  tape measure, and the accelerometer upright versus on its side. The last one is what would
+  give this robot fall detection; quackd deliberately does not guess it, because a wrong fall
+  detector fails as a confident "not fallen". Flip the `bridge` row in
+  `docs/adapter-status.md` only after a run on a real duck

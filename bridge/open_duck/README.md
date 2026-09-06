@@ -105,20 +105,20 @@ python quackd_duck_camd.py [flags]
 |---|---|---|
 | `--bind` | `127.0.0.1` | it serves a live view of wherever your robot is, with no authentication |
 | `--port` | `9872` | |
-| `--fps` | `1.0` | it captures on a timer, so a slow client cannot stall the capture |
-| `--size` | `512` | square, matching upstream's own camera code |
+| `--fps` | `5.0` | it captures on a timer, so a slow client cannot stall the capture. 1 fps was too slow for the 10 Hz steering loop |
+| `--size` | `256` | square. Upstream's own camera code uses 512, which costs CPU this process exists to save |
 | `--rotate` | `90` | upstream rotates 90 degrees clockwise, so the module is mounted on its side |
-| `--no-swap-rb` | off | skip upstream's red and blue swap, if your frames come out wrong |
-| `--duck-config` | `~/duck_config.json` | used only to refuse when the runtime owns the camera |
+| `--no-swap-rb` | off | **almost certainly not what you want.** The default is correct: picamzero hands back RGB-ordered data and the swap turns it into what the JPEG encoder expects, matching upstream's own camera code. Setting this inverts the image, which lands an orange ball inside the *person* hue range and roughly triples its reported distance. Channel order is a property of picamera2's configuration, not of your module or how it is mounted, so point wrong-looking colours at white balance and `--rotate` |
+| `--duck-config` | `~/duck_config.json` | used only to warn when it claims the runtime owns the camera |
 | `--fake` | off | a synthetic duck's eye view with a ball on the floor |
 | `--seconds` | forever | |
 
 It serves `/snapshot.jpg` and `/healthz`, and answers nothing else. There is no control path
 in the file at all, so the camera port cannot move the robot even if you expose it.
 
-**Two processes cannot own one camera.** If `duck_config.json` says
-`expression_features.camera` is true, the robot's own runtime constructs a `Cam` and owns the
-device, and this server refuses to start. Set that flag false and let quackd serve frames.
+**Two processes cannot own one camera**, but upstream's walk loop — the script the bridge
+runs — opens none, so with `expression_features.camera` true in `duck_config.json` this
+server warns and starts anyway. Setting that flag false is still tidier.
 
 ## Try the whole thing with no robot
 
@@ -151,8 +151,6 @@ to see the difference between the description and your duck.
   The reply says `"how": "the pad's sound button"` for exactly this reason.
 - **Nothing detects a fall.** Posture reads unknown, never standing.
 - **Nothing reports a battery**, so a `battery below N%` abort can never fire.
-- **Whether head commands do anything without upstream's mode button is unverified.** quackd
-  will not press that button to find out.
 
 ## Status
 

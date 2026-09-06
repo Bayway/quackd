@@ -9,12 +9,12 @@ Thanks for taking a toy duck seriously. Two kinds of contribution matter most: *
 git clone https://github.com/rokbenko/quackd && cd quackd
 uv sync --extra dev            # add --extra anthropic etc. if you want a real provider
 uv run pre-commit install
-uv run pytest                  # the whole suite, about 80 s, no network, no keys
+uv run pytest                  # the whole suite, a few minutes, no network, no keys
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
-Windows, macOS and Linux are all first-class. Tests must never touch the network. Most of
-those seconds are the five seeded acceptance sweeps, which CI holds at 10 of 10 by setting
+Windows, macOS and Linux are all first-class. Tests must never touch the network. About a
+third of that is the five seeded acceptance sweeps, which CI holds at 10 of 10 by setting
 `QUACKD_STRICT_SEEDS=1`; locally they pass at 8 of 10 so a slow machine does not block you.
 
 Touching anything under `bridge/`? That is the code that runs on a robot, and there are
@@ -61,7 +61,7 @@ nothing in your `allow` list. Skip it for a smoke test, the way `hello-world` do
    manifest meets a requirement (a camera, a `twist` intent, a `sound` intent); add its
    `Requirement` to `REQUIREMENTS`. **Extension** = one robot's own behaviour, in that
    adapter's `verbs.py` (Microduck: `quackd/adapters/microduck/verbs.py`; it needs a
-   VERIFIED upstream method in the adapter's `upstream_api.py`). **Learned** = v2, see
+   VERIFIED upstream method in `quackd/transport/upstream_api.py`). **Learned** = v2, see
    [docs/learned-verbs.md](docs/learned-verbs.md). If the thing you are adding never
    touches the body, it is probably not a verb at all: `remember` sits next to
    `declare_success` as a *meta tool* precisely so that the rule "the vocabulary comes from

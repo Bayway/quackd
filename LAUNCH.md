@@ -56,7 +56,7 @@ mocks now, every hardware backend experimental and never run), and the ask ("add
 > head spots and judges, a duck kicks).
 >
 > Three things I'd really value from the people who built the real things:
-> 1. **Microduck socket assumptions.** I read `duck-ipc-proto` (API v16) and mapped verbs to
+> 1. **Microduck socket assumptions.** I read `duck-ipc-proto` (API v23, pinned) and mapped verbs to
 >    `robot.move` (as notifications, feeding the deadman), `robot.do{skill}`, `robot.look`,
 >    `robot.sound{tag}`, `robot.health` as the heartbeat. Everything I couldn't verify is
 >    tagged UNVERIFIED in one file — mainly: how to read posture from `robot.state.policy`,

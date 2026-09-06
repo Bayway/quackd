@@ -82,36 +82,24 @@ def test_readme_promises() -> None:
         assert hype not in README.lower(), hype
 
 
-#: The one line in the README allowed a dash, matched exactly and nowhere else: the signature
-#: on the author's own note. A signature is the one place an em dash is typographically right
-#: rather than lazy punctuation, and it is one line, so it earns an exact-match exception
-#: instead of a loosened rule. Changing the wording of that line brings the rule back.
-DASH_EXEMPT_LINES = frozenset({"> — Rok Benko, August 2026"})
+#: The one dash the README is allowed: the leading one of a blockquote attribution,
+#: `> — Name, Month Year`. That dash is the convention for signing a quote, not punctuation
+#: inside a sentence, which is what the rule below is actually about. Only the prefix is
+#: exempt. The rest of the line is held to the same standard as any other prose.
+ATTRIBUTION_PREFIX = "> — "
 
 
 def test_readme_punctuation_style() -> None:
     """House style: no semicolons and no dashes used as punctuation (em/en dash, ' - ').
 
-    Fenced code blocks are exempt (YAML lists, shell comments, JSON are what they are), and so
-    is each line in `DASH_EXEMPT_LINES`, by exact match. Semicolons have no exceptions."""
+    Fenced code blocks are exempt (YAML lists, shell comments, JSON are what they are), and
+    so is the leading dash of a blockquote attribution (see ATTRIBUTION_PREFIX)."""
     prose = re.sub(r"```.*?```", "", README, flags=re.S)
     for i, line in enumerate(prose.splitlines(), 1):
-        assert ";" not in line, f"README:{i}: semicolon"
-        if line.strip() in DASH_EXEMPT_LINES:
-            continue
+        checked = line[len(ATTRIBUTION_PREFIX) :] if line.startswith(ATTRIBUTION_PREFIX) else line
+        assert ";" not in checked, f"README:{i}: semicolon"
         for dash in ("—", "–", " - "):  # noqa: RUF001  (em dash, en dash, spaced hyphen)
-            assert dash not in line, f"README:{i}: dash punctuation {dash!r}"
-
-
-def test_the_dash_exemption_is_still_earning_its_place() -> None:
-    """An exception nobody uses is a rule with a hole in it.
-
-    If the signature is reworded or removed, this fails and the exemption comes out with it,
-    rather than sitting in the file granting a dash to a line that no longer exists."""
-    prose = re.sub(r"```.*?```", "", README, flags=re.S)
-    lines = {line.strip() for line in prose.splitlines()}
-    unused = sorted(DASH_EXEMPT_LINES - lines)
-    assert not unused, f"DASH_EXEMPT_LINES no longer matches the README: {unused}"
+            assert dash not in checked, f"README:{i}: dash punctuation {dash!r}"
 
 
 def test_readme_ends_with_license_section() -> None:

@@ -1010,7 +1010,10 @@ def load_motions(root: str, robot_name: str, robot: Any = None) -> dict[str, lis
         # than the plain ones. A 30-wide frame sent to a 32-motor robot is not a short read,
         # it is a command that means something different on every joint after the first
         # mismatch, so it is refused rather than padded.
-        wanted = int(getattr(robot, "nu", frames.shape[1]))
+        # `robot` is optional here, so fall back to the frame's own width, which makes
+        # the check a no-op rather than a crash when nobody passed a body.
+        nu = getattr(robot, "nu", None)
+        wanted = int(nu) if nu is not None else int(frames.shape[1])
         if frames.shape[1] != wanted:
             log.error(
                 "motion %r has %d motors and this robot has %d, so it is not offered",
