@@ -37,7 +37,7 @@ from quackd.cli import app
 from quackd.duckfile.parser import load_duck, parse_duck_text
 from quackd.duckfile.validate import validate_duck
 from quackd.perception.color_blob import ColorBlobDetector
-from quackd.safety import Executor, VerbNotAllowed, allow_all
+from quackd.safety import ConfirmDenied, Executor, VerbNotAllowed, allow_all
 from quackd.transport.base import Intent, TransportError
 from quackd.verbs.core import scan_mode
 from quackd.verbs.registry import VerbNotFound, registry_from_manifest
@@ -567,3 +567,33 @@ def test_list_verbs_shows_the_real_set() -> None:
     names = _verb_column(result.output)
     assert {"move", "gripper", "observe"} <= names, names
     assert not names & {"kick", "quack", "say", "gaze", "lift", "perform"}, names
+
+
+async def test_the_confirm_gated_verb_is_actually_gated() -> None:
+    """`move_joints` declares `safety_class="confirm"` and nothing verified that declaration.
+    It is the verb that moves twelve arm servos on a cart with no per-step clamp of its own,
+    so the gate is the point of it being declared at all."""
+    asked: list[str] = []
+
+    def refuse(name: str, _params: dict[str, object]) -> bool:
+        asked.append(name)
+        return False
+
+    adapter = XLerobotAdapter(XLerobotMock())
+    manifest = await adapter.connect()
+    mock = adapter.transport
+    assert isinstance(mock, XLerobotMock)
+    ex = Executor(
+        registry_from_manifest(manifest, adapter),  # type: ignore[arg-type]
+        adapter,
+        contract=None,
+        detector=ColorBlobDetector(),
+        confirm=refuse,
+    )
+    with pytest.raises(ConfirmDenied, match="move_joints"):
+        await ex.run_verb("move_joints", {"positions": {"left_arm_elbow_flex": 5.0}})
+    assert asked == ["move_joints"]
+    assert not mock.intents_of("joint"), "it never reached the robot"
+
+    assert (await ex.run_verb("report_state", {})).ok
+    assert asked == ["move_joints"], "a safe verb must not ask"

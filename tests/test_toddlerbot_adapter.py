@@ -527,3 +527,14 @@ async def test_the_confirm_gated_verbs_are_actually_gated() -> None:
     assert (await ex.run_verb("report_state", {})).ok
     assert (await ex.run_verb("observe", {})).ok
     assert asked == ["stand", "perform"], "a safe verb must not ask"
+
+
+def test_the_deadman_flag_says_what_each_backend_can_actually_do() -> None:
+    """ADR-0028 said `deadman` was true only on `:bridge`, which is exactly backwards: the
+    offline doubles emulate one, and the static `bridge` manifest cannot know whether a daemon
+    is there until it has answered the handshake."""
+    assert describe("mock").safety_authority.deadman is True
+    assert describe("sim2d").safety_authority.deadman is True
+    assert describe("bridge").safety_authority.deadman is False, "nothing has answered yet"
+    # and connecting is what turns it true
+    assert toddlerbot_manifest("bridge", deadman=True).safety_authority.deadman is True

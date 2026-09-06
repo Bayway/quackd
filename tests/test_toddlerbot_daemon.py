@@ -920,3 +920,28 @@ def test_a_keyframe_that_can_never_be_reached_does_not_stall_the_motion_forever(
     d.command.play("kneel", [impossible])
     _ticks(d, D.FRAME_DWELL_LIMIT + 5)
     assert d.command.frame_index >= 1, "it gave up on the frame rather than dwelling forever"
+
+
+async def test_a_checkpoint_that_cannot_move_the_robot_is_not_locomotion() -> None:
+    """`limits` may only narrow, so an envelope of zero clamps every velocity to nothing.
+    Offering `move` on top of that is a verb that accepts every command and moves nothing,
+    which is the same empty claim a missing checkpoint would make."""
+    with _Serving(walk=True, envelope={"max_vx": 0.0, "max_vy": 0.0, "max_wz": 0.0}) as s:
+        adapter = ToddlerBotAdapter(ToddlerBotBridge(address=s.address))
+        manifest = await adapter.connect()
+        assert manifest.mobility == "none"
+        for verb in ("move", "go_to", "approach_and"):
+            assert not manifest.provides(verb), verb
+        await adapter.transport.close()
+
+
+async def test_an_envelope_with_one_usable_axis_is_still_locomotion() -> None:
+    """Forward only is a real robot. Only a checkpoint with nothing left on any axis is not."""
+    with _Serving(walk=True, envelope={"max_vx": 0.12, "max_vy": 0.0, "max_wz": 0.0}) as s:
+        adapter = ToddlerBotAdapter(ToddlerBotBridge(address=s.address))
+        manifest = await adapter.connect()
+        assert manifest.mobility == "legged"
+        assert manifest.provides("move")
+        assert manifest.limits["max_vx"] == pytest.approx(0.12)
+        assert manifest.limits["max_vy"] == pytest.approx(0.0)
+        await adapter.transport.close()

@@ -128,6 +128,31 @@ no longer are.
 
 ### Fixed
 
+- **The ToddlerBot's `search_scan` sweeps its head rather than turning its body.** `scan_mode`
+  turns any robot with mobility and the twist intent, which is right for a duck and wrong for
+  a humanoid with no get-up policy: with a walk checkpoint staged the shared verb would have
+  pirouetted 3 kg of fall-prone robot to look for a ball. quackd supplies its own for this
+  body, and it waits for the neck to arrive before taking the frame, because the daemon rate
+  limits every joint and the shared sweep looks after a tenth of a second.
+- **The transport keeps the link alive, so a long verb is not cancelled by its own deadman.**
+  The daemon's deadman fires after half a second of silence and `stand` takes three, and the
+  executor sends one command and then only polls while it waits. quackd's own `Heartbeat`
+  cannot be that signal, because its period is a run setting rather than the manifest's and
+  defaults to the same half second. The ToddlerBot transport now sends `bot.keepalive` on its
+  own timer, and reading state or a frame deliberately does not count as being alive.
+- **Every ToddlerBot disconnect used to stall for the full request timeout.** `close()`
+  cancelled the read loop and then asked for a final stop, which waits on a future only that
+  read loop could resolve.
+- **A walk checkpoint that cannot move the robot is no longer offered as locomotion.** An
+  envelope of zero on every axis clamps every velocity to nothing, so `move`, `go_to` and
+  `approach_and` would have accepted every command and moved nothing.
+- **The mocks and the simulators stopped reporting a pose their robots do not have.** Neither
+  ZeroMQ wire carries a position, so the real backends report None and the offline doubles
+  were dead-reckoning one. A double that is easier than the robot is a task that passes here
+  and fails there.
+- **The ToddlerBot daemon moved to port 9873.** The Open Duck Mini already had 9871 for its
+  bridge and 9872 for its camera daemon, and `SECURITY.md` tells people to tunnel that pair.
+
 - **The ToddlerBot daemon stopped claiming four things it could not do.** An audit of the
   three new adapters against their own plan found the same shape of bug three times, and it
   is the shape this project exists to prevent: a capability flag the operator sets, a

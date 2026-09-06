@@ -592,7 +592,7 @@ Measured on the simulator with the scripted pilot (no model latency): `find-and-
 
 Why a task can refuse a body, whether two robots can share a task, and more: [docs/faq.md](docs/faq.md).
 
-**Non goals for now, on purpose:** no RL training or reward generation (that is v2, and only the registry hook exists), no features that require hardware (the real robot backends ship experimental and have never run: `microduck:jsonrpc`, `reachy_mini:sdk`, `lerobot:real`, `rosbridge:ws`), and no copying of Pollen Robotics assets, ever (no logos, no 3D meshes, no videos).
+**Non goals for now, on purpose:** no RL training or reward generation (that is v2, and only the registry hook exists), no features that require hardware (all eight real robot backends ship experimental and have never run, listed in full under [Limitations](#limitations)), and no copying of Pollen Robotics assets, ever (no logos, no 3D meshes, no videos).
 
 <br>
 

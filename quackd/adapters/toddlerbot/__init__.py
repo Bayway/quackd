@@ -85,6 +85,11 @@ def _reported_motions(transport: object) -> tuple[str, ...]:
     return MOTIONS if reported is None else tuple(reported)
 
 
+def _can_actually_walk(envelope: dict[str, float]) -> bool:
+    """Whether a reported envelope leaves any axis with room to move on."""
+    return any(abs(float(envelope.get(k, 0.0))) > 1e-3 for k in ("max_vx", "max_vy", "max_wz"))
+
+
 def _limits(envelope: dict[str, float] | None = None) -> dict[str, float]:
     """The velocity envelope, from the checkpoint that is loaded where there is one.
 
@@ -127,6 +132,12 @@ def toddlerbot_manifest(
     envelope: dict[str, float] | None = None,
 ) -> RobotManifest:
     """The robot as data. Every flag is what the daemon reported, not what a config claimed."""
+    # A checkpoint whose envelope is zero on every axis is a checkpoint that cannot move
+    # the robot: `limits` would clamp every velocity to nothing while `move`, `go_to` and
+    # `approach_and` went on being offered and going on accepting. That is the same claim
+    # without a body behind it that a missing checkpoint is, so it is treated the same way.
+    if walk and envelope is not None and not _can_actually_walk(envelope):
+        walk = False
     own = toddlerbot_verbs(neck=neck, gripper=gripper, motions=motions)
     verbs = [
         verb_spec(CORE["report_state"], core=True),
@@ -186,7 +197,9 @@ def toddlerbot_manifest(
         # There is no watchdog, no timeout, no e-stop and no deadman anywhere upstream, and
         # silence on this robot means "hold the last target forever" rather than "stop". The
         # only deadman that can exist is the one quackd's own daemon runs, so `deadman` is
-        # true exactly when that daemon is the thing on the other end.
+        # true wherever something is actually running one: the offline doubles emulate
+        # it, and `:bridge` is false until the daemon has answered the handshake and
+        # said otherwise, because before that there is nothing on the other end.
         safety_authority=SafetyAuthority(native="none", deadman=deadman, heartbeat_hz=HEARTBEAT_HZ),
         frame=Frame(
             reference="body",

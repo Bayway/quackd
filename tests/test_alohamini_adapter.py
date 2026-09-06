@@ -43,7 +43,7 @@ from quackd.cli import app
 from quackd.duckfile.parser import load_duck
 from quackd.duckfile.validate import validate_duck
 from quackd.perception.color_blob import ColorBlobDetector
-from quackd.safety import Executor, VerbNotAllowed, allow_all
+from quackd.safety import ConfirmDenied, Executor, VerbNotAllowed, allow_all
 from quackd.transport.base import Intent
 from quackd.verbs.core import scan_mode
 from quackd.verbs.registry import VerbNotFound, registry_from_manifest
@@ -491,3 +491,35 @@ def test_list_verbs_shows_the_real_set() -> None:
     names = _verb_column(result.output)
     assert {"move", "lift", "gripper", "observe"} <= names, names
     assert not names & {"kick", "quack", "say", "gaze", "perform", "stand"}, names
+
+
+async def test_the_confirm_gated_verbs_are_actually_gated() -> None:
+    """`lift`, `move_joints` and `home_arms` all declare `safety_class="confirm"` and nothing
+    verified any of it. These are the verbs that drive a 600 mm motorised axis and two arms
+    whose torque quackd's own host wrapper had to switch on."""
+    asked: list[str] = []
+
+    def refuse(name: str, _params: dict[str, object]) -> bool:
+        asked.append(name)
+        return False
+
+    adapter = AlohaMiniAdapter(AlohaMiniMock())
+    manifest = await adapter.connect()
+    ex = Executor(
+        registry_from_manifest(manifest, adapter),  # type: ignore[arg-type]
+        adapter,
+        contract=None,
+        detector=ColorBlobDetector(),
+        confirm=refuse,
+    )
+    for verb, params in (
+        ("lift", {"height_mm": 200.0}),
+        ("move_joints", {"arm": "left", "positions": {"shoulder_pan": 10.0}}),
+        ("home_arms", {}),
+    ):
+        with pytest.raises(ConfirmDenied, match=verb):
+            await ex.run_verb(verb, params)
+    assert asked == ["lift", "move_joints", "home_arms"], asked
+
+    assert (await ex.run_verb("report_state", {})).ok
+    assert asked == ["lift", "move_joints", "home_arms"], "a safe verb must not ask"

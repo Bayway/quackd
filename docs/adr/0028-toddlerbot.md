@@ -56,13 +56,15 @@ torqued holding its last target instead.
   shutdown freezes every thread that might have supervised it. The daemon reaches the safe pose
   first, then arms a hard-exit timer and calls `close()`. A torqued robot and a dead process is
   worse than a clean shutdown and better than a frozen process nobody can signal.
-- **`safety_authority` is `native: none`, and `deadman` is true only on `:bridge`.**
-  There is no watchdog, no timeout, no e-stop, no reset and no current limit anywhere
-  upstream, and the motors are in multi-turn mode so the firmware's own position
-  limits are off too. The robot is therefore not a safety authority in any sense the
-  manifest can name, and `native` says so. The only deadman that can exist here is
-  the one quackd's own daemon runs, so `deadman` is true exactly when that daemon is
-  on the other end and false on `mock`. `heartbeat_hz` is 5, an order of magnitude
+- **`safety_authority` is `native: none`, and `deadman` is true wherever something is
+  actually running one.** There is no watchdog, no timeout, no e-stop, no reset and no
+  current limit anywhere upstream, and the motors are in multi-turn mode so the
+  firmware's own position limits are off too. The robot is therefore not a safety
+  authority in any sense the manifest can name, and `native` says so. The only
+  deadman that can exist is one quackd runs, and each backend answers for itself:
+  `mock` and `sim2d` emulate it and say true, and `:bridge` says **false** until the
+  daemon has actually answered the handshake, because before that there is nothing on
+  the other end to be running anything. Connecting is what turns it true. `heartbeat_hz` is 5, an order of magnitude
   below the control rate, because quackd's heartbeat only has to notice that the
   daemon stopped answering: the fifty hertz loop and its own deadman are the
   daemon's job. `extras.deadman_scope` says what tripping it actually does, which is
