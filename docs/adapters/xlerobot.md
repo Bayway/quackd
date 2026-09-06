@@ -152,6 +152,11 @@ started on the machine wired to the two Feetech buses. It **exits by itself afte
 and there is no systemd unit, autostart or supervisor anywhere in the repository, so a session
 longer than an hour needs it restarted. When it stops answering, quackd's heartbeat says so.
 
+**Nothing authenticates this wire.** Upstream's host binds its two ZeroMQ ports and accepts
+whatever arrives: there is no handshake, no token and no `--token` here, because quackd is a
+client of someone else's protocol rather than the author of one. Anything that can reach the
+port can drive the robot. Bind it to loopback and reach it through an ssh tunnel.
+
 ## VERIFIED (read from upstream source on 2026-09-04, at `3d14695`)
 
 | Thing | Value | Used for |
@@ -202,8 +207,15 @@ longer than an hour needs it restarted. When it stops answering, quackd's heartb
 
 ## How to help
 
-If you have built an XLeRobot, the useful thing is a first run. Start its host, point
-`xlerobot-lookout` at it, and say what happened — that task's allowlist moves no wheel and no
-arm, so it is safe to try before anything else. What most needs a real cart: the camera colour
-order, the base sign convention (`+x` really forward?), and whether the head motors are what
-RoboCrew implies. Open an issue with the transcript.
+If you have built an XLeRobot, the useful thing is a first run. Work through
+[xlerobot-hardware-checklist.md](../xlerobot-hardware-checklist.md) in order: it keeps the
+wheels on blocks until step 9, and the first thing it asks for is `quackd doctor --address`,
+which connects, rather than `list-verbs`, which does not.
+
+Note that `xlerobot-lookout` needs a camera. It requires `observe`, and a stock cart is blind,
+so on an unmodified cart it refuses before a verb runs. Report `doctor` and a `report_state`
+instead, or enable a camera first.
+
+What most needs a real cart: the camera colour order, the base sign convention (`+x` really
+forward?), and whether the head motors are what RoboCrew implies. Open an issue with the
+transcript.

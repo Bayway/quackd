@@ -26,30 +26,14 @@ handler anywhere upstream, so `SIGTERM` does not even reach that.
 
 ## What it does
 
-Ten things upstream has not got. The list lives in the daemon's own docstring, which is the
-copy to trust if these ever drift:
-
-1. **Signal handlers and excepthooks** that reach a safe pose before anything is allowed to
-   exit. Upstream's C level `atexit` disables torque on any interpreter exit at all.
-2. **A hard-exit timer around `close()`**, which is bound without releasing the GIL and can
-   block forever on an unresponsive bus, freezing every thread that might have supervised it.
-   A torqued robot and a dead process beats a frozen process nobody can signal.
-3. **A safe-pose slew**, since no reset exists: upstream's own default pose at upstream's own
-   0.3 rad/s, waist first, because a position command here is a full-torque snap.
-4. **No command at all until it has read the robot once.** Before that the target is a guess,
-   and writing a guess to a servo bus is a full-scale jump from wherever the robot really is.
-5. **A last-known-good observation cache** with an all-zeros detector, so a dropped packet
-   cannot be mistaken for a reading.
-6. **Its own clamp** against the joint limits, a per-tick rate limit, and a refusal of any
-   target that is not a finite number.
-7. **A control loop that survives a raising tick** rather than dying quietly while the socket
-   goes on answering healthy.
-8. **Keyframe playback paced to what the body can follow**, rather than advancing a frame per
-   tick and tracing a smoothed shortcut through the motion while reporting it complete.
-9. **A construction watchdog**, because upstream's constructor busy-waits forever on a silent
-   IMU with the motors already live.
-10. **Capability dispatch by type** rather than by testing whether a class name contains
-    "real".
+Ten things upstream has not got, enumerated in this file's own docstring in
+`quackd_toddlerbot_bridge.py` rather than a second time here. They fall into three groups:
+**nothing exits without settling first** (signal handlers, excepthooks, a hard deadline
+around a `close()` that holds the GIL), **nothing is commanded that cannot be trusted** (no
+command at all before the first reading, an all-zeros detector, a clamp, a rate limit, a
+refusal of non-finite targets, keyframes paced to what the body can follow), and **nothing
+fails silently** (a loop that survives a raising tick instead of dying while the socket
+answers healthy, a construction watchdog, dispatch by type rather than by class name).
 
 The deadman is the opposite of the Open Duck Mini's. A duck that stops walking stands still.
 A humanoid that stops walking mid-stride falls. So on silence this slews to the safe pose and

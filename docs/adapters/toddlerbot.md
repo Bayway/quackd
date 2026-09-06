@@ -112,68 +112,33 @@ shorter list is better than a verb that refuses on a robot.
 
 ## Running the daemon
 
-It needs upstream installed on the robot, **in upstream's own environment**, and that
-separation is the first of the three reasons this is a daemon rather than a library call.
-Upstream hard-pins `numpy==1.26.4`, `jax==0.4.28`, `jaxlib==0.4.28`, `setuptools==75.6.0`,
-`moviepy==1.0.3` and `opencv-python==4.9.0.80`. Those cannot share a process with quackd's
-own dependencies, and quackd is not going to ask anyone to downgrade numpy to drive a
-robot. The daemon runs over there and speaks a socket, so neither environment has to win.
+The install, the flags and the safety notes live with the daemon, in
+[`bridge/toddlerbot/README.md`](../../bridge/toddlerbot/README.md), because that is the file
+an operator has open on the robot. What matters from quackd's side is the shape of the
+answer:
 
-Note also that `mujoco` is not a declared dependency there at all: it arrives transitively
-through `brax`, unpinned, so pin it yourself.
+**Three flags decide what this robot can do, and each one is checked rather than believed.**
+`--camera left|right` needs upstream's `Camera` to actually open. `--walk-policy NAME` needs
+a checkpoint at `ckpts/NAME/` that upstream neither publishes nor checks in, so it is a file
+you supply. `--gripper` is only honoured if the robot has gripper motors. A capability the
+daemon reports is a verb quackd will offer, so the daemon reports only what it loaded: a
+camera that will not open means `observe` never appears, and a missing checkpoint means
+`move`, `go_to` and `approach_and` do not exist rather than being gated off.
 
-```bash
-git clone https://github.com/hshi74/toddlerbot && cd toddlerbot
-git checkout 84e02d14261292eec5d06f896e3145b35c54856c
-pip install -e . && pip install 'mujoco==3.3.4' 'scipy>=1.14'
-python quackd_toddlerbot_bridge.py --robot toddlerbot_2xc --toddlerbot .
-```
-
-Three flags decide what this robot can do, and **each one is checked rather than believed**.
-A capability the daemon reports is a verb quackd will offer, so the daemon only reports what
-it actually loaded.
-
-| Flag | What it needs | If it is not there |
-|---|---|---|
-| `--camera left` or `--camera right` | upstream's `Camera`, which needs `cv2`, the `v4l2-ctl` binary and a real device | logged, and the robot simply has no camera: `observe`, `go_to`, `search_scan` and `approach_and` never appear |
-| `--walk-policy NAME` | `ckpts/NAME/model_best.onnx` **and** `env_config.json` beside it | the daemon refuses to start rather than reaching for a wandb artifact from a robot |
-| `--gripper` | the gripper build | `grip` does not appear |
-
-There is no `--walk` flag any more, and that is the point: walking needs a checkpoint upstream
-neither publishes nor checks in, so it is a file you supply and the daemon loads. It reads that
-checkpoint's own `command_range` at startup and reports the velocity envelope it was really
-trained on, which is what quackd's `limits` then narrow to. Nothing is hardcoded from a gin
-file.
-
-`--fake` runs the whole daemon and protocol against a simulated body, with no robot and no
-upstream, which is what CI does. The daemon **refuses to actuate without a zero calibration**
-(`motors.yml`), because without it every commanded angle is offset by however that particular
-robot was assembled.
+The daemon also reads the loaded checkpoint's own `command_range` at startup and reports the
+velocity envelope it was really trained on, which is what quackd's `limits` narrow to. An
+envelope with nothing left on any axis is treated as no locomotion at all.
 
 ## The contract job, and what a green one means
 
 `.github/workflows/toddlerbot-contract.yml` runs nightly and on demand, and it is the only
-thing in this repository that installs upstream. It takes a blobless sparse checkout of about
-70 MB out of upstream's 1.2 GB, starts quackd's real daemon with `--sim mujoco`, and drives it
-with quackd's real client over a real socket.
-
-It is deliberately not part of `ci`. The main suite has to stay installable on Windows with
-nothing but quackd's own dependencies, and this needs MuJoCo, jax, OpenCV and a 30-motor
-model. It runs on a schedule and on demand, so it gates no pull request and blocks no
-release by construction, and it is deliberately **not** `continue-on-error`: a red run should
-look red. What it watches for is upstream drift rather than a regression here, so a failure
-means go and look, not stop the release.
-
-Two things the plan for this adapter got wrong, corrected by reading the source. There is no
-need for `MUJOCO_GL=osmesa` or `xvfb`: the headless path builds neither a viewer nor a
-renderer, so no GL context is created at all, and upstream never reads `MUJOCO_GL`. What is
-needed instead is that `import mujoco.viewer` succeeds, because `mujoco_sim` imports it at
-module scope before it checks `vis_type`, and that pulls in glfw's shared library. The job
-installs the X11 client libraries for that reason, and it never runs a display.
+thing here that installs upstream: a blobless sparse checkout, quackd's real daemon under
+`--sim mujoco`, and quackd's real client over a real socket. Its own comments carry the
+reasoning, including why `MUJOCO_GL` and `xvfb` are not needed and what is needed instead.
 
 **A green run still means nothing about hardware.** It means the protocol, the fifty hertz
-loop, the clamp and the deadman hold up against thirty simulated motors that push back, which
-is strictly more than the fake body could prove and strictly less than a robot.
+loop, the clamp and the deadman hold up against thirty simulated motors that push back,
+which is strictly more than the fake body proves and strictly less than a robot.
 
 ## VERIFIED (read from upstream source on 2026-09-05, at `84e02d1`)
 

@@ -44,6 +44,11 @@ Speaking the wire also buys something importing would not: upstream's own client
 host's `_images` list and trusts its own config instead, and its `robot_model` default
 disagrees with the host's. Reading the wire makes both impossible to get wrong.
 
+**Nothing authenticates this wire.** Upstream's host binds its two ZeroMQ ports and accepts
+whatever arrives: there is no handshake, no token and no `--token` here, because quackd is a
+client of someone else's protocol rather than the author of one. Anything that can reach the
+port can drive the robot. Bind it to loopback and reach it through an ssh tunnel.
+
 ## What this robot cannot do
 
 - **`say` — there is no speaker.** Nothing in the driver produces audio, so the `sound` intent
@@ -193,8 +198,10 @@ so quackd validates every goal against the manifest before it is sent.
 
 ## How to help
 
-If you have built an AlohaMini, the useful thing is a first run. Start quackd's host wrapper,
-point `alohamini-lookout` at it, and say what happened: that task's allowlist moves no wheel,
-no arm and no lift. What most needs a real robot: whether `+x` is physically forward, the
+If you have built an AlohaMini, the useful thing is a first run. Work through
+[alohamini-hardware-checklist.md](../alohamini-hardware-checklist.md) in order. It starts on
+upstream's **stock** host rather than quackd's, because with the arms limp the base and the
+lift can be exercised with no arm risk at all, and only then switches to the wrapper that
+turns torque on. What most needs a real robot: whether `+x` is physically forward, the
 camera colour order, how fast the lift actually travels, and whether the wrapper really does
 leave the arms holding.

@@ -45,6 +45,33 @@ Nothing here has run on hardware yet, on any body. When it does, start with `--d
 every time, then a `.duck` whose `allow` list is the smallest thing that could work, then
 widen it. **You are responsible for your robot.**
 
+**An XLeRobot (a 12 kg dual-arm cart):**
+
+- **The watchdog stops the wheels and nothing else.** Upstream's 500 ms deadman calls
+  `stop_base()`, so the fourteen arm and head servos keep holding their last goal under
+  torque. `deadman_scope` says `base_only`, and that is the robot's entire safety authority.
+- **Nothing reports a battery**, so a battery abort can never fire. The power station's
+  switch is the only e-stop and it is not on the network.
+- **The host exits by itself after an hour** with no supervisor anywhere upstream, so a long
+  session ends as a heartbeat failure rather than an error.
+- Blocks under the wheels until you have checked the turn direction: quackd converts rad/s to
+  the deg/s the wire wants, and a wrong conversion is a 57x error.
+- Work through [xlerobot-hardware-checklist.md](xlerobot-hardware-checklist.md).
+
+**An AlohaMini (two arms on a 600 mm motorised lift):**
+
+- **As upstream ships it the arms are limp**, so the safest bring-up is on the stock host,
+  where the base and the lift can be exercised with no arm risk. quackd's own host wrapper is
+  what turns torque on, and upstream's `disconnect()` turns it off again, so a loaded arm
+  falls when that host exits.
+- **The watchdog covers the base and the lift, never the arms** (`base_and_lift_only`).
+- **`home()` leaves the lift travelling** at full speed, because the write that would zero
+  that register is commented out upstream. quackd sends `stop` as its first command after
+  connecting for exactly this reason.
+- Clear the lift's whole travel before powering it. How fast it moves in mm/s is not stated
+  anywhere upstream, so quackd's duration estimate for `lift` is an assumption.
+- Work through [alohamini-hardware-checklist.md](alohamini-hardware-checklist.md).
+
 **A ToddlerBot (a 56 cm, 3 kg humanoid):**
 
 - **It cannot get up.** There is no get-up policy for this body at the pinned commit, so

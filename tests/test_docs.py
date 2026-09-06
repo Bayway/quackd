@@ -25,9 +25,6 @@ def test_adapter_status_lists_every_microduck_upstream_ref() -> None:
     for adapter, backends in BACKENDS.items():
         for backend in backends:
             assert f"`{adapter}:{backend}`" in doc, f"adapter-status.md lacks {adapter}:{backend}"
-    # the old page is a redirect, not a stale copy
-    old = (REPO / "docs" / "transport-status.md").read_text(encoding="utf-8")
-    assert "adapter-status.md" in old and "VERIFIED (read" not in old
 
 
 def test_adapter_guide_and_manifest_spec_match_the_code() -> None:

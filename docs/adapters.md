@@ -105,26 +105,84 @@ Intents are the whole vocabulary between verbs and backends: `move` (a twist), `
 `joint`, `gripper`, `enable`, `pose`, `stop`. A backend answers each with an `Ack`; a
 refusal is data (`accepted=False, reason=...`), never an exception.
 
-## Backends: mock first, the SDK last
+## Backends: mock first, then whichever route the robot leaves you
 
-Write `mock` before anything else. It runs offline, records intents, serves a synthetic
-frame if the body has a camera, and lets every verb, every executor gate and the detector
-run in the test suite. Then the SDK backend:
+Write `mock` before anything else. It runs offline, records intents, serves a synthetic frame
+if the body has a camera, and lets every verb, every executor gate and the detector run in the
+test suite.
 
-- import the SDK **inside `connect()`**, and raise `AdapterNotInstalled(name, "quackd[extra]")`
-  on `ImportError`, so a machine without the extra still validates, lists and mocks the robot;
-- serialise SDK calls under one lock in a worker thread with a deadline unless you have
-  read that the SDK is thread-safe;
-- never send the SDK's "go limp" call (`disable_motors`, `disable_torque`, `relax`); stop
-  means stop, not collapse;
-- take injectable clients (`client=`, `robot=`, `ros=`) so the tests exercise the mapping
-  with fakes;
-- add the extra to `pyproject.toml` (with a `python_version` marker if the SDK needs
-  one) and the module to `doctor.py`'s `EXTRAS` (metadata-only if importing it is heavy).
-  An adapter whose robot side is a daemon you ship needs no extra at all, because nothing
-  heavy is imported on the laptop: `open_duck` declares none.
+**A fake must never be kinder than the robot.** If the real backend cannot report a position,
+the mock reports `None` too, even though it knows where it is. If a real stop cannot hold the
+arms, the mock's cannot either. A mock that is easier than the body is a task that passes here
+and fails there, and it is the only kind of bug this repository cannot catch for you.
+
+Then the real backend, and the shape of that depends entirely on what the robot gives you.
+Three of the eight adapters import an SDK. The others could not.
+
+| Route | When | Who does it | What it costs |
+|---|---|---|---|
+| **Import the SDK** | upstream ships an installable package with a client | `reachy_mini:sdk`, `lerobot:real`, `rosbridge:ws` | an optional extra, a lazy import inside `connect()`, a lock around a synchronous SDK |
+| **Speak its wire** | upstream ships a host process but is not installable, or installing it would drag in torch and a Python floor | `xlerobot:zmq`, `alohamini:zmq` | reading the wire from source rather than the docs, and owning the framing yourself |
+| **Ship the robot side** | upstream has no network API of any kind | `open_duck:bridge`, `toddlerbot:bridge` | a daemon in `bridge/`, a protocol you define at both ends, and everything below |
+
+Whichever route: import upstream **inside `connect()`** and raise
+`AdapterNotInstalled(name, "quackd[extra]")` on `ImportError`, so a machine without the extra
+still validates, lists and mocks the robot. Serialise access under one lock in a worker thread
+with a deadline unless you have read that it is thread-safe. Take injectable clients
+(`client=`, `robot=`, `ros=`) so the tests drive the mapping with fakes. Add the extra to
+`pyproject.toml`, run `uv lock`, and add the module to `doctor.py`'s `EXTRAS`. An adapter whose
+robot side you ship needs no extra at all: `open_duck` and `toddlerbot` declare none.
+
+**And never send the body's go-limp call.** `disable_motors`, `disable_torque`, `relax`, an
+XLeRobot `disconnect()`: stop means stop, not collapse. This applies to teardown as much as to
+`stop`, and upstream's own `disconnect()` is usually where the trap is — three of these robots
+disable torque inside it, by default, so `close()` has to stop and hold rather than delegate.
+
+### If you speak a wire
+
+You own the framing, so you own the failure modes that come with it.
+
+- **Nothing on a wire is timestamped unless you make it so.** Stamp on arrival, expose the age
+  in `extras`, and turn "no observation lately" into a `HeartbeatError`, or a cached reading
+  will be served as a fresh one and a stopped robot will look like a moving one.
+- **A socket may drop your older message.** ZeroMQ's `CONFLATE` keeps only the newest, so two
+  intents in one tick become one. quackd's answer on both ZeroMQ bodies is a single writer
+  that re-sends the whole desired action, rather than a mirror of the robot's state.
+- **A partial payload can mean something else entirely.** The AlohaMini's driver indexes three
+  velocity keys with no `.get()`, so omitting one discards the whole action, arms included.
+  Route every verb through one payload builder rather than composing dicts at each call site.
+- **Refusal is data.** Whatever the socket raises when the host dies, the pilot should get an
+  `Ack(accepted=False)` naming the address, not an exception through the executor's catch-all.
+
+### If you ship the robot side
+
+The three rules are that it never imports quackd, it ships in the sdist and never in the
+wheel, and it stays testable with no hardware. What that actually costs, beyond writing it:
+
+- **A handshake that reports what is really there**, and a `connect()` that narrows the
+  manifest from the answer. A capability the daemon reports is a verb quackd will offer, so it
+  must report what loaded rather than what a flag claimed.
+- **A protocol version, and a refusal on mismatch.** The daemon on the robot is one somebody
+  installed months ago.
+- **Whatever the robot's own runtime does not do.** The Open Duck's daemon feeds a loop that
+  already exists. The ToddlerBot's owns the loop, because upstream's `step()` is a no-op, and
+  that difference is most of the size difference between the two.
+- **A keepalive, if silence means something.** Where the robot's deadman fires on silence,
+  something has to say the client is still there while a long verb runs, because the executor
+  sends one command and then waits.
+
+### A simulator, if the cartoon world already draws the body
+
+Half the bodies here ship a `sim2d` backend. It is worth writing when the shared 2D world can represent the
+body honestly and the robot has a task worth running end to end; it is not worth writing for a
+body the world would have to lie about. It earns a ✅ only with a seeded acceptance sweep that
+checks the world's ground truth, not merely a run that does not crash.
 
 ## `upstream_api.py`: never guess a name
+
+The traps that recur across bodies, and what each one cost, are collected in
+[reading-robots.md](reading-robots.md). Read it before the first adapter you write against
+an upstream you did not choose.
 
 Every SDK name you spell lives in one file as an `UpstreamRef(name, status, source, note)`
 with a permalink to a pinned commit and line. `VERIFIED` means you read it there;

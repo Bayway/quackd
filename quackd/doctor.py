@@ -336,7 +336,7 @@ def run_doctor(
 
     unverified = up.refs_by_status("UNVERIFIED")
     t = Table(
-        title=f"upstream assumptions (UNVERIFIED: {len(unverified)}) — see docs/transport-status.md"
+        title=f"upstream assumptions (UNVERIFIED: {len(unverified)}) — see docs/adapter-status.md"
     )
     t.add_column("what")
     t.add_column("note")

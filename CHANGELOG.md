@@ -16,6 +16,22 @@ no longer are.
 
 ### Added
 
+- **Bring-up checklists for the XLeRobot and the AlohaMini**
+  ([docs/xlerobot-hardware-checklist.md](docs/xlerobot-hardware-checklist.md),
+  [docs/alohamini-hardware-checklist.md](docs/alohamini-hardware-checklist.md)). The two
+  bodies here you can buy today were the two without one. They are not copies of each other:
+  the cart's hazard is that its watchdog stops the wheels and leaves fourteen arm servos
+  holding, so it stays on blocks until step 9; the AlohaMini's is the opposite, that its arms
+  are limp until quackd's own host turns torque on, which makes upstream's stock host the
+  safest place to learn the base and the lift first.
+- **[docs/reading-robots.md](docs/reading-robots.md), the traps by pattern rather than by
+  robot.** quackd drives eight bodies and has run on none, so everything it does came from
+  reading upstream closely enough to be safe without executing it, and the same shapes kept
+  recurring: a number that looks like a different number, a default pose that is not neutral,
+  a stop that is not a stop, a partial message that means something else, a capability that is
+  only a claim, a name that exists on the wrong class, a line somebody commented out. The next
+  robot will not have the AlohaMini's bug; it will have one of the AlohaMini's shape.
+
 - **The ToddlerBot: a small open source humanoid, and the first body here that can hurt
   itself** (`--robot toddlerbot:mock`, `sim2d` or `bridge`). Two arms, two legs, a two joint
   neck and thirty servos, on a machine with no network API of any kind, so quackd ships the

@@ -80,7 +80,7 @@ is POSIX-only; forward it with `ssh -L 9870:/run/robotd.sock <robot>` and use
 `--address tcp://127.0.0.1:9870`.
 
 **Can I run it on my Microduck today?** `--robot microduck:jsonrpc` speaks the verified
-`duck-ipc-proto` v16 vocabulary but has never touched hardware. Start with `--dry-run`,
+`duck-ipc-proto` v23 vocabulary but has never touched hardware. Start with `--dry-run`,
 read [adapter-status.md](adapter-status.md), and tell us what happened.
 
 **Can I drive it from the Claude mobile app?** Not yet. `quackd serve-mcp` speaks `stdio`
@@ -114,14 +114,16 @@ robot at once. Every real-hardware transport is experimental and unverified end 
 the same executor and verb registry, so a real client like a phone app would mean adding a
 network-reachable server and auth on top, not rewriting the core.
 
-**Can I control who's allowed to pilot my robot?** Barely, and only on one body. quackd
+**Can I control who's allowed to pilot my robot?** Barely, and only where quackd ships the
+robot side. quackd
 adds no login or accounts, so access is mostly whatever your OS and network enforce.
 `robotd`'s socket can't be reached off the robot's own computer unless something bridges
 it, so the real gate there is SSH's authentication (and your Wi-Fi's), not quackd's;
 `quackd announce`/`discover` do broadcast a robot's identity, unauthenticated, to anyone on
-the LAN ([lan.md](lan.md)), though that's identity only, not a way to drive it. The one
-exception is the Open Duck bridge, which quackd itself ships: it binds loopback, and if a
-token file is configured it checks one with `hmac.compare_digest` before accepting a
+the LAN ([lan.md](lan.md)), though that's identity only, not a way to drive it. The two
+exceptions are the daemons quackd itself ships, for the Open Duck Mini and the ToddlerBot:
+each binds loopback, and if a token is configured it checks one with `hmac.compare_digest`
+before accepting a
 handshake (`--token`, or `QUACKD_DUCK_TOKEN`). Its camera server has no authentication at
 all, so tunnel it. On a Microduck the physical gamepad preempts remote commands; on an Open
 Duck it does not, because quackd's daemon *replaces* the gamepad the walk loop reads, which
