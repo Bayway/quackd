@@ -21,19 +21,27 @@ level `atexit` handler disconnects every client on any normal interpreter exit, 
 torque and drops a standing robot. There is no Python signal handler anywhere upstream, so
 `SIGTERM` does not even reach that.
 
-So this daemon carries seven things upstream has not got:
+So this daemon carries ten things upstream has not got:
 
-1. signal handlers that reach a safe pose before anything is allowed to exit;
+1. signal handlers that reach a safe pose before anything is allowed to exit, and excepthooks
+   for the same reason: upstream's C level atexit disables torque on any interpreter exit;
 2. a hard-exit timer around `close()`, which is bound without releasing the GIL and can block
    forever on an unresponsive bus, freezing every thread that might have supervised it;
 3. a safe-pose slew, since no reset exists: upstream's own default pose at upstream's own
    0.3 rad/s, waist first, because a position command here is a full-torque snap;
-4. a last-known-good observation cache with an all-zeros detector, so a dropped packet cannot
+4. no command at all until it has read the robot once, because before that the target is a
+   guess and writing a guess to a servo bus is a full-scale jump;
+5. a last-known-good observation cache with an all-zeros detector, so a dropped packet cannot
    be mistaken for a reading;
-5. its own clamp against the joint limits, plus a per-tick rate limit;
-6. a construction watchdog, because the constructor busy-waits forever on a silent IMU with
+6. its own clamp against the joint limits, a per-tick rate limit, and a refusal of any target
+   that is not a finite number, since `json.loads` accepts a bare NaN;
+7. a control loop that survives a raising tick instead of dying quietly while the socket goes
+   on answering healthy;
+8. keyframe playback paced to what the body can actually follow, rather than advancing a frame
+   per tick and tracing a smoothed shortcut through the motion;
+9. a construction watchdog, because the constructor busy-waits forever on a silent IMU with
    the motors already live;
-7. capability dispatch by type rather than by testing whether a name contains "real".
+10. capability dispatch by type rather than by testing whether a name contains "real".
 
 Rules this file lives by, the same three as `bridge/open_duck/`:
 
@@ -611,7 +619,10 @@ class Daemon:
             # minutes to fall below the client's floor, so a loop that collapsed to 10 Hz an
             # hour in would still report 49 and the heartbeat would never fire.
             recent.append(now)
-            while len(recent) > 1 and now - recent[0] > 1.0:
+            # Keep two, always. Trimming to one leaves nothing to measure a span with, and
+            # the fallback below is the lifetime average, which is what this window exists to
+            # replace: a single tick over a second long would hide the stall it just had.
+            while len(recent) > 2 and now - recent[0] > 1.0:
                 recent.popleft()
             if len(recent) > 1:
                 self.loop_hz = (len(recent) - 1) / max(1e-6, now - recent[0])
@@ -747,7 +758,15 @@ class Handler(socketserver.StreamRequestHandler):
                 msg = json.loads(raw)
             except ValueError:
                 continue
-            method, params = msg.get("method"), msg.get("params") or {}
+            # `null`, `7`, `[]` and `"hi"` are all valid JSON and none of them is a request.
+            # `msg.get` on any of them raises outside the dispatch guard, which drops the
+            # connection and loses every later verb on that session over one bad line.
+            if not isinstance(msg, dict):
+                log.warning("ignoring a line that is not a JSON-RPC object: %.80r", msg)
+                continue
+            method, params = msg.get("method"), msg.get("params")
+            if not isinstance(params, dict):
+                params = {}
             req_id = msg.get("id")
             try:
                 result, authed = self._dispatch(method, params, authed)

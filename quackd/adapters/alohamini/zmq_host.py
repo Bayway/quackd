@@ -58,7 +58,10 @@ CMD_PORT = int(up.PORT_ZMQ_CMD.name)
 OBS_PORT = int(up.PORT_ZMQ_OBSERVATIONS.name)
 """Both from `upstream_api`, not retyped here. `upstream_api.py` is the one file to
 edit when an upstream moves, and a port spelled twice can disagree with itself."""
-WATCHDOG_MS = 1000.0
+WATCHDOG_MS = float(up.WATCHDOG_TIMEOUT_MS.name)
+"""The host's own watchdog window, from `upstream_api`, not retyped. By the time an
+observation is this old the host has already stopped the base and the lift, so this is
+the moment a cached reading stops being a reading."""
 POLL_MS = 200
 """Upstream's own client poll window: it must exceed one host cycle at 30 Hz."""
 CONNECT_TIMEOUT_S = 5.0

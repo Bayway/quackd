@@ -9,7 +9,7 @@ ToddlerBot has no network API of any kind. No socket, no daemon, no IPC: it is a
 library whose control loop opens serial ports in-process. Something has to be on the robot,
 so quackd ships this, the way it ships one for the Open Duck Mini.
 
-Two reasons it is a daemon rather than a thin shim, and the second is the important one.
+Three reasons it is a daemon rather than a thin shim, and the second is the important one.
 
 **A verb is episodic and this robot is not.** `RealWorld.step()` is a no-op, so nothing times
 out and nothing re-arms: the last commanded pose is held forever. A humanoid frozen mid-stride
@@ -26,21 +26,30 @@ handler anywhere upstream, so `SIGTERM` does not even reach that.
 
 ## What it does
 
-Seven things upstream has not got:
+Ten things upstream has not got. The list lives in the daemon's own docstring, which is the
+copy to trust if these ever drift:
 
-1. **Signal handlers** that reach a safe pose before anything is allowed to exit.
+1. **Signal handlers and excepthooks** that reach a safe pose before anything is allowed to
+   exit. Upstream's C level `atexit` disables torque on any interpreter exit at all.
 2. **A hard-exit timer around `close()`**, which is bound without releasing the GIL and can
    block forever on an unresponsive bus, freezing every thread that might have supervised it.
    A torqued robot and a dead process beats a frozen process nobody can signal.
 3. **A safe-pose slew**, since no reset exists: upstream's own default pose at upstream's own
    0.3 rad/s, waist first, because a position command here is a full-torque snap.
-4. **A last-known-good observation cache** with an all-zeros detector, so a dropped packet
+4. **No command at all until it has read the robot once.** Before that the target is a guess,
+   and writing a guess to a servo bus is a full-scale jump from wherever the robot really is.
+5. **A last-known-good observation cache** with an all-zeros detector, so a dropped packet
    cannot be mistaken for a reading.
-5. **Its own clamp** against the joint limits, plus a per-tick rate limit.
-6. **A construction watchdog**, because upstream's constructor busy-waits forever on a silent
+6. **Its own clamp** against the joint limits, a per-tick rate limit, and a refusal of any
+   target that is not a finite number.
+7. **A control loop that survives a raising tick** rather than dying quietly while the socket
+   goes on answering healthy.
+8. **Keyframe playback paced to what the body can follow**, rather than advancing a frame per
+   tick and tracing a smoothed shortcut through the motion while reporting it complete.
+9. **A construction watchdog**, because upstream's constructor busy-waits forever on a silent
    IMU with the motors already live.
-7. **Capability dispatch by type** rather than by testing whether a class name contains
-   "real".
+10. **Capability dispatch by type** rather than by testing whether a class name contains
+    "real".
 
 The deadman is the opposite of the Open Duck Mini's. A duck that stops walking stands still.
 A humanoid that stops walking mid-stride falls. So on silence this slews to the safe pose and
@@ -70,8 +79,7 @@ and land in transcripts.
 
 ## Running it
 
-It runs **in upstream's own environment**, and that separation is the first of the
-three reasons this is a daemon rather than a library call. Upstream hard-pins
+It runs **in upstream's own environment**, which is the third of those reasons. Upstream hard-pins
 `numpy==1.26.4`, `jax==0.4.28`, `jaxlib==0.4.28`, `setuptools==75.6.0`,
 `moviepy==1.0.3` and `opencv-python==4.9.0.80`. Those cannot share a process with
 quackd's own dependencies, and quackd is not going to ask anyone to downgrade numpy

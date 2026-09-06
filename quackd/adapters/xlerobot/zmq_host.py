@@ -48,7 +48,10 @@ CMD_PORT = int(up.PORT_ZMQ_CMD.name)
 OBS_PORT = int(up.PORT_ZMQ_OBSERVATIONS.name)
 """Both from `upstream_api`, not retyped here. A port spelled twice is a port that
 can disagree with itself, and this one is read from upstream's own host config."""
-STALE_LIMIT_MS = 500.0
+STALE_LIMIT_MS = float(up.WATCHDOG_TIMEOUT_MS.name)
+"""The host's own watchdog window, from `upstream_api`, not retyped. By the time an
+observation is this old the host has already stopped the base, so this is the moment a
+cached reading stops being a reading. A number spelled twice can disagree with itself."""
 """The host's own watchdog window: by now it has already stopped the base."""
 POLL_MS = 50
 CONNECT_TIMEOUT_S = 5.0

@@ -537,20 +537,29 @@ async def test_the_token_is_compared_in_constant_time() -> None:
     and rules out exactly one spelling of the thing it is trying to forbid.
     """
     calls: list[tuple[str, str]] = []
-    real = D.hmac.compare_digest
 
-    def watched(a: object, b: object) -> bool:
-        calls.append((str(a), str(b)))
-        return bool(real(a, b))  # type: ignore[arg-type]
+    class _Watched:
+        """Stands in for the daemon's `hmac`, and only the daemon's.
 
-    D.hmac.compare_digest = watched  # type: ignore[assignment]
+        Assigning to `D.hmac.compare_digest` would replace it on the stdlib module object for
+        the whole interpreter, including for anything else running concurrently. Replacing the
+        daemon module's own reference is the narrower thing, and it is what the daemon calls.
+        """
+
+        @staticmethod
+        def compare_digest(a: object, b: object) -> bool:
+            calls.append((str(a), str(b)))
+            return str(a) == str(b)
+
+    real_module = D.hmac
+    D.hmac = _Watched  # type: ignore[assignment]
     try:
         with _Serving(token="hunter2") as s:
             link = ToddlerBotBridge(address=s.address, token="hunter2")
             await link.connect()
             await link.close()
     finally:
-        D.hmac.compare_digest = real  # type: ignore[assignment]
+        D.hmac = real_module
 
     assert calls, "the handshake never compared the token in constant time"
     assert ("hunter2", "hunter2") in calls
@@ -945,3 +954,20 @@ async def test_an_envelope_with_one_usable_axis_is_still_locomotion() -> None:
         assert manifest.limits["max_vx"] == pytest.approx(0.12)
         assert manifest.limits["max_vy"] == pytest.approx(0.0)
         await adapter.transport.close()
+
+
+async def test_a_line_that_is_not_a_request_does_not_cost_the_session() -> None:
+    """`null`, `7`, `[]` and `"hi"` are all valid JSON and none of them is a JSON-RPC object.
+    `msg.get` on any of them used to raise outside the dispatch guard, dropping the connection
+    and losing every later verb on that session over one bad line."""
+    with _Serving() as s:
+        link = ToddlerBotBridge(address=s.address)
+        await link.connect()
+        assert link._writer is not None
+        for junk in ("null", "7", "[]", '"hi"', '{"params": 3, "method": "bot.state", "id": 9}'):
+            link._writer.write((junk + "\n").encode())
+            await link._writer.drain()
+        # the link still works, which is the whole point
+        assert (await link.get_state()).extras["loop_hz"] > 0
+        assert (await link.send_intent(Intent.do("stand"))).accepted
+        await link.close()

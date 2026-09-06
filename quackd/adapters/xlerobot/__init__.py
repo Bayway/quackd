@@ -34,6 +34,7 @@ from quackd.adapters.manifest import (
     SafetyAuthority,
     verb_spec,
 )
+from quackd.adapters.xlerobot import upstream_api as up
 from quackd.adapters.xlerobot.verbs import JOINTS, xlerobot_conditions, xlerobot_verbs
 from quackd.transport.base import Ack, DuckState, DuckTransport, HeartbeatError, Intent
 from quackd.verbs.core import CORE
@@ -67,7 +68,7 @@ _MOVE_DESCRIPTION = (
     "teleop opens at 0.1 m/s and 30 deg/s, so ask for 0.1 on a first run rather than "
     "taking the default."
 )
-_STALE_LIMIT_MS = 500.0
+_STALE_LIMIT_MS = float(up.WATCHDOG_TIMEOUT_MS.name)
 """Matches the host's own watchdog (`upstream_api.WATCHDOG_TIMEOUT_MS`): by the time an
 observation is this old, the host has already stopped the base."""
 

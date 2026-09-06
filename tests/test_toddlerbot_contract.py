@@ -247,8 +247,12 @@ async def test_the_motions_the_workflow_fetched_actually_loaded() -> None:
         link = await _connect(daemon)
         assert link.motions, f"no keyframe motion loaded\n{daemon.say_why()}"
         assert set(link.motions) <= {"hold", "kneel", "cuddle", "push_up", "crawl"}
-        adapter = ToddlerBotAdapter(link)
+
+        # A second connect on the SAME bridge would open a second socket and orphan the first
+        # reader, so the adapter gets its own link.
+        adapter = ToddlerBotAdapter(ToddlerBotBridge(address=daemon.address))
         manifest = await adapter.connect()
         assert manifest.provides("perform")
         assert manifest.extras["motions"] == sorted(link.motions)
+        await adapter.transport.close()
         await link.close()

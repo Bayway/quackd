@@ -386,6 +386,14 @@ _CORE_VERBS = frozenset(
 )
 
 
+async def _implementable(adapter: str) -> set[str]:
+    """Every verb this adapter has an implementation for, across all its builds."""
+    import importlib
+
+    module = importlib.import_module(f"quackd.adapters.{adapter}")
+    return set(module.implementations())
+
+
 def test_the_readme_verb_table_has_a_row_per_body_listing_its_real_verbs() -> None:
     """The other list-shaped thing no guard could see.
 
@@ -419,5 +427,9 @@ def test_the_readme_verb_table_has_a_row_per_body_listing_its_real_verbs() -> No
         # And the other direction, which is the drift that happens when a verb is deleted from
         # an adapter and nobody remembers the README.
         listed = {chunk.strip() for chunk in cell.split("`") if chunk.strip()}
-        gone = [v for v in listed if v not in own and v not in _CORE_VERBS]
-        assert not gone, f"the {adapter} row lists verbs the robot no longer has: {gone}"
+        # Against everything the adapter can implement, not just what this build reports: a
+        # row may name a verb only some builds have (the ToddlerBot's `grip` needs the gripper
+        # variant), but it may never name one the adapter cannot implement at all.
+        possible = set(asyncio.run(_implementable(adapter)))
+        gone = [v for v in listed if v not in possible and v not in _CORE_VERBS]
+        assert not gone, f"the {adapter} row lists verbs the adapter cannot implement: {gone}"

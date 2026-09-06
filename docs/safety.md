@@ -45,6 +45,22 @@ Nothing here has run on hardware yet, on any body. When it does, start with `--d
 every time, then a `.duck` whose `allow` list is the smallest thing that could work, then
 widen it. **You are responsible for your robot.**
 
+**A ToddlerBot (a 56 cm, 3 kg humanoid):**
+
+- **It cannot get up.** There is no get-up policy for this body at the pinned commit, so
+  a fall ends the run and needs a human. Every moving verb refuses once it is down.
+- **Work through [toddlerbot-hardware-checklist.md](toddlerbot-hardware-checklist.md) in
+  order.** It keeps the feet off the ground until step 13, and steps 11 and 12 (pull the
+  network cable mid-move, then send `SIGTERM`) are the two that matter most.
+- **The deadman is a slew, not a stop.** There is no velocity at this hardware boundary:
+  the command is an absolute pose. On silence the daemon quackd ships slews to the safe
+  pose at upstream's own rate, waist first, and holds. It never goes limp, because on
+  this body torque off is a fall.
+- **quackd owns the control loop here**, which is true of no other body. Upstream's own
+  `step()` is a no-op, so nothing times out and nothing re-arms without the daemon.
+- A good first contract is the shipped `toddlerbot-lookout`: it moves no leg, no arm and
+  no waist.
+
 **A Microduck (a 25 cm biped):**
 
 - **Run on the floor, not a table.** A 25 cm biped and a table edge do not mix.

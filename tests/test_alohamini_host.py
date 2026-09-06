@@ -163,7 +163,9 @@ async def test_silence_stops_the_base_and_the_lift_but_not_the_arms() -> None:
         link = await _connected(host)
         await link.send_intent(Intent.joint({"arm_right_wrist_roll": 15.0}, 0.2))
         await link.send_intent(Intent.move(vx=0.2))
-        await _until(lambda: host.state["x.vel"] == pytest.approx(0.2))
+        # On the applied action rather than on `state`: the watchdog zeroes the base again
+        # within a couple of host cycles, and catching that window is a race under load.
+        await _until(lambda: any(a.get("x.vel") == pytest.approx(0.2) for a in host.actions))
         # The counter is cumulative, and home()'s stray descent velocity already tripped it
         # once before the client even connected. Waiting for `>= 1` therefore returns
         # immediately, under load before the move above has been zeroed. Wait for a trip that

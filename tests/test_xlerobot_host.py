@@ -265,7 +265,10 @@ async def test_silence_trips_the_hosts_watchdog_and_stops_the_base() -> None:
     with FakeXLerobotHost(watchdog_s=0.5) as host:
         link = await _connected(host)
         await link.send_intent(Intent.move(vx=0.25))
-        await _until(lambda: host.state["x.vel"] == pytest.approx(0.25))
+        # On the applied action, which is append-only, rather than on `state`, which the
+        # watchdog zeroes again a moment later: catching a transient value on a real clock
+        # against a real host thread is a race that a busy machine loses.
+        await _until(lambda: any(a.get("x.vel") == pytest.approx(0.25) for a in host.actions))
 
         # A trip AFTER the move landed. `watchdog_trips` is cumulative, so waiting for `>= 1`
         # can be satisfied by a trip that happened before it.

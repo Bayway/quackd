@@ -79,8 +79,10 @@ within 72 hours.
 
 Only the latest released minor version receives fixes.
 
-The on-robot daemons carry their own versions (`BRIDGE_VERSION`, `CAMD_VERSION`) and live
-on someone else's Raspberry Pi, so they can drift from the quackd that talks to them. The
-handshake carries both and refuses a protocol mismatch rather than guessing, but a daemon
-you installed months ago is a daemon that has not had your fixes. `quackd doctor --robot
-open_duck:bridge --address ...` prints what your robot is actually running.
+The on-robot artifacts carry their own versions and live on someone else's computer, so
+they can drift from the quackd that talks to them: `BRIDGE_VERSION` and `CAMD_VERSION`
+on an Open Duck Mini's Raspberry Pi, `VERSION` in the ToddlerBot daemon on its Jetson,
+and the AlohaMini host wrapper's `quackd_host_version` field. Each handshake carries a
+protocol version and refuses a mismatch rather than guessing, but a daemon you installed
+months ago is a daemon that has not had your fixes. `quackd doctor --robot
+<adapter>:<backend> --address ...` prints what your robot is actually running.
