@@ -283,7 +283,23 @@ class Daemon:
         self.hi = np.array([limits.get(k, (-math.pi, math.pi))[1] for k in order], np.float32)
         self.waist = np.array([i for i, k in enumerate(order) if "waist" in k], dtype=int)
         self.neck = [i for i, k in enumerate(order) if "neck" in k]
-        default = np.array(getattr(robot, "default_motor_pos", np.zeros(n)), np.float32)
+        # `default_motor_angles`, and no getattr. The name matters more here than
+        # anywhere else in this file: this is the pose the deadman slews to, the pose
+        # `stand` targets and the pose the excepthook settles to. Upstream does have a
+        # `default_motor_pos`, on BasePolicy, which is what makes the wrong name so easy
+        # to reach for. On Robot it is a dict keyed by motor name, in motor_ordering
+        # order because that is what it is built from, in radians.
+        #
+        # A fallback here would be worse than a crash. Zeros are not a neutral pose on
+        # this body: home carries plus or minus 1.57 rad of shoulder and elbow yaw and
+        # 1.22 of wrist, so slewing to zeros is a large wrong motion on every limb, and
+        # it would happen exactly when nobody is driving the robot.
+        default = np.array(list(robot.default_motor_angles.values()), np.float32)
+        if len(default) != n:
+            raise SystemExit(
+                f"this robot reports {n} motors and {len(default)} default angles. "
+                "Refusing to start: the safe pose has to be the same shape as the body."
+            )
         self.safe = SafeState(default)
         self.command = Command(default)
         self.command.last_client = time.monotonic()
@@ -642,7 +658,7 @@ class FakeRobot:
             f"joint_{i}" for i in range(nu - 4)
         ]
         self.motor_limits = {k: (-2.0, 2.0) for k in self.motor_ordering}
-        self.default_motor_pos = [0.0] * nu
+        self.default_motor_angles = {k: 0.0 for k in self.motor_ordering}
         self.quackd_calibrated = True
 
 

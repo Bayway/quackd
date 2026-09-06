@@ -72,6 +72,16 @@ notice that the daemon stopped answering, so it runs an order of magnitude slowe
 STALE_LIMIT_MS = 1000.0
 
 
+def _reported_motions(transport: object) -> tuple[str, ...]:
+    """What the daemon said it loaded, or quackd's own list where nothing reports.
+
+    `mock` and `sim2d` do not carry the attribute at all and get the full list. A
+    `bridge` that reports an empty list gets an empty list, and `perform` goes with
+    it."""
+    reported = getattr(transport, "motions", None)
+    return MOTIONS if reported is None else tuple(reported)
+
+
 def _limits(envelope: dict[str, float] | None = None) -> dict[str, float]:
     """The velocity envelope, from the checkpoint that is loaded where there is one.
 
@@ -114,16 +124,15 @@ def toddlerbot_manifest(
     envelope: dict[str, float] | None = None,
 ) -> RobotManifest:
     """The robot as data. Every flag is what the daemon reported, not what a config claimed."""
-    own = toddlerbot_verbs(neck=neck, gripper=gripper)
+    own = toddlerbot_verbs(neck=neck, gripper=gripper, motions=motions)
     verbs = [
         verb_spec(CORE["report_state"], core=True),
         verb_spec(CORE["stop"], core=True),
         *[verb_spec(v, core=False) for v in own.values()],
     ]
-    preconditions: dict[str, list[str]] = {
-        "stand": ["link_fresh", "calibrated"],
-        "perform": ["link_fresh", "calibrated", "not_fallen"],
-    }
+    preconditions: dict[str, list[str]] = {"stand": ["link_fresh", "calibrated"]}
+    if motions:
+        preconditions["perform"] = ["link_fresh", "calibrated", "not_fallen"]
     if neck:
         preconditions["look"] = ["link_fresh", "not_fallen"]
     if gripper:
@@ -236,7 +245,10 @@ class ToddlerBotAdapter:
             robot=str(getattr(self.transport, "robot_name", DEFAULT_ROBOT)),
             deadman=bool(getattr(self.transport, "deadman", False)),
             motors=int(getattr(self.transport, "motors", 30)),
-            motions=tuple(getattr(self.transport, "motions", ()) or MOTIONS),
+            # An empty list means the daemon loaded none, which is a different thing
+            # from a backend that does not report them at all. `or MOTIONS` treated
+            # the two as the same and re-advertised five motions the robot refused.
+            motions=_reported_motions(self.transport),
             envelope=getattr(self.transport, "walk_envelope", None),
         )
         return self.manifest

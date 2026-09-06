@@ -18,6 +18,7 @@ quackd offers named moves instead.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -145,9 +146,34 @@ def toddlerbot_conditions() -> dict[str, Precondition]:
 # ── the verbs ───────────────────────────────────────────────────────────────────────────
 
 
+def look_point(yaw_deg: float, pitch_deg: float) -> tuple[float, float, float]:
+    """quackd's `look` intent carries a direction, not two angles.
+
+    Every other gaze body in this repository reads it with `atan2`, and core's own
+    `search_scan` gaze sweep sends `Intent.look(cos, sin, 0)`. This robot's *verb* takes
+    degrees, because two neck servos are what it has, so the conversion belongs here.
+    Putting degrees straight into y and z made a 45 degree sweep arrive as 0.7 degrees.
+    """
+    yaw, pitch = math.radians(yaw_deg), math.radians(pitch_deg)
+    return (
+        math.cos(yaw) * math.cos(pitch),
+        math.sin(yaw) * math.cos(pitch),
+        math.sin(pitch),
+    )
+
+
+def look_degrees(x: float, y: float, z: float) -> tuple[float, float]:
+    """The inverse, for whoever has to turn it back into two servo angles."""
+    return (
+        math.degrees(math.atan2(y, x)),
+        math.degrees(math.atan2(z, math.hypot(x, y))),
+    )
+
+
 async def look(ctx: VerbContext, p: LookParams) -> VerbResult:
     """Point the head. The daemon interpolates and rate limits; quackd sends a target."""
-    intent = Intent.look(x=1.0, y=p.yaw_deg, z=p.pitch_deg)
+    x, y, z = look_point(p.yaw_deg, p.pitch_deg)
+    intent = Intent.look(x=x, y=y, z=z)
     if (fail := await send_or_fail(ctx, intent)) is not None:
         return fail
     await ctx.transport.sleep(LOOK_S)
@@ -222,8 +248,17 @@ async def grip(ctx: VerbContext, p: GripParams) -> VerbResult:
     )
 
 
-def toddlerbot_verbs(*, neck: bool = True, gripper: bool = False) -> dict[str, Verb]:
-    """`neck` and `gripper` are what the daemon reported this build actually has."""
+def toddlerbot_verbs(
+    *,
+    neck: bool = True,
+    gripper: bool = False,
+    motions: tuple[str, ...] = MOTIONS,
+) -> dict[str, Verb]:
+    """Every argument is what the daemon reported this build actually has.
+
+    `motions` is the list it managed to load. A robot whose keyframe files are missing or
+    unreadable gets no `perform` at all rather than a verb that refuses every motion: a
+    verb that is not in the manifest does not exist."""
     verbs: list[Verb] = [
         Verb(
             "stand",
@@ -234,16 +269,20 @@ def toddlerbot_verbs(*, neck: bool = True, gripper: bool = False) -> dict[str, V
             timeout_s=STAND_TIMEOUT_S + 10,
             safety_class="confirm",
         ),
-        Verb(
-            "perform",
-            "Play one of the motions that ship with this robot: hold, kneel, cuddle, push_up "
-            "or crawl. It needs clear space and a flat surface.",
-            perform,
-            PerformParams,
-            timeout_s=PERFORM_TIMEOUT_S + 10,
-            safety_class="confirm",
-        ),
     ]
+    if motions:
+        verbs.append(
+            Verb(
+                "perform",
+                "Play one of the motions this robot has loaded: "
+                + ", ".join(motions)
+                + ". It needs clear space and a flat surface.",
+                perform,
+                PerformParams,
+                timeout_s=PERFORM_TIMEOUT_S + 10,
+                safety_class="confirm",
+            )
+        )
     if neck:
         verbs.append(
             Verb(
@@ -294,6 +333,8 @@ __all__ = [
     "GripParams",
     "LookParams",
     "PerformParams",
+    "look_degrees",
+    "look_point",
     "neck_limits",
     "toddlerbot_conditions",
     "toddlerbot_verbs",

@@ -4251,6 +4251,9 @@ all = [
     { name = "google-genai" },
     { name = "openai" },
 ]
+alohamini = [
+    { name = "pyzmq" },
+]
 anthropic = [
     { name = "anthropic" },
 ]
@@ -4328,6 +4331,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "pyzmq", marker = "extra == 'alohamini'", specifier = ">=26" },
     { name = "pyzmq", marker = "extra == 'dev'", specifier = ">=26" },
     { name = "pyzmq", marker = "extra == 'xlerobot'", specifier = ">=26" },
     { name = "reachy-mini", marker = "extra == 'reachy'", specifier = ">=1.10,<2" },
@@ -4340,7 +4344,7 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'microduck-camera'", specifier = ">=13" },
     { name = "zeroconf", marker = "extra == 'lan'", specifier = ">=0.132" },
 ]
-provides-extras = ["all", "anthropic", "dev", "gemini", "grok", "lan", "lerobot", "live", "microduck-camera", "openai", "reachy", "rosbridge", "xlerobot", "yolo"]
+provides-extras = ["all", "alohamini", "anthropic", "dev", "gemini", "grok", "lan", "lerobot", "live", "microduck-camera", "openai", "reachy", "rosbridge", "xlerobot", "yolo"]
 
 [[package]]
 name = "questionary"

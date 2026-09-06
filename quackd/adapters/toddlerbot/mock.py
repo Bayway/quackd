@@ -22,6 +22,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
+from quackd.adapters.toddlerbot.verbs import look_degrees
 from quackd.sim2d.render import BALL, FLOOR, HORIZON, SKY, focal_px
 from quackd.transport.base import Ack, DuckState, HeartbeatError, Intent
 
@@ -113,7 +114,9 @@ class ToddlerBotMock:
         if self.ball_xy is None:
             return None
         dx, dy = self.ball_xy[0] - self.x, self.ball_xy[1] - self.y
-        bearing = math.degrees(math.atan2(dy, dx) - self.theta) + self.neck_yaw
+        # MINUS the head: a target dead ahead of a head turned left is to the RIGHT of
+        # the camera. open_duck/mock.py does the same, and it is easy to get backwards.
+        bearing = math.degrees(math.atan2(dy, dx) - self.theta) - self.neck_yaw
         return math.hypot(dx, dy), (bearing + 180.0) % 360.0 - 180.0
 
     # ── protocol ────────────────────────────────────────────────────────────────────
@@ -163,6 +166,9 @@ class ToddlerBotMock:
                     "yaw_deg": round(self.neck_yaw, 1),
                     "pitch_deg": round(self.neck_pitch, 1),
                 },
+                # what core's gaze sweep centres on, spelled the way every gaze body
+                # in this repository spells it
+                "head_yaw_deg": round(self.neck_yaw, 1),
                 "holding": dict(self.holding),
                 "robot": self.robot_name,
                 "calibrated": self.calibrated,
@@ -200,10 +206,12 @@ class ToddlerBotMock:
                     return Ack(accepted=False, reason="this build has no neck")
                 if self.fallen:
                     return Ack(accepted=False, reason="the robot has fallen")
-                self.neck_yaw = max(-NECK_YAW_LIMIT, min(NECK_YAW_LIMIT, float(p.get("y", 0.0))))
-                self.neck_pitch = max(
-                    -NECK_PITCH_LIMIT, min(NECK_PITCH_LIMIT, float(p.get("z", 0.0)))
+                # a direction, not degrees: the same three slots every other body uses
+                yaw, pitch = look_degrees(
+                    float(p.get("x", 1.0)), float(p.get("y", 0.0)), float(p.get("z", 0.0))
                 )
+                self.neck_yaw = max(-NECK_YAW_LIMIT, min(NECK_YAW_LIMIT, yaw))
+                self.neck_pitch = max(-NECK_PITCH_LIMIT, min(NECK_PITCH_LIMIT, pitch))
             case "gripper":
                 if not self.gripper_available:
                     return Ack(accepted=False, reason="this build has no grippers")

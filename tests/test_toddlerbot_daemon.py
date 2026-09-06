@@ -591,3 +591,52 @@ def test_the_walk_policy_is_driven_through_upstreams_own_interface() -> None:
     src = DAEMON.read_text(encoding="utf-8")
     assert "step_target" not in src
     assert "self.walk_policy.step(self.last_obs, self.sim)" in src
+
+
+def test_the_safe_pose_is_the_robots_home_pose_and_never_zeros() -> None:
+    """The bug this guards is the worst one in this file's history.
+
+    The daemon read `default_motor_pos`, which upstream really does have -- on `BasePolicy`,
+    not on `Robot` -- behind a `getattr` fallback that quietly turned the wrong name into an
+    all-zeros pose. Zeros are not neutral on this body: home carries plus or minus 1.57 rad of
+    shoulder and elbow yaw and 1.22 of wrist. So the pose the deadman slews to, `stand`
+    targets and the excepthook settles to would have been a large wrong motion on every limb,
+    at the exact moment nobody was driving the robot, and every test passed because the fake
+    body happened to define the name the daemon was reading.
+    """
+    robot = D.FakeRobot()
+    robot.default_motor_angles = dict.fromkeys(robot.motor_ordering, 0.3)
+    d = D.Daemon(robot, D.FakeSim(robot), fake=True)
+    assert np.allclose(d.command.default_pose, 0.3), "the safe pose is the robot's home pose"
+    assert not np.allclose(d.command.default_pose, 0.0), "and is not the all-zeros fallback"
+
+
+def test_a_robot_with_no_home_pose_refuses_to_start() -> None:
+    """No fallback on this path. A rename upstream has to be a crash at startup rather than a
+    plausible-looking pose discovered at slew time."""
+    robot = D.FakeRobot()
+    del robot.default_motor_angles
+    with pytest.raises(AttributeError):
+        D.Daemon(robot, D.FakeSim(robot), fake=True)
+
+
+def test_a_home_pose_of_the_wrong_length_refuses_to_start() -> None:
+    robot = D.FakeRobot()
+    robot.default_motor_angles = {"only_one": 0.0}
+    with pytest.raises(SystemExit, match="same shape as the body"):
+        D.Daemon(robot, D.FakeSim(robot), fake=True)
+
+
+async def test_a_daemon_that_loaded_no_motions_offers_no_perform() -> None:
+    """Absent, not gated. An empty list means the keyframe files were missing or unreadable,
+    which is a different thing from a backend that does not report motions at all, and the
+    client used to treat the two the same and re-advertise all five."""
+    with _Serving(motions=[]) as s:
+        adapter = ToddlerBotAdapter(ToddlerBotBridge(address=s.address))
+        manifest = await adapter.connect()
+        assert adapter.transport.motions == ()
+        assert not manifest.provides("perform")
+        assert "perform" not in manifest.preconditions
+        assert manifest.extras["motions"] == []
+        assert manifest.provides("stand"), "and the verbs that need no keyframes survive"
+        await adapter.transport.close()

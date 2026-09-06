@@ -29,7 +29,7 @@ uv run quackd run alohamini-lookout --robot alohamini:zmq --address tcp://192.16
 | `--robot` | What it is | Status |
 |---|---|---|
 | `alohamini:mock` | base, lift and arms in memory, with a synthetic camera | ✅ every verb runs offline in the test suite |
-| `alohamini:sim2d` | the cartoon world, which already integrates a holonomic base, plus a lift | ✅ |
+| `alohamini:sim2d` | the cartoon world, which already integrates a holonomic base, plus a lift | ✅ `alohamini-lookout` 10 of 10 seeds |
 | `alohamini:zmq` | the real robot, over the ZeroMQ host it ships | 🧪 wire format VERIFIED at the pin, exercised against a fake host over loopback, **never run on a robot** |
 
 ## Why quackd does not import it

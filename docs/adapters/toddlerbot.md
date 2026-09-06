@@ -27,7 +27,7 @@ uv run quackd run toddlerbot-lookout --robot toddlerbot:bridge \
 | `--robot` | What it is | Status |
 |---|---|---|
 | `toddlerbot:mock` | the daemon's answers in memory | ✅ every verb runs offline in the test suite |
-| `toddlerbot:sim2d` | the cartoon world with a humanoid profile | ✅ runs, no seeded sweep yet |
+| `toddlerbot:sim2d` | the cartoon world with a humanoid profile | ✅ `toddlerbot-lookout` 10 of 10 seeds |
 | `toddlerbot:bridge` | the real robot, through the daemon quackd ships | 🧪 names VERIFIED at the pin, the protocol and the daemon exercised against a fake body over loopback, **never run on a robot** |
 
 ## Why quackd ships a daemon
@@ -82,7 +82,6 @@ file, so none of it was ever machine-verified by anyone.
   fill, so the shape that upstream's threaded IMU returns is not a fact quackd depends on
   and is not cited here. If a future verb ever needs the IMU directly, that is the point at
   which somebody has to read it at the pin.
-  fall ends the run. Every moving verb refuses afterwards and asks for a human.
 - **Report a battery.** Bus voltage is read in C++ and only printed, so a battery abort can
   never fire here.
 - **Report a position.** The observation carries motor positions and an orientation. There is
@@ -218,6 +217,7 @@ is strictly more than the fake body could prove and strictly less than a robot.
 | MuJoCo is transitive | `brax` | undeclared and unpinned |
 | The builds | `Robot` | five names, thirty to thirty-two motors |
 | The only joint limits | `motor_limits` | parsed from the MJCF, never from YAML |
+| The safe pose | `default_motor_angles` | a dict of radians per motor, **not** `default_motor_pos`, which is a real upstream name on a different class. quackd reads it with no fallback: zeros are a large wrong motion on this body |
 | Calibration is absent | `motors.yml` | gitignored, so a fresh clone has none |
 | The only offline motion | `motion` | eighteen keyframes, nine motions |
 | No loader exists | `joblib.load` | every reader upstream loads the file inline |

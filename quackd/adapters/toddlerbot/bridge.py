@@ -37,6 +37,7 @@ from typing import Any
 
 from PIL import Image, UnidentifiedImageError
 
+from quackd.adapters.toddlerbot.verbs import look_degrees
 from quackd.transport.base import Ack, DuckState, HeartbeatError, Intent, TransportError
 
 STATUS = "EXPERIMENTAL - quackd's own protocol, never run against a robot"
@@ -77,6 +78,14 @@ def parse_address(address: str) -> tuple[str, int]:
     if not port.isdigit():
         raise TransportError(f"bad address {address!r}; expected tcp://host:port")
     return host, int(port)
+
+
+def _yaw_deg(p: dict[str, Any]) -> float:
+    return look_degrees(float(p.get("x", 1.0)), float(p.get("y", 0.0)), float(p.get("z", 0.0)))[0]
+
+
+def _pitch_deg(p: dict[str, Any]) -> float:
+    return look_degrees(float(p.get("x", 1.0)), float(p.get("y", 0.0)), float(p.get("z", 0.0)))[1]
 
 
 class ToddlerBotBridge:
@@ -283,6 +292,7 @@ class ToddlerBotBridge:
         extras = {
             "joints": state.get("joints") or {},
             "neck": state.get("neck") or {},
+            "head_yaw_deg": float((state.get("neck") or {}).get("yaw_deg") or 0.0),
             "holding": state.get("holding") or {},
             "robot": self.robot_name,
             "calibrated": bool(state.get("calibrated", False)),
@@ -339,8 +349,10 @@ class ToddlerBotBridge:
                         await self.request(
                             LOOK,
                             {
-                                "yaw_deg": float(p.get("y", 0.0)),
-                                "pitch_deg": float(p.get("z", 0.0)),
+                                # the intent carries a direction; the wire carries
+                                # the two servo angles the daemon actually commands
+                                "yaw_deg": _yaw_deg(p),
+                                "pitch_deg": _pitch_deg(p),
                             },
                         )
                     )

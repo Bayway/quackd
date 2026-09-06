@@ -318,14 +318,20 @@ WALK_NEEDS_A_WANDB_CHECKPOINT = UpstreamRef(
     "it looks for a local onnx checkpoint and otherwise pulls a wandb artifact. Nothing is "
     "checked into the repository and the README mentions no checkpoint, no wandb entity and "
     "no download at all. So on a bare install there is no walk policy, and quackd does not "
-    "declare move, go_to or approach_and unless the daemon reports one staged.",
+    "declare move, go_to or approach_and unless the daemon reports one staged."
+    " Its annotation says Dict[str, Any] and it returns a str directory, ckpts/<name>, and its "
+    "argument is a run name rather than a path."
+    " quackd checks for model_best.onnx and env_config.json itself and refuses when either is "
+    "absent, because a robot should not silently download the thing that decides how it walks.",
 )
 WALK_COMMAND_KEYS_ARE_ALL_OR_NOTHING = UpstreamRef(
     "control_inputs",
     "VERIFIED",
     src(_MJX, 143),
     "a plain attribute with no setter, and the walk policy indexes its three keys "
-    "unconditionally, so a partial command raises KeyError mid-tick.",
+    "unconditionally, so a partial command raises KeyError mid-tick."
+    " An empty dict is not a stop either: it falls back to the fixed command, so quackd always "
+    "sends all three keys and sends explicit zeros to stand still.",
 )
 WALK_COMMAND_RANGE = UpstreamRef(
     "command_range",
@@ -333,7 +339,10 @@ WALK_COMMAND_RANGE = UpstreamRef(
     src(_MJX, 92),
     "the range actually enforced comes from the checkpoint's own config rather than from the "
     "gin file, so quackd reads it at connect rather than hardcoding it. The gin file at this "
-    "pin says forward velocity minus 0.2 to plus 0.3, which is asymmetric.",
+    "pin says forward velocity minus 0.2 to plus 0.3, which is asymmetric."
+    " It is shaped (num_commands, 2) and the walk velocities are rows 5, 6 and 7: the first five "
+    "are upper-body pose commands, so reading rows 0 to 2 would clamp against the wrong thing "
+    "entirely.",
 )
 
 # ── the sensors that exist, and the one that does not ───────────────────────────────────
@@ -402,7 +411,9 @@ MOTOR_LIMITS_COME_FROM_THE_MJCF = UpstreamRef(
     src(_ROBOT, 191),
     "parsed from the joint ranges in the fixed-base MJCF, never from YAML. This is the only "
     "source of a joint limit anywhere, and it is what quackd clamps against because nothing "
-    "upstream does.",
+    "upstream does."
+    " It is a Dict[str, List[float]] of [low, high] in radians rather than an array, so it has to "
+    "be ordered through motor_ordering before it can clamp anything.",
 )
 CALIBRATION_IS_NOT_IN_THE_REPO = UpstreamRef(
     "motors.yml",
@@ -504,15 +515,6 @@ CAMERA_GET_JPEG_SWAPS_RED_AND_BLUE = UpstreamRef(
 
 # ── the walk policy, whose interface is not what a reader would guess ───────────────────
 
-WALK_LOADER_RETURNS_A_DIRECTORY = UpstreamRef(
-    "load_wandb_policy",
-    "VERIFIED",
-    src(_MJX, 27),
-    "its annotation says Dict[str, Any] and it returns a str directory, ckpts/<name>, and it "
-    "downloads from wandb when the file is missing. The argument is a run name, not a path. "
-    "quackd checks for model_best.onnx and env_config.json itself and refuses when either is "
-    "absent, because a robot should not silently download the thing that decides how it walks.",
-)
 WALK_STEP_TAKES_THE_OBSERVATION = UpstreamRef(
     "WalkPolicy.step",
     "VERIFIED",
@@ -521,24 +523,6 @@ WALK_STEP_TAKES_THE_OBSERVATION = UpstreamRef(
     "observation and the sim, answering with (control_inputs, motor_target). The target is "
     "(30,) float32 radians in motor_ordering, already clipped to motor_limits. There is no "
     "method that takes only the current pose.",
-)
-WALK_COMMAND_ROWS_ARE_FIVE_SIX_SEVEN = UpstreamRef(
-    "command_range",
-    "VERIFIED",
-    src(_MJX, 93),
-    "shaped (num_commands, 2) and read from the checkpoint's own env_config.json, so it is "
-    "the envelope this policy was really trained on. The walk velocities are rows 5, 6 and 7: "
-    "the first five are upper-body pose commands. walk.gin's training defaults are vx "
-    "[-0.2, 0.3], vy [-0.1, 0.1] and yaw [-1.0, 1.0], asymmetric in forward speed.",
-)
-WALK_INPUTS_ARE_ALL_THREE_OR_NONE = UpstreamRef(
-    "control_inputs",
-    "VERIFIED",
-    src(_MJX, 143),
-    "a plain dict attribute that takes precedence over the joystick when non-empty. All three "
-    "of walk_x, walk_y and walk_turn are indexed unconditionally, so a partial dict raises "
-    "KeyError mid-tick, and an empty one means use the fixed command rather than stop. quackd "
-    "always sends all three, and sends explicit zeros to stand still.",
 )
 WALK_INPUTS_ARE_NEVER_CLIPPED = UpstreamRef(
     "walk_x",
@@ -601,6 +585,28 @@ MUJOCO_PATHS_ARE_RELATIVE = UpstreamRef(
     "the daemon changes directory to the checkout root before constructing either. Robot "
     "also parses <robot>_fixed.xml unconditionally, for the motor ordering, even when the "
     "body is free.",
+)
+
+ROBOT_DEFAULT_POSE = UpstreamRef(
+    "default_motor_angles",
+    "VERIFIED",
+    src(_ROBOT, 105),
+    "a Dict[str, float] keyed by motor name, in motor_ordering order because it is built by "
+    "iterating it, in radians, from each motor's home_pos in default.yml. It is NOT "
+    "default_motor_pos, which is a real upstream name but lives on BasePolicy, and NOT "
+    "default_joint_angles, which is a different space. Every upstream caller converts it the "
+    "same way: np.array(list(robot.default_motor_angles.values())). quackd reads it with no "
+    "fallback, because this is the pose the deadman slews to and zeros are not a neutral pose "
+    "on this body: home carries plus or minus 1.57 rad of shoulder and elbow yaw and 1.22 of "
+    "wrist, so a wrong name would mean a large wrong motion on every limb at the exact moment "
+    "nobody is driving the robot.",
+)
+ROBOT_MOTOR_COUNT = UpstreamRef(
+    "nu",
+    "VERIFIED",
+    src(_ROBOT, 88),
+    "len(motor_ordering): thirty on the 2xc and 2xm, thirty-two on the gripper builds and "
+    "fourteen on the teleop leader, so nothing may assume a count.",
 )
 
 # ── what quackd assumes ─────────────────────────────────────────────────────────────────

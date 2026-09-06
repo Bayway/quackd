@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from quackd.adapters.toddlerbot.verbs import MOTIONS
+from quackd.adapters.toddlerbot.verbs import MOTIONS, look_degrees
 from quackd.transport.base import Ack, DuckState, Intent
 from quackd.transport.sim2d import Sim2DTransport
 
@@ -72,6 +72,7 @@ class ToddlerBotSim2D(Sim2DTransport):
                         "yaw_deg": round(self.neck_yaw, 1),
                         "pitch_deg": round(self.neck_pitch, 1),
                     },
+                    "head_yaw_deg": round(self.neck_yaw, 1),
                     "robot": self.robot_name,
                     "calibrated": True,
                     "moving": self.moving,
@@ -110,10 +111,17 @@ class ToddlerBotSim2D(Sim2DTransport):
     async def send_intent(self, intent: Intent) -> Ack:
         p: dict[str, Any] = intent.params
         if intent.kind == "look":
-            # the head is two joints, not an IK target: yaw and pitch arrive in degrees
-            self.neck_yaw = max(-NECK_YAW_LIMIT, min(NECK_YAW_LIMIT, float(p.get("y", 0.0))))
-            self.neck_pitch = max(-NECK_PITCH_LIMIT, min(NECK_PITCH_LIMIT, float(p.get("z", 0.0))))
-            return Ack()
+            # The head is two joints rather than an IK target, but the intent still
+            # carries a direction like every other body's, so convert rather than
+            # reading degrees out of the same slots.
+            yaw, pitch = look_degrees(
+                float(p.get("x", 1.0)), float(p.get("y", 0.0)), float(p.get("z", 0.0))
+            )
+            self.neck_yaw = max(-NECK_YAW_LIMIT, min(NECK_YAW_LIMIT, yaw))
+            self.neck_pitch = max(-NECK_PITCH_LIMIT, min(NECK_PITCH_LIMIT, pitch))
+            # and the cartoon head has to actually turn, or `observe` after a `look`
+            # sees whatever it saw before and the whole gaze sweep is theatre
+            return await super().send_intent(intent)
         if intent.kind == "sound":
             return Ack(accepted=False, reason="a ToddlerBot has no text to speech")
         if intent.kind == "gripper":

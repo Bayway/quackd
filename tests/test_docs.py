@@ -316,3 +316,47 @@ def test_no_living_document_claims_the_wrong_number_of_mcp_tools() -> None:
         # anything that still describes the removed aliases as present, in any wording
         for stale in ("duck_* tools kept as aliases", "`duck_*` tools kept as aliases"):
             assert stale not in haystack, f"{path.name} describes the duck_* aliases as present"
+
+
+# ── the guard that was missing twice ────────────────────────────────────────────────────
+
+
+def test_the_architecture_diagram_names_every_adapter() -> None:
+    """`_prose()` strips fenced blocks before every other doc guard, so the mermaid diagram
+    is invisible to all of them by construction.
+
+    That is not hypothetical. `docs/design/memory.md` records 0.6 fixing exactly this defect
+    ("the README's architecture diagram listed four adapters and omitted `open_duck` and its
+    `bridge` backend, which the adapter-count guard could not see because it reads the phrase
+    'N adapters' and not a list"). Nothing was added to catch it, so it came back three
+    adapters later. This is that guard.
+    """
+    from quackd.adapters.factory import ADAPTER_NAMES, BACKENDS
+
+    node = next((line for line in README.splitlines() if 'ADAPTER["robot adapter' in line), None)
+    assert node is not None, "the architecture diagram's adapter node has moved or gone"
+    missing = [name for name in ADAPTER_NAMES if name not in node]
+    assert not missing, f"the architecture diagram does not name: {missing}"
+
+    #: Backends are listed by their bare name in that node, so every distinct one must appear.
+    kinds = {backend for backends in BACKENDS.values() for backend in backends}
+    absent = sorted(k for k in kinds if k not in node)
+    assert not absent, f"the architecture diagram does not name the backends: {absent}"
+
+
+def test_no_fenced_block_names_a_stale_subset_of_the_adapters() -> None:
+    """The general form of the same hole: any fenced block that enumerates most of the
+    adapters has to enumerate all of them, or it is a list somebody forgot to update."""
+    from quackd.adapters.factory import ADAPTER_NAMES
+
+    for doc in [REPO / "README.md", *sorted((REPO / "docs").rglob("*.md"))]:
+        text = doc.read_text(encoding="utf-8")
+        for block in re.findall(r"```.*?```", text, flags=re.S):
+            named = [n for n in ADAPTER_NAMES if n in block]
+            if len(named) < len(ADAPTER_NAMES) - 2:
+                continue  # not an enumeration, just a couple of examples
+            missing = [n for n in ADAPTER_NAMES if n not in block]
+            assert not missing, (
+                f"{doc.relative_to(REPO)}: a fenced block names {len(named)} adapters "
+                f"and omits {missing}"
+            )

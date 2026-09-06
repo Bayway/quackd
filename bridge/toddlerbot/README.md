@@ -72,9 +72,13 @@ python quackd_toddlerbot_bridge.py --robot toddlerbot_2xc --toddlerbot .
 `mujoco` is not a declared dependency upstream. It arrives transitively and unpinned, so pin
 it yourself.
 
-`--camera`, `--walk` and `--gripper` declare what this robot has, and the handshake passes
-them to quackd. Nothing is assumed: a walk checkpoint is a wandb artifact upstream does not
-publish, so `--walk` is a claim you make about your own robot.
+`--camera left|right`, `--walk-policy NAME` and `--gripper` say what this robot has, and
+**each is checked rather than believed**. A camera that will not open is logged and the
+robot simply has none, so quackd never offers `observe`. A walk checkpoint is a wandb
+artifact upstream neither publishes nor checks in, so `--walk-policy` names a directory
+under `ckpts/` that you supply, and the daemon refuses to start rather than reaching for
+wandb from a robot. The handshake reports what actually loaded, including which motions
+were readable, and quackd's manifest is built from that answer.
 
 `--fake` runs the whole daemon and protocol against a simulated body, with no robot and no
 upstream installed, which is what CI does. `--once` sets up, reports what it found, and exits.
