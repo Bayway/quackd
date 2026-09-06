@@ -24,7 +24,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from quackd.transport.base import DuckState, Intent
-from quackd.verbs.core import send_or_fail
+from quackd.verbs.core import SearchScanParams, _gaze_sweep, send_or_fail
 from quackd.verbs.registry import NoParams, Precondition, Verb, VerbContext, VerbResult
 
 #: The motions that ship as keyframes in the repository, and therefore the only motion that
@@ -52,6 +52,8 @@ SHIPPED_MOTIONS: tuple[str, ...] = (
 MOTIONS: tuple[str, ...] = ("hold", "kneel", "cuddle", "push_up", "crawl")
 
 NECK_FRACTION = 0.8
+NECK_YAW_LIMIT_DEG = 90.0
+"""How far the head sweeps either side of centre, matching `LookParams.yaw_deg`."""
 """How much of the neck's own range `look` will use. The range is not what breaks a neck
 linkage; a step command arriving from a network is, so the daemon also rate limits."""
 LOOK_S = 1.2
@@ -248,6 +250,20 @@ async def grip(ctx: VerbContext, p: GripParams) -> VerbResult:
     )
 
 
+async def search_scan(ctx: VerbContext, p: SearchScanParams) -> VerbResult:
+    """Sweep the head. Never turn the body.
+
+    `scan_mode` turns any robot that has both mobility and the twist intent, which is the
+    right answer for a duck and the wrong one here: with a walk checkpoint staged this body
+    is mobile, so the shared verb would pirouette a fall-prone 3 kg humanoid to look for a
+    ball, and there is no get-up policy if it goes over. The neck is right there.
+
+    The manifest declares `search_scan` only when there is both a camera and a neck, so the
+    thing this needs always exists by the time it runs.
+    """
+    return await _gaze_sweep(ctx, p, NECK_YAW_LIMIT_DEG)
+
+
 def toddlerbot_verbs(
     *,
     neck: bool = True,
@@ -284,6 +300,16 @@ def toddlerbot_verbs(
             )
         )
     if neck:
+        verbs.append(
+            Verb(
+                "search_scan",
+                "Look around for something by sweeping the head, without turning the body.",
+                search_scan,
+                SearchScanParams,
+                timeout_s=LOOK_S * 20 + 10,
+                safety_class="safe",
+            )
+        )
         verbs.append(
             Verb(
                 "look",

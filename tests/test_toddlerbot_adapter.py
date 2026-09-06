@@ -33,7 +33,7 @@ from quackd.cli import app
 from quackd.duckfile.parser import load_duck
 from quackd.duckfile.validate import validate_duck
 from quackd.perception.color_blob import ColorBlobDetector
-from quackd.safety import Executor, VerbNotAllowed, allow_all
+from quackd.safety import ConfirmDenied, Executor, VerbNotAllowed, allow_all
 from quackd.transport.base import Intent
 from quackd.verbs.core import scan_mode
 from quackd.verbs.registry import VerbNotFound, registry_from_manifest
@@ -460,3 +460,62 @@ def test_list_verbs_shows_the_real_set() -> None:
     names = _verb_column(result.output)
     assert {"look", "stand", "perform", "observe"} <= names, names
     assert not names & {"kick", "quack", "say", "relax", "stand_up", "sit_toggle"}, names
+
+
+async def test_search_scan_sweeps_the_head_and_never_turns_the_body() -> None:
+    """`scan_mode` turns any robot with mobility and the twist intent, which is right for a
+    duck and wrong for a humanoid that cannot get up. With a walk checkpoint staged this body
+    is mobile, so the shared verb would pirouette it to look for a ball. quackd supplies its
+    own implementation, and the manifest's own comment claims exactly this."""
+    from quackd.verbs.core import scan_mode
+
+    adapter = ToddlerBotAdapter(ToddlerBotMock(walk=True))
+    manifest = await adapter.connect()
+    mock = adapter.transport
+    assert isinstance(mock, ToddlerBotMock)
+    assert manifest.provides("search_scan")
+    # the shared rule would turn the body here, which is the whole reason for the override
+    assert scan_mode(manifest) == "turn"
+
+    ex = _executor(adapter, manifest)
+    start_theta = mock.theta
+    result = await ex.run_verb("search_scan", {"target": "ball", "max_steps": 4})
+    assert result.ok, result.summary
+    assert mock.theta == pytest.approx(start_theta), "it never turned the body"
+    assert not mock.intents_of("move"), "and never asked to walk"
+    assert mock.intents_of("look"), "it swept the head instead"
+
+
+async def test_the_confirm_gated_verbs_are_actually_gated() -> None:
+    """`stand` and `perform` declare `safety_class="confirm"`, and nothing in the suite
+    verified that declaration. These are the two verbs that move the whole body of a robot
+    which cannot get up, so the gate is the point of them being declared at all."""
+    asked: list[str] = []
+
+    def refuse(name: str, _params: dict[str, object]) -> bool:
+        asked.append(name)
+        return False
+
+    adapter = ToddlerBotAdapter(ToddlerBotMock())
+    manifest = await adapter.connect()
+    mock = adapter.transport
+    assert isinstance(mock, ToddlerBotMock)
+    ex = Executor(
+        registry_from_manifest(manifest, adapter),  # type: ignore[arg-type]
+        adapter,
+        contract=None,
+        detector=ColorBlobDetector(),
+        confirm=refuse,
+    )
+
+    for verb, params in (("stand", {}), ("perform", {"motion": "kneel"})):
+        # a denial stops the verb outright rather than returning a failed result
+        with pytest.raises(ConfirmDenied, match=verb):
+            await ex.run_verb(verb, params)
+    assert asked == ["stand", "perform"], asked
+    assert mock.stands == 0 and mock.performed == [], "and neither reached the robot"
+
+    # while the safe ones are never gated
+    assert (await ex.run_verb("report_state", {})).ok
+    assert (await ex.run_verb("observe", {})).ok
+    assert asked == ["stand", "perform"], "a safe verb must not ask"

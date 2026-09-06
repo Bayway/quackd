@@ -44,6 +44,9 @@ from quackd.transport.base import Ack, DuckState, DuckTransport, HeartbeatError,
 from quackd.verbs.core import CORE
 from quackd.verbs.registry import Precondition, Verb
 
+CORE_OVERRIDES = frozenset({"search_scan"})
+"""Core verbs this robot implements itself. Declared as core, run as ours."""
+
 BACKENDS = ("mock", "sim2d", "bridge")
 DEFAULT_ID = "toddlerbot"
 
@@ -128,7 +131,10 @@ def toddlerbot_manifest(
     verbs = [
         verb_spec(CORE["report_state"], core=True),
         verb_spec(CORE["stop"], core=True),
-        *[verb_spec(v, core=False) for v in own.values()],
+        # `search_scan` is quackd's own implementation of a core verb, not an extension
+        # of this robot's: it is declared below as core, where the camera gates it, and
+        # the registry takes the head-only implementation from `implementations()`.
+        *[verb_spec(v, core=False) for n, v in own.items() if n not in CORE_OVERRIDES],
     ]
     preconditions: dict[str, list[str]] = {"stand": ["link_fresh", "calibrated"]}
     if motions:

@@ -194,9 +194,12 @@ class AlohaMiniMock:
             posture="unknown",
             fallen=False,
             battery_percent=None,
-            x=self.x,
-            y=self.y,
-            theta=self.theta,
+            # No pose. Neither robot has odometry: both wires carry velocities and never a
+            # position, so the real backends report None and the mock has to as well. A mock
+            # that is easier than the robot is a task that passes here and fails there.
+            x=None,
+            y=None,
+            theta=None,
             holding=any(self.holding.values()),
             extras={
                 "joints": {k: round(v, 1) for k, v in self.joints.items()},
