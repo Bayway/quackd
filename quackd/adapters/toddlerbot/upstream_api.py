@@ -635,6 +635,16 @@ FALL_DETECTION = UpstreamRef(
     "orientation past a tilt threshold, and that threshold is a guess until somebody tips a "
     "real robot.",
 )
+GRIPPER_AXES = UpstreamRef(
+    "GRIPPER_AXES",
+    "UNVERIFIED",
+    src(_ROBOT, 195),
+    "which end of a gripper motor's travel is closed. Upstream states it nowhere, so "
+    "the daemon takes the low end of the MJCF joint range as closed and the high end as "
+    "open, and finds the motors by name. If a real robot opens when quackd says close, "
+    "this is the line that was wrong. It is also why the capability is only reported "
+    "when a gripper motor is actually found, rather than when the flag was passed.",
+)
 NECK_AXES = UpstreamRef(
     "NECK_AXES",
     "UNVERIFIED",

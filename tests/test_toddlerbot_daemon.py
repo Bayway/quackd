@@ -468,7 +468,15 @@ async def test_a_faulted_loop_fails_the_heartbeat_rather_than_looking_healthy() 
         link = ToddlerBotBridge(address=s.address)
         await link.connect()
         await _until(lambda: s.daemon.fault is not None)
-        with pytest.raises(HeartbeatError, match="faulted"):
+
+        # `bot.health` names the fault. The heartbeat may trip on either that or the loop
+        # rate, because a loop that is faulting is also a loop that is not ticking, and
+        # loop_hz is a rate over the last second rather than over the run.
+        health = await link.request("bot.health")
+        assert isinstance(health, dict)
+        assert health["ok"] is False
+        assert "faulted" in str(health["reason"]), health
+        with pytest.raises(HeartbeatError):
             await link.heartbeat()
         await link.close()
 
@@ -691,3 +699,141 @@ async def test_polling_state_does_not_count_as_driving_the_robot() -> None:
         assert polls > 5, "it really was polling throughout"
         assert s.daemon.deadman_tripped, "questions must not hold the deadman off"
         await link.close()
+
+
+# ── 9. the numbers that must never reach a servo ───────────────────────────────────────
+
+
+def test_a_non_finite_target_is_refused_rather_than_latched() -> None:
+    """`json.loads` accepts a bare NaN, `np.clip` propagates it, and `rate_limit` would then
+    carry it into `target`, where every later tick rate-limits from NaN. One bad number off
+    the wire would freeze the robot's commanded pose for the life of the process."""
+    d = _daemon()
+    good = d.target.copy()
+    d.command.hold(np.full(d.robot.nu, np.nan, np.float32))
+    d.tick()
+    assert np.all(np.isfinite(d.target)), "NaN never reached the target"
+    assert np.allclose(d.target, good), "and it held the last good pose"
+    d.command.hold(np.full(d.robot.nu, 0.2, np.float32))
+    for _ in range(200):
+        d.tick()
+    assert float(np.max(d.target)) > 0.1, "and it recovered once the numbers were numbers"
+
+
+async def test_a_nonsense_parameter_is_refused_and_the_link_survives() -> None:
+    """A TypeError inside the handler used to escape and drop the connection, so a bad
+    parameter cost the session rather than the call."""
+    with _Serving() as s:
+        link = ToddlerBotBridge(address=s.address)
+        await link.connect()
+        for bad in (float("nan"), float("inf"), None, "left"):
+            with pytest.raises(TransportError, match="yaw_deg"):
+                await link.request("bot.look", {"yaw_deg": bad, "pitch_deg": 0.0})
+        # and the link is still usable: the refusal cost the call, not the session
+        assert (await link.send_intent(Intent.look(x=1.0, y=0.0, z=0.0))).accepted
+        assert (await link.get_state()).extras["loop_hz"] > 0
+        await link.close()
+
+
+# ── 10. the head is not the body ───────────────────────────────────────────────────────
+
+
+def test_looking_around_does_not_cancel_what_the_body_is_doing() -> None:
+    """`bot.look` used to `hold()`, which cancelled a walk or a motion mid-stride and still
+    answered accepted. On a real body the neck is independent of the gait."""
+    d = _daemon()
+    d.command.play("kneel", [np.full(d.robot.nu, 0.2, np.float32)] * 600)
+    assert d.command.mode == D.Command.MOTION
+    d.aim_neck(0.4, -0.2)
+    for _ in range(400):  # the head is rate limited like every other joint
+        d.tick()
+    assert d.command.mode == D.Command.MOTION, "the motion is still running"
+    assert d.target[d.neck_yaw] == pytest.approx(0.4, abs=0.05)
+    assert d.target[d.neck_pitch] == pytest.approx(-0.2, abs=0.05)
+
+
+def test_which_neck_motor_is_yaw_comes_from_its_name() -> None:
+    """Taking `neck[0]` as yaw assumes an ordering upstream never promises: an alphabetical
+    motors block lists neck_pitch first, and every look would go to the wrong joint."""
+    robot = D.FakeRobot()
+    robot.motor_ordering = ["neck_pitch", "neck_yaw", *robot.motor_ordering[2:]]
+    robot.default_motor_angles = dict.fromkeys(robot.motor_ordering, 0.0)
+    d = D.Daemon(robot, D.FakeSim(robot), fake=True)
+    assert robot.motor_ordering[d.neck_yaw] == "neck_yaw"
+    assert robot.motor_ordering[d.neck_pitch] == "neck_pitch"
+
+
+def test_one_dropped_read_does_not_cancel_a_walk() -> None:
+    """A dropped packet is routine on this bus. Cancelling a gait mid-stride because of one
+    is worse than feeding the policy a reading a tick old."""
+    d = _daemon()
+    # Move it off zero first: the all-zeros detector refuses a fresh fake's opening reading,
+    # correctly, because that is exactly what a dropped packet looks like on this bus.
+    d.command.hold(np.full(d.robot.nu, 0.2, np.float32))
+    for _ in range(200):
+        d.tick()
+    assert d.last_obs is not None
+    d.sim.drop_next = True
+    d.tick()
+    assert d.last_obs is not None, "the last good reading survived one drop"
+    for _ in range(D.DROP_LIMIT + 2):
+        d.sim.drop_next = True
+        d.tick()
+    assert d.last_obs is None, "but not an unbroken run of them"
+
+
+# ── 11. the gripper, which used to say yes and do nothing ──────────────────────────────
+
+
+def test_a_gripper_build_has_gripper_motors_and_a_plain_one_does_not() -> None:
+    plain = D.Daemon(D.FakeRobot(), D.FakeSim(D.FakeRobot()), fake=True)
+    assert not any(plain.grippers.values())
+    robot = D.FakeRobot("toddlerbot_2xc_gripper")
+    assert robot.nu == 32, "the gripper builds carry two more motors"
+    gripped = D.Daemon(robot, D.FakeSim(robot), fake=True)
+    assert gripped.grippers["left"] and gripped.grippers["right"]
+
+
+def test_closing_a_gripper_actually_commands_the_motor() -> None:
+    """`bot.grip` used to answer accepted and command nothing at all, on a capability taken
+    from a command line flag rather than from the body."""
+    robot = D.FakeRobot("toddlerbot_2xc_gripper")
+    robot.default_motor_angles = dict.fromkeys(robot.motor_ordering, 0.0)
+    d = D.Daemon(robot, D.FakeSim(robot), fake=True)
+    index = d.grippers["right"][0]
+
+    moved = d.set_grip("right", close=True)
+    assert moved == ["right_gripper"]
+    for _ in range(400):
+        d.tick()
+    assert d.target[index] == pytest.approx(float(d.lo[index]), abs=0.05)
+
+    d.set_grip("right", close=False)
+    for _ in range(400):
+        d.tick()
+    assert d.target[index] == pytest.approx(float(d.hi[index]), abs=0.05)
+
+    assert d.set_grip("left", close=True) == ["left_gripper"]
+    assert d.set_grip("both", close=True) == ["left_gripper", "right_gripper"]
+
+
+async def test_a_gripper_flag_on_a_body_with_no_grippers_is_not_a_capability() -> None:
+    with _Serving(gripper=False) as s:
+        link = ToddlerBotBridge(address=s.address)
+        await link.connect()
+        assert link.gripper_available is False
+        reply = await link.request("bot.grip", {"side": "right", "close": True})
+        assert isinstance(reply, dict) and reply["accepted"] is False
+        await link.close()
+
+
+def test_a_camera_that_stopped_answering_stops_being_a_camera() -> None:
+    """A wedged USB camera would otherwise serve its last good picture forever, and a pilot
+    would navigate by a photograph of somewhere the robot used to be."""
+    feed = D.CameraFeed.__new__(D.CameraFeed)
+    feed.lock = threading.Lock()
+    feed.jpeg = b"not really a jpeg"
+    feed.taken = time.monotonic()
+    assert feed.latest() is not None
+    feed.taken = time.monotonic() - D.CAMERA_STALE_S - 1.0
+    assert feed.latest() is None, "a stale frame is no frame"

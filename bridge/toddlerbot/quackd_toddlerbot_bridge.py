@@ -50,6 +50,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import collections
+import contextlib
 import hmac
 import json
 import logging
@@ -91,7 +93,22 @@ MAX_STEP_RAD = RESET_VEL * CONTROL_DT * 4.0
 """The most any joint may move in one tick, whatever asked for it."""
 CLOSE_TIMEOUT_S = 5.0
 FAULT_LIMIT = 10
+CONTROL_THREAD = "quackd-control"
+"""The only thread whose death is the robot's problem."""
+DROP_LIMIT = 5
+"""Consecutive dropped reads before the last good one stops being good enough. One is
+routine on this bus; five in a row at fifty hertz is a tenth of a second blind."""
+CATCHUP_LIMIT_S = 0.25
+"""How far behind the schedule may fall before it is reset rather than caught up.
+
+Catching up means running the backlog with no sleep between ticks, and each of those
+ticks is allowed a full MAX_STEP_RAD. Twelve ticks in a millisecond is not a rate limit,
+it is a jump, so a loop that fell behind starts again from now instead."""
 CAMERA_PERIOD_S = 0.1
+CAMERA_STALE_S = 2.0
+"""How old the newest frame may be before it is no frame at all. A wedged USB camera
+would otherwise serve its last good picture forever, and a pilot would navigate by a
+photograph of somewhere the robot used to be."""
 """Ten frames a second. quackd asks for one when it wants one, so this only bounds how
 stale the newest can be, and a USB read is expensive enough not to do at fifty."""
 
@@ -270,6 +287,9 @@ class Daemon:
         self.tilt_deg = 0.0
         self.deadman_tripped = False
         self.fault: str | None = None
+        self.dropped = 0
+        self.neck_goal: Any = None
+        self.grip_goal: dict[int, float] = {}
         self.faults = 0
         self._shut = False
         self.calibrated = bool(getattr(robot, "quackd_calibrated", False))
@@ -286,6 +306,26 @@ class Daemon:
         self.hi = np.array([limits.get(k, (-math.pi, math.pi))[1] for k in order], np.float32)
         self.waist = np.array([i for i, k in enumerate(order) if "waist" in k], dtype=int)
         self.neck = [i for i, k in enumerate(order) if "neck" in k]
+        #: By name, like the neck. A build without them has no gripper motors at all, so
+        #: the capability is what was found rather than what the operator passed.
+        self.grippers = {
+            "left": [i for i, k in enumerate(order) if "gripper" in k and "left" in k],
+            "right": [i for i, k in enumerate(order) if "gripper" in k and "right" in k],
+        }
+        # By name, not by position. `self.neck` is whatever contains 'neck', and taking
+        # [0] as yaw and [1] as pitch assumes an ordering upstream never promises: an
+        # alphabetical motors block lists neck_pitch before neck_yaw, which would send
+        # every look to the wrong joint. Fall back to order only when the names do not
+        # say, and say so when that happens.
+        self.neck_yaw = next((i for i in self.neck if "yaw" in order[i]), None)
+        self.neck_pitch = next((i for i in self.neck if "pitch" in order[i]), None)
+        if self.neck and (self.neck_yaw is None or self.neck_pitch is None):
+            log.warning(
+                "neck motors %s do not say which is yaw and which is pitch; assuming order",
+                [order[i] for i in self.neck],
+            )
+            self.neck_yaw = self.neck[0]
+            self.neck_pitch = self.neck[1] if len(self.neck) > 1 else None
         # `default_motor_angles`, and no getattr. The name matters more here than
         # anywhere else in this file: this is the pose the deadman slews to, the pose
         # `stand` targets and the pose the excepthook settles to. Upstream does have a
@@ -373,7 +413,17 @@ class Daemon:
     def tick(self, dt: float = CONTROL_DT) -> Any:
         """One control step: read, decide, clamp, write. Never raises for a bad reading."""
         with self.lock:
-            self.last_obs = self.observe()
+            obs = self.observe()
+            if obs is not None:
+                self.last_obs = obs
+                self.dropped = 0
+            else:
+                # Keep the last good reading rather than dropping to None. A single dropped
+                # packet is routine on this bus, and cancelling a gait mid-stride because of
+                # one is worse than feeding the policy a reading one tick old.
+                self.dropped += 1
+                if self.dropped > DROP_LIMIT:
+                    self.last_obs = None
             if time.monotonic() - self.command.last_client > DEADMAN_S:
                 if not self.deadman_tripped:
                     log.warning("quackd went quiet; slewing to the safe pose and holding")
@@ -382,17 +432,70 @@ class Daemon:
             else:
                 self.deadman_tripped = False
             wanted = self.plan(dt)
+            wanted = self._with_neck(wanted)
+            if not np.all(np.isfinite(wanted)):
+                # np.clip propagates NaN, rate_limit would then carry it into self.target, and
+                # every later tick would rate-limit from NaN: one bad number latches forever.
+                # json.loads accepts a bare NaN literal, so this is reachable from the wire.
+                log.error("a non-finite target reached the loop; holding the last good pose")
+                wanted = self.target
             wanted = clamp_to_limits(wanted, self.lo, self.hi)
             self.target = rate_limit(wanted, self.target)
             self.sim.set_motor_target(self.target)
             self.sim.step()
             return self.target
 
+    def _with_neck(self, wanted: Any) -> Any:
+        """Apply the head's own goal on top of whatever is driving the body.
+
+        Looking around used to `hold()`, which cancelled a walk or a motion mid-stride and
+        still answered accepted. The neck is independent of the gait on a real body, so it is
+        an overlay here too: the policy owns the other twenty-eight joints and the head goes
+        where it was last told.
+        """
+        if self.neck_goal is None and not self.grip_goal:
+            return wanted
+        out = np.array(wanted, dtype=np.float32, copy=True)
+        if self.neck_goal is not None and self.neck:
+            yaw, pitch = self.neck_goal
+            if self.neck_yaw is not None:
+                out[self.neck_yaw] = yaw
+            if self.neck_pitch is not None:
+                out[self.neck_pitch] = pitch
+        for index, value in self.grip_goal.items():
+            out[index] = value
+        return out
+
+    def set_grip(self, side: str, close: bool) -> list[str]:
+        """Command the gripper motors, and say which ones moved.
+
+        Returning the names matters: `bot.grip` used to answer accepted and command nothing
+        at all, on a capability taken from a flag rather than from the body.
+
+        Which end of a gripper's travel is closed is not stated anywhere upstream, so it is
+        an assumption (`upstream_api.GRIPPER_AXES`) and it is written down as one.
+        """
+        sides = ["left", "right"] if side == "both" else [side]
+        moved: list[str] = []
+        with self.lock:
+            for one in sides:
+                for index in self.grippers.get(one, []):
+                    low, high = float(self.lo[index]), float(self.hi[index])
+                    self.grip_goal[index] = low if close else high
+                    moved.append(self.order[index])
+        return moved
+
+    def aim_neck(self, yaw_rad: float, pitch_rad: float) -> None:
+        """Where the head should point. It does not change what the body is doing."""
+        with self.lock:
+            self.neck_goal = (float(yaw_rad), float(pitch_rad))
+
     def run(self) -> None:
         """The absolute schedule upstream uses, so a slow tick does not accumulate error."""
         self.running = True
         start = time.monotonic()
         step = 0
+        recent: Any = collections.deque(maxlen=256)
         while self.running:
             try:
                 self.tick()
@@ -414,10 +517,29 @@ class Daemon:
                 self.faults = 0
                 self.fault = None
             step += 1
-            self.loop_hz = step / max(1e-6, time.monotonic() - start)
-            slack = start + CONTROL_DT * step - time.monotonic()
+            now = time.monotonic()
+            # A rate over the last second, not over the run. A lifetime average takes tens of
+            # minutes to fall below the client's floor, so a loop that collapsed to 10 Hz an
+            # hour in would still report 49 and the heartbeat would never fire.
+            recent.append(now)
+            while len(recent) > 1 and now - recent[0] > 1.0:
+                recent.popleft()
+            if len(recent) > 1:
+                self.loop_hz = (len(recent) - 1) / max(1e-6, now - recent[0])
+            else:
+                # the very first tick, before the window has two samples to span
+                self.loop_hz = step / max(1e-6, now - start)
+
+            slack = start + CONTROL_DT * step - now
             if slack > 0:
                 time.sleep(slack)
+            elif slack < -CATCHUP_LIMIT_S:
+                log.warning(
+                    "the loop fell %.2f s behind; restarting the schedule rather than "
+                    "running the backlog at full speed",
+                    -slack,
+                )
+                start, step = time.monotonic(), 0
 
     # -- shutdown, which is the dangerous part --------------------------------------
 
@@ -592,23 +714,34 @@ class Handler(socketserver.StreamRequestHandler):
         if method == "bot.look":
             if not self.capabilities.get("neck"):
                 return {"accepted": False, "reason": "this build has no neck"}, authed
-            with d.lock:
-                _aim_neck(d, float(params.get("yaw_deg", 0.0)), float(params.get("pitch_deg", 0.0)))
+            d.aim_neck(
+                math.radians(_number(params, "yaw_deg")),
+                math.radians(_number(params, "pitch_deg")),
+            )
             return {"accepted": True}, authed
         if method == "bot.command":
             if not self.capabilities.get("walk"):
                 return {"accepted": False, "reason": "no walk policy is staged"}, authed
             with d.lock:
                 d.command.drive(
-                    float(params.get("walk_x", 0.0)),
-                    float(params.get("walk_y", 0.0)),
-                    float(params.get("walk_turn", 0.0)),
+                    _number(params, "walk_x"),
+                    _number(params, "walk_y"),
+                    _number(params, "walk_turn"),
                 )
             return {"accepted": True}, authed
         if method == "bot.grip":
             if not self.capabilities.get("gripper"):
                 return {"accepted": False, "reason": "this build has no grippers"}, authed
-            return {"accepted": True}, authed
+            side = str(params.get("side", "right"))
+            if side not in ("left", "right", "both"):
+                raise _Refused(ERR_REFUSED, f"unknown side {side!r}")
+            moved = d.set_grip(side, bool(params.get("close", True)))
+            if not moved:
+                return {
+                    "accepted": False,
+                    "reason": f"this robot has no gripper motor on the {side}",
+                }, authed
+            return {"accepted": True, "motors": moved}, authed
         if method == "bot.frame":
             return {"jpeg": d.camera.latest() if d.camera is not None else None}, authed
         raise _Refused(ERR_UNKNOWN, f"unknown method {method!r}")
@@ -631,6 +764,22 @@ class Handler(socketserver.StreamRequestHandler):
         self.wfile.write((json.dumps(payload) + "\n").encode())
 
 
+def _number(params: Any, key: str, default: float = 0.0) -> float:
+    """A float off the wire, or a refusal.
+
+    `json.loads` accepts a bare NaN and Infinity by default, and `float(None)` raises a
+    TypeError that would escape the handler and drop the connection rather than answer
+    it. Refusal is data here too."""
+    value = params.get(key, default) if isinstance(params, dict) else default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise _Refused(ERR_REFUSED, f"{key} must be a number, got {value!r}") from None
+    if not math.isfinite(number):
+        raise _Refused(ERR_REFUSED, f"{key} must be finite, got {number!r}")
+    return number
+
+
 class _Refused(Exception):
     def __init__(self, code: int, message: str) -> None:
         super().__init__(message)
@@ -643,29 +792,19 @@ class Server(socketserver.ThreadingTCPServer):
     address_family = socket.AF_INET
 
 
-def _aim_neck(d: Daemon, yaw_deg: float, pitch_deg: float) -> None:
-    """Point the head by writing the two neck joints of the held pose.
-
-    Which neck motor is yaw and which is pitch is inferred from the motor names rather than
-    stated anywhere upstream, and the result is clamped like every other joint."""
-    goal = d.safe.pose.copy()
-    if d.neck:
-        goal[d.neck[0]] = math.radians(yaw_deg)
-    if len(d.neck) > 1:
-        goal[d.neck[1]] = math.radians(pitch_deg)
-    d.command.hold(goal)
-
-
 # ── the fake body, so the whole daemon runs with nothing installed ──────────────────────
 
 
 class FakeRobot:
-    def __init__(self, name: str = "toddlerbot_2xc", nu: int = 30) -> None:
-        self.nu = nu
+    def __init__(self, name: str = "toddlerbot_2xc", nu: int | None = None) -> None:
+        # The gripper builds carry two more motors than the plain ones, and the difference
+        # matters: a keyframe file is per variant, and grip has to find a motor to command.
+        grippers = ["left_gripper", "right_gripper"] if "gripper" in name else []
+        self.nu = nu if nu is not None else 30 + len(grippers)
         self.name = name
-        self.motor_ordering = ["neck_yaw", "neck_pitch", "waist_roll", "waist_yaw"] + [
-            f"joint_{i}" for i in range(nu - 4)
-        ]
+        head = ["neck_yaw", "neck_pitch", "waist_roll", "waist_yaw"]
+        filler = [f"joint_{i}" for i in range(self.nu - len(head) - len(grippers))]
+        self.motor_ordering = head + filler + grippers
         self.motor_limits = {k: (-2.0, 2.0) for k in self.motor_ordering}
         self.default_motor_angles = {k: 0.0 for k in self.motor_ordering}
         self.quackd_calibrated = True
@@ -697,7 +836,7 @@ class FakeSim:
         self.closed = True
 
 
-def load_motions(root: str, robot_name: str) -> dict[str, list[Any]]:
+def load_motions(root: str, robot_name: str, robot: Any = None) -> dict[str, list[Any]]:
     """Read the keyframes upstream ships. There is no loader upstream to call.
 
     Every call site there does `joblib.load(path)` inline, so this does the same. The
@@ -736,6 +875,19 @@ def load_motions(root: str, robot_name: str) -> dict[str, list[Any]]:
         if frames.ndim != 2:
             log.error("motion %r is shaped %s, not frames of motors", name, frames.shape)
             continue
+        # The keyframe files are per variant, and the gripper builds have two more motors
+        # than the plain ones. A 30-wide frame sent to a 32-motor robot is not a short read,
+        # it is a command that means something different on every joint after the first
+        # mismatch, so it is refused rather than padded.
+        wanted = int(getattr(robot, "nu", frames.shape[1]))
+        if frames.shape[1] != wanted:
+            log.error(
+                "motion %r has %d motors and this robot has %d, so it is not offered",
+                name,
+                frames.shape[1],
+                wanted,
+            )
+            continue
         library[name] = [frames[i] for i in range(len(frames))]
         log.info("motion %r: %d frames", name, len(frames))
     return library
@@ -761,6 +913,7 @@ class CameraFeed:
         self.camera = Camera(side)
         self.lock = threading.Lock()
         self.jpeg: bytes | None = None
+        self.taken = 0.0
         self.running = True
         self.thread = threading.Thread(target=self._loop, daemon=True, name="quackd-camera")
         self.thread.start()
@@ -779,15 +932,22 @@ class CameraFeed:
             if ok:
                 with self.lock:
                     self.jpeg = buf.tobytes()
+                    self.taken = time.monotonic()
             time.sleep(CAMERA_PERIOD_S)
 
     def latest(self) -> str | None:
         with self.lock:
-            jpeg = self.jpeg
-        return base64.b64encode(jpeg).decode("ascii") if jpeg else None
+            jpeg, taken = self.jpeg, self.taken
+        if not jpeg or time.monotonic() - taken > CAMERA_STALE_S:
+            return None
+        return base64.b64encode(jpeg).decode("ascii")
 
     def close(self) -> None:
         self.running = False
+        self.thread.join(timeout=2.0)
+        # upstream's own close, which the device needs and which nothing else calls
+        with contextlib.suppress(Exception):
+            self.camera.close()
 
 
 def build_walk_policy(ckpt: str, robot: Any, init_pos: Any, root: str) -> tuple[Any, Any]:
@@ -949,13 +1109,18 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("quackd's ToddlerBot daemon needs numpy\n")
         return 2
 
+    # Resolved once, before anything changes directory. build_real and build_mujoco both
+    # chdir into the checkout, so a second os.path.abspath of a relative --toddlerbot would
+    # resolve against the new directory and quietly name a different path.
+    root = os.path.abspath(os.path.expanduser(args.toddlerbot))
+
     if args.fake:
         robot: Any = FakeRobot(args.robot)
         sim: Any = FakeSim(robot)
     else:
         build = build_mujoco if args.sim == "mujoco" else build_real
         try:
-            robot, sim = build(args.robot, os.path.abspath(args.toddlerbot))
+            robot, sim = build(args.robot, root)
         except ImportError as e:
             sys.stderr.write(
                 "quackd's ToddlerBot daemon needs upstream installed on this robot:\n"
@@ -966,19 +1131,36 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     daemon = Daemon(robot, sim, fake=args.fake)
-    if not args.fake:
-        daemon.motion_library = load_motions(os.path.abspath(args.toddlerbot), args.robot)
-    if args.camera:
-        try:
-            daemon.camera = CameraFeed(args.camera)
-        except Exception:
-            # Not fatal, and not something to paper over either: the robot simply has no
-            # camera, and the handshake will say so, so quackd never declares `observe`.
-            log.exception("the %s camera did not open, so this robot has none", args.camera)
-    if args.walk_policy and not args.fake:
-        daemon.walk_policy, daemon.walk_envelope = build_walk_policy(
-            args.walk_policy, robot, daemon.target, os.path.abspath(args.toddlerbot)
-        )
+
+    # From here the motors are live and torqued: upstream's RealWorld constructor energises
+    # them the moment it returns. Everything that follows can fail, and anything that leaves
+    # by exception or SystemExit would otherwise reach the C level atexit, which disconnects
+    # every client, which disables torque, which drops a standing robot. So the rest of
+    # start-up settles first and exits second.
+    def die(message: str) -> int:
+        log.error("%s", message)
+        daemon.shutdown()
+        sys.stderr.write(message + "\n")
+        return 2
+
+    try:
+        if not args.fake:
+            daemon.motion_library = load_motions(root, args.robot, robot)
+        if args.camera:
+            try:
+                daemon.camera = CameraFeed(args.camera)
+            except Exception:
+                # Not fatal, and not papered over either: the robot simply has no camera,
+                # the handshake says so, and quackd never declares `observe`.
+                log.exception("the %s camera did not open, so this robot has none", args.camera)
+        if args.walk_policy and not args.fake:
+            daemon.walk_policy, daemon.walk_envelope = build_walk_policy(
+                args.walk_policy, robot, daemon.target, root
+            )
+    except SystemExit as e:
+        return die(str(e) or "start-up refused")
+    except Exception as e:
+        return die(f"start-up failed after the motors were live: {e!r}")
 
     # Every one of these is what actually loaded, never what the operator claimed. A
     # capability quackd reports is a verb quackd will offer, and a verb it offers is one it
@@ -986,7 +1168,7 @@ def main(argv: list[str] | None = None) -> int:
     capabilities: dict[str, Any] = {
         "camera": daemon.camera is not None,
         "neck": bool(daemon.neck),
-        "gripper": bool(args.gripper),
+        "gripper": bool(args.gripper) and any(daemon.grippers.values()),
         "walk": daemon.walk_policy is not None,
         "deadman": True,
         "motions": sorted(daemon.motion_library),
@@ -995,11 +1177,24 @@ def main(argv: list[str] | None = None) -> int:
         capabilities["walk_envelope"] = daemon.walk_envelope
     if args.once:
         log.info("robot=%s motors=%d capabilities=%s", args.robot, robot.nu, capabilities)
+        # On a real body this has already energised every motor, so it cannot simply return:
+        # the interpreter exit would reach upstream's atexit and drop the robot where it
+        # stands. Settle, then close, then leave.
+        daemon.shutdown()
         return 0
 
     # Nothing upstream installs a signal handler, and its C level atexit does not run on
     # SIGTERM at all, so a systemd stop would leave a torqued robot holding its last target.
+    leaving = threading.Event()
+
     def on_signal(signum: int, _frame: Any) -> None:
+        # The settle takes seconds and prints nothing while it runs, so an operator's reflex
+        # is a second Ctrl-C. That used to re-enter here and raise straight through the slew,
+        # leaving the robot wherever it had got to and skipping the close entirely.
+        if leaving.is_set():
+            log.warning("signal %s: already settling, and it will not be hurried", signum)
+            return
+        leaving.set()
         log.warning("signal %s: settling before exit", signum)
         daemon.shutdown()
         raise SystemExit(0)
@@ -1022,10 +1217,32 @@ def main(argv: list[str] | None = None) -> int:
 
         return hook
 
-    sys.excepthook = settle_first(sys.excepthook)
-    threading.excepthook = settle_first(threading.excepthook)
+    def settle_if_it_was_driving(original: Any) -> Any:
+        """Thread deaths are not all the same.
 
-    loop = threading.Thread(target=daemon.run, daemon=True, name="quackd-control")
+        `threading.excepthook` is global. Shutting the whole robot down because the camera
+        thread raised would settle a robot that was walking perfectly well, so only the
+        thread that drives it gets that treatment. Every other thread is logged, and the
+        control loop's own fault handling deals with the rest.
+        """
+
+        def hook(args: Any) -> None:
+            if getattr(getattr(args, "thread", None), "name", "") == CONTROL_THREAD:
+                settle_first(original)(args)
+                return
+            log.exception(
+                "thread %s died: %s",
+                getattr(getattr(args, "thread", None), "name", "?"),
+                args.exc_value,
+            )
+            original(args)
+
+        return hook
+
+    sys.excepthook = settle_first(sys.excepthook)
+    threading.excepthook = settle_if_it_was_driving(threading.excepthook)
+
+    loop = threading.Thread(target=daemon.run, daemon=True, name=CONTROL_THREAD)
     loop.start()
 
     Handler.daemon_ref = daemon
