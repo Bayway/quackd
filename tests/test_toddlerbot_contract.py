@@ -215,11 +215,23 @@ async def test_a_client_that_goes_quiet_trips_the_deadman_on_real_physics() -> N
     with _Daemon() as daemon:
         link = await _connect(daemon)
         assert (await link.send_intent(Intent.do("stand"))).accepted
-        await asyncio.sleep(2.0)  # longer than the daemon's 500 ms deadman
-        # Asking is not driving: `bot.state` deliberately does not feed the deadman, which is
-        # what makes this observable from here at all.
-        state = await link.get_state()
+
+        # Going quiet means the client stops existing, not the client stopping talking: the
+        # transport sends a keepalive on its own timer precisely so a long verb is not
+        # cancelled underneath itself. Kill the keepalive and the socket, then watch.
+        assert link._alive is not None
+        link._alive.cancel()
+        assert link._writer is not None
+        link._writer.close()
+        await asyncio.sleep(2.0)  # four times the daemon's 500 ms deadman
+
+        # and the daemon is still alive, still looping, and holding rather than limp
+        watcher = ToddlerBotBridge(address=daemon.address)
+        await watcher.connect()
+        state = await watcher.get_state()
         assert state.extras["deadman_tripped"] is True, daemon.say_why()
+        assert state.extras["loop_hz"] > 40.0, daemon.say_why()
+        await watcher.close()
         health = await link.request("bot.health")
         assert isinstance(health, dict)
         assert health.get("loop_hz", 0) > 40.0, "it is still running the loop, not stopped"

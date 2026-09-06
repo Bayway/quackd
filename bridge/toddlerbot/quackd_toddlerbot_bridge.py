@@ -96,6 +96,10 @@ FAULT_LIMIT = 10
 CONTROL_THREAD = "quackd-control"
 """The only thread whose death is the robot's problem."""
 DROP_LIMIT = 5
+FRAME_DWELL_LIMIT = 100
+"""Ticks to spend trying to reach one keyframe before giving up on it. A frame outside the
+joint limits can never be reached, and a motion that stalls forever is worse than one that
+skips a frame and says so."""
 """Consecutive dropped reads before the last good one stops being good enough. One is
 routine on this bus; five in a row at fifty hertz is a tenth of a second blind."""
 CATCHUP_LIMIT_S = 0.25
@@ -131,8 +135,22 @@ ERR_BAD_TOKEN = 2
 ERR_REFUSED = 3
 ERR_UNKNOWN = 4
 
-READ_ONLY_METHODS = frozenset({"bot.state", "bot.health", "bot.frame"})
-"""Questions rather than commands, so they do not feed the deadman."""
+COMMAND_METHODS = frozenset(
+    {
+        "bot.keepalive",
+        "bot.stop",
+        "bot.stand",
+        "bot.perform",
+        "bot.look",
+        "bot.command",
+        "bot.grip",
+    }
+)
+"""The methods that drive the robot, and the only ones that feed the deadman.
+
+Questions (state, health, frame) do not, and neither does anything the daemon has never
+heard of: a client built against a newer protocol would otherwise hold the deadman off
+with calls this daemon is refusing, which is exactly the version-skew case it is for."""
 
 log = logging.getLogger("quackd-toddlerbot")
 
@@ -235,6 +253,7 @@ class Command:
         self.motion: str | None = None
         self.frames: list[Any] = []
         self.frame_index = 0
+        self.dwell = 0
         self.walk: dict[str, float] = {"walk_x": 0.0, "walk_y": 0.0, "walk_turn": 0.0}
         self.last_client = 0.0
 
@@ -258,6 +277,7 @@ class Command:
         self.motion = name
         self.frames = frames
         self.frame_index = 0
+        self.dwell = 0
 
     def drive(self, walk_x: float, walk_y: float, walk_turn: float) -> None:
         self.given = True
@@ -346,12 +366,17 @@ class Daemon:
         # this body: home carries plus or minus 1.57 rad of shoulder and elbow yaw and
         # 1.22 of wrist, so slewing to zeros is a large wrong motion on every limb, and
         # it would happen exactly when nobody is driving the robot.
-        default = np.array(list(robot.default_motor_angles.values()), np.float32)
-        if len(default) != n:
+        # By name, exactly as `lo` and `hi` are built three lines up. The dict is built by
+        # iterating motor_ordering upstream, so its insertion order matches today, but the
+        # limits do not rely on that and neither should the pose the deadman slews to.
+        angles = dict(robot.default_motor_angles)
+        missing = [k for k in order if k not in angles]
+        if missing:
             raise SystemExit(
-                f"this robot reports {n} motors and {len(default)} default angles. "
-                "Refusing to start: the safe pose has to be the same shape as the body."
+                f"this robot has no home angle for {missing}. Refusing to start: the safe "
+                "pose has to cover every motor."
             )
+        default = np.array([angles[k] for k in order], np.float32)
         self.safe = SafeState(default)
         self.command = Command(default)
         self.command.last_client = time.monotonic()
@@ -408,7 +433,28 @@ class Daemon:
                 cmd.hold(current)
                 return current
             frame = np.asarray(cmd.frames[cmd.frame_index], dtype=np.float32)
-            cmd.frame_index += 1
+            # Advance only once the body has actually reached this frame, or after waiting
+            # long enough that it plainly never will.
+            #
+            # The files are fifty hertz recordings of a body moving faster than this loop's
+            # per-tick rate limit allows, and `rate_limit` caps every step at MAX_STEP_RAD.
+            # Advancing regardless means the robot traces a smoothed shortcut through the
+            # keyframes and still reports the motion complete. Playing it slower is a
+            # different motion; playing it truncated is a different motion AND a wrong claim
+            # about which one ran.
+            away = float(np.max(np.abs(frame - self.target)))
+            if away <= MAX_STEP_RAD or cmd.dwell >= FRAME_DWELL_LIMIT:
+                if away > MAX_STEP_RAD:
+                    log.warning(
+                        "motion %r frame %d is %.3f rad away and not getting closer; moving on",
+                        cmd.motion,
+                        cmd.frame_index,
+                        away,
+                    )
+                cmd.frame_index += 1
+                cmd.dwell = 0
+            else:
+                cmd.dwell += 1
             return frame
         if cmd.mode == Command.WALK:
             # The policy owns the gait. quackd feeds it and clamps what comes back, because
@@ -735,7 +781,7 @@ class Handler(socketserver.StreamRequestHandler):
         # polls while it thinks, would otherwise hold the deadman off for as long as it kept
         # asking. WALK is latched, so the robot would go on walking with nobody steering it,
         # which is the exact failure the deadman exists for.
-        if method not in READ_ONLY_METHODS:
+        if method in COMMAND_METHODS:
             d.touch()
         if method == "bot.state":
             return d.state(), authed
@@ -801,6 +847,10 @@ class Handler(socketserver.StreamRequestHandler):
                     "reason": f"this robot has no gripper motor on the {side}",
                 }, authed
             return {"accepted": True, "motors": moved}, authed
+        if method == "bot.keepalive":
+            # A notification, and the only thing a client has to send to say it is
+            # still there. `d.touch()` above already did the work.
+            return None, authed
         if method == "bot.frame":
             return {"jpeg": d.camera.latest() if d.camera is not None else None}, authed
         raise _Refused(ERR_UNKNOWN, f"unknown method {method!r}")

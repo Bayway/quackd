@@ -688,10 +688,18 @@ def test_a_robot_with_no_home_pose_refuses_to_start() -> None:
         D.Daemon(robot, D.FakeSim(robot), fake=True)
 
 
-def test_a_home_pose_of_the_wrong_length_refuses_to_start() -> None:
+def test_a_home_pose_that_does_not_cover_every_motor_refuses_to_start() -> None:
+    """Built by name, like the joint limits beside it, so a motor with no home angle is named
+    rather than silently taking whatever the dict's insertion order happened to line up."""
     robot = D.FakeRobot()
     robot.default_motor_angles = {"only_one": 0.0}
-    with pytest.raises(SystemExit, match="same shape as the body"):
+    with pytest.raises(SystemExit, match="no home angle for"):
+        D.Daemon(robot, D.FakeSim(robot), fake=True)
+
+    # and one missing motor out of thirty is still a refusal, not a shrug
+    robot = D.FakeRobot()
+    robot.default_motor_angles = dict.fromkeys(robot.motor_ordering[:-1], 0.0)
+    with pytest.raises(SystemExit, match=robot.motor_ordering[-1]):
         D.Daemon(robot, D.FakeSim(robot), fake=True)
 
 
@@ -710,25 +718,30 @@ async def test_a_daemon_that_loaded_no_motions_offers_no_perform() -> None:
         await adapter.transport.close()
 
 
-async def test_polling_state_does_not_count_as_driving_the_robot() -> None:
-    """A client that stops steering but keeps asking questions must still trip the deadman.
+def test_reading_state_is_not_a_signal_of_life() -> None:
+    """Only the methods that drive the robot feed the deadman, plus the keepalive the
+    transport sends to say it is still there. A question is not a command, and neither is a
+    method this daemon has never heard of: a client built against a newer protocol would
+    otherwise hold the deadman off with calls this one is refusing."""
+    for question in ("bot.state", "bot.health", "bot.frame", "bot.hello"):
+        assert question not in D.COMMAND_METHODS, question
+    assert "bot.keepalive" in D.COMMAND_METHODS
+    assert "bot.some.method.from.the.future" not in D.COMMAND_METHODS
 
-    WALK is latched, so if `bot.state` fed the deadman a model that stalled mid-verb while
-    polling would leave the robot walking with nobody driving it. That is the exact failure
-    the deadman exists for, so the read-only methods deliberately do not touch it.
-    """
-    with _Serving(walk=True) as s:
+
+async def test_a_connected_client_is_not_treated_as_gone_part_way_through_a_verb() -> None:
+    """The deadman fires after half a second of silence and `stand` takes three, so without a
+    keepalive every long verb would be cancelled underneath itself by the safe-pose slew.
+
+    quackd's own `Heartbeat` cannot be that signal: its period is a run setting rather than
+    the manifest's, and it defaults to the same half second the deadman uses. The transport
+    keeps its own timer instead."""
+    with _Serving() as s:
         link = ToddlerBotBridge(address=s.address)
         await link.connect()
-        assert (await link.send_intent(Intent.move(vx=0.1))).accepted
-        deadline = asyncio.get_running_loop().time() + 5.0
-        polls = 0
-        while asyncio.get_running_loop().time() < deadline and not s.daemon.deadman_tripped:
-            await link.get_state()  # a question, over and over
-            polls += 1
-            await asyncio.sleep(0.02)
-        assert polls > 5, "it really was polling throughout"
-        assert s.daemon.deadman_tripped, "questions must not hold the deadman off"
+        assert (await link.send_intent(Intent.do("stand"))).accepted
+        await asyncio.sleep(D.DEADMAN_S * 3)  # well past the window, sending no commands
+        assert not s.daemon.deadman_tripped, "the keepalive said the client was still there"
         await link.close()
 
 
@@ -864,3 +877,46 @@ def test_a_camera_that_stopped_answering_stops_being_a_camera() -> None:
     assert feed.latest() is not None
     feed.taken = time.monotonic() - D.CAMERA_STALE_S - 1.0
     assert feed.latest() is None, "a stale frame is no frame"
+
+
+async def test_closing_the_link_does_not_sit_out_the_request_timeout() -> None:
+    """`close()` sends a final stop, and `request()` waits on a future that only the read loop
+    can resolve. Cancelling the pump first meant every close waited the whole request timeout
+    and never saw the answer, which is three seconds of nothing on every disconnect."""
+    with _Serving() as s:
+        link = ToddlerBotBridge(address=s.address, request_timeout_s=3.0)
+        await link.connect()
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        await link.close()
+        elapsed = loop.time() - started
+        assert elapsed < 1.0, f"close() took {elapsed:.1f}s waiting for an answer nobody could give"
+        assert s.daemon.command.mode == D.Command.HOLD, "and the daemon really got the stop"
+
+
+def test_a_motion_is_played_rather_than_smoothed_past() -> None:
+    """The keyframe files are fifty hertz recordings of a body moving faster than this loop's
+    per-tick rate limit allows. Advancing a frame every tick regardless meant the robot traced
+    a smoothed shortcut through them and still reported the motion complete."""
+    d = _daemon()
+    d.tick()
+    far = np.full(d.robot.nu, 1.0, np.float32)  # far further than one tick can travel
+    d.command.play("kneel", [far, far * -1.0])
+    d.touch()
+    d.tick()
+    assert d.command.frame_index == 0, "it did not advance past a frame it has not reached"
+
+    _ticks(d, 300)
+    assert d.command.frame_index >= 1, "and it did advance once the body caught up"
+    assert float(np.max(np.abs(d.target))) > 0.5, "having actually gone most of the way there"
+
+
+def test_a_keyframe_that_can_never_be_reached_does_not_stall_the_motion_forever() -> None:
+    """A frame outside the joint limits is unreachable by construction, and a motion that
+    waits for it forever is worse than one that skips it and says so."""
+    d = _daemon()
+    d.tick()
+    impossible = np.full(d.robot.nu, 99.0, np.float32)  # the clamp will never allow this
+    d.command.play("kneel", [impossible])
+    _ticks(d, D.FRAME_DWELL_LIMIT + 5)
+    assert d.command.frame_index >= 1, "it gave up on the frame rather than dwelling forever"

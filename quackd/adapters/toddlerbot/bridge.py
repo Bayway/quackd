@@ -61,6 +61,19 @@ STAND = "bot.stand"
 PERFORM = "bot.perform"
 GRIP = "bot.grip"
 FRAME = "bot.frame"
+KEEPALIVE = "bot.keepalive"
+
+KEEPALIVE_S = 0.15
+"""How often the client says it is still there.
+
+The daemon's deadman fires after half a second of silence, and on this body that is
+not a stop but a slew to the safe pose, so a verb that took longer than half a second
+without sending anything would be cancelled underneath itself. `stand` takes three.
+
+quackd's own `Heartbeat` cannot be the signal: its period is a run setting rather than
+the manifest's, and it defaults to the same half second the deadman uses. So the
+transport keeps its own timer, the way the Microduck's re-sent `robot.move` does, and
+reading state or a frame deliberately does not count as being alive."""
 
 MIN_LOOP_HZ = 40.0
 """The daemon runs at fifty. Much below that and the gait phase drifts, so quackd says so
@@ -107,6 +120,7 @@ class ToddlerBotBridge:
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._pump: asyncio.Task[None] | None = None
+        self._alive: asyncio.Task[None] | None = None
         self._pending: dict[int, asyncio.Future[Any]] = {}
         self._notifications: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)
         self._next_id = 1
@@ -182,19 +196,36 @@ class ToddlerBotBridge:
         self.robot_name = str(self.hello.get("robot") or self.robot_name)
         self.motors = int(self.hello.get("motors") or self.motors)
         self.daemon_version = self.hello.get("daemon_version")
+        self._alive = asyncio.create_task(self._keepalive(), name="quackd-toddlerbot-keepalive")
         self.upstream_commit = (self.hello.get("upstream") or {}).get("commit")
 
+    async def _keepalive(self) -> None:
+        """Say we are here, often enough that the deadman does not fire on a verb."""
+        while self._writer is not None and not self._writer.is_closing():
+            with contextlib.suppress(Exception):
+                await self.notify(KEEPALIVE, {})
+            await asyncio.sleep(KEEPALIVE_S)
+
     async def close(self) -> None:
+        if self._alive is not None:
+            self._alive.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._alive
+            self._alive = None
+        # The final stop goes FIRST, while the reader is still running. `request()` waits on a
+        # future that only the read loop can resolve, so cancelling the pump before asking
+        # meant every close sat out the full request timeout and never saw the answer.
+        if self._writer is not None:
+            # never a torque-off from here: quackd asks the daemon to hold, and the daemon
+            # decides what leaving looks like. Dropping the socket is not a shutdown.
+            with contextlib.suppress(Exception):
+                await self.stop()
         if self._pump is not None:
             self._pump.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._pump
             self._pump = None
         if self._writer is not None:
-            # never a torque-off from here: quackd asks the daemon to hold, and the daemon
-            # decides what leaving looks like. Dropping the socket is not a shutdown.
-            with contextlib.suppress(Exception):
-                await self.stop()
             self._writer.close()
             with contextlib.suppress(Exception):
                 await self._writer.wait_closed()

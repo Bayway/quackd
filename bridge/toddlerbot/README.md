@@ -56,6 +56,14 @@ handshake reports what this particular robot actually has, and quackd narrows it
 from the answer, so a build with no walk checkpoint loses locomotion entirely rather than
 being offered it and refused.
 
+The client also sends `bot.keepalive` on its own timer, several times a second, for as long
+as it is connected. That is the only thing that stops the deadman firing part way through a
+verb: `stand` takes three seconds and the deadman fires after half of one, so without it
+every long verb would be cancelled underneath itself by the safe-pose slew. Reading state or
+a frame deliberately does **not** count, and neither does a method this daemon has never
+heard of, so a client built against a newer protocol cannot hold the deadman off with calls
+this one is refusing.
+
 Set `QUACKD_TODDLERBOT_TOKEN` (or pass `--token`) and the daemon refuses unauthenticated
 clients. It travels in the handshake and never in the address, because addresses get printed
 and land in transcripts.

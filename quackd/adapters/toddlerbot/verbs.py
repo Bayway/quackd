@@ -24,7 +24,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from quackd.transport.base import DuckState, Intent
-from quackd.verbs.core import SearchScanParams, _gaze_sweep, send_or_fail
+from quackd.verbs.core import SearchScanParams, _see, gaze_sweep_yaws, send_or_fail
 from quackd.verbs.registry import NoParams, Precondition, Verb, VerbContext, VerbResult
 
 #: The motions that ship as keyframes in the repository, and therefore the only motion that
@@ -251,17 +251,46 @@ async def grip(ctx: VerbContext, p: GripParams) -> VerbResult:
 
 
 async def search_scan(ctx: VerbContext, p: SearchScanParams) -> VerbResult:
-    """Sweep the head. Never turn the body.
+    """Sweep the head, never the body, and wait for the head to arrive before looking.
+
+    Two things differ from the shared verb.
 
     `scan_mode` turns any robot that has both mobility and the twist intent, which is the
     right answer for a duck and the wrong one here: with a walk checkpoint staged this body
     is mobile, so the shared verb would pirouette a fall-prone 3 kg humanoid to look for a
     ball, and there is no get-up policy if it goes over. The neck is right there.
 
-    The manifest declares `search_scan` only when there is both a camera and a neck, so the
-    thing this needs always exists by the time it runs.
+    And the shared sweep waits `TICK_S` between commanding a gaze angle and taking the frame,
+    which is a tenth of a second. This robot's daemon rate limits every joint, the neck
+    included, so a 45 degree step takes the better part of a second to arrive. Looking after
+    a tenth of it means photographing where the head used to be and reporting the ball
+    missing, so this waits the same `LOOK_S` the `look` verb waits.
+
+    The manifest declares `search_scan` only when there is both a camera and a neck, so what
+    this needs always exists by the time it runs.
     """
-    return await _gaze_sweep(ctx, p, NECK_YAW_LIMIT_DEG)
+    state = await ctx.transport.get_state()
+    centre = float(state.extras.get("head_yaw_deg") or 0.0)
+    yaws = gaze_sweep_yaws(centre, p.step_deg, p.max_steps, NECK_YAW_LIMIT_DEG)
+    for i, yaw in enumerate(yaws):
+        x, y, z = look_point(yaw, 0.0)
+        await ctx.transport.send_intent(Intent.look(x=x, y=y, z=z))
+        await ctx.transport.sleep(LOOK_S)  # the neck is rate limited; let it get there
+        img, hits = await _see(ctx, p.target, f"search_scan gaze {yaw:+.0f}")
+        if img is None:
+            return VerbResult.fail("this transport has no camera")
+        if hits:
+            best = hits[0]
+            return VerbResult.success(
+                f"{p.target} found: {best.summary()} (gaze {yaw:+.0f} degrees)",
+                detections=[d.model_dump() for d in hits],
+                steps=i,
+                gaze_yaw_deg=yaw,
+            )
+    span = (len(yaws) - 1) * p.step_deg
+    return VerbResult.fail(
+        f"{p.target} not found in a gaze sweep of {len(yaws)} looks ({span:.0f} degrees)"
+    )
 
 
 def toddlerbot_verbs(
