@@ -120,7 +120,7 @@ Each of these is fixed, and the ones no test could see became tests. A living do
 Python string a user reads* may not claim a number of `robot_*` tools the server disagrees
 with, which is 0.5's `--transport` lesson finally applied to counts as well as flags. The key
 the CLI computes for a robot's memory file must equal the key the MCP server computes, for
-all five adapters and all fourteen backends. Every way of corrupting the memory file by hand
+all eight adapters and all twenty-two backends. Every way of corrupting the memory file by hand
 is skipped rather than fatal. And the `quackd memory` command group has tests at all, which
 is how two of its three subcommands came to be wrong.
 
@@ -144,8 +144,8 @@ is how two of its three subcommands came to be wrong.
 - `--no-memory` writes no file, offers no `remember`, and puts no memory heading in the
   prompt.
 - A dry run writes no episode.
-- The key the CLI computes and the key the MCP server computes agree for all five adapters
-  and all fourteen backends, which is what makes "a note saved from Claude Desktop is read
+- The key the CLI computes and the key the MCP server computes agree for all eight adapters
+  and all twenty-two backends, which is what makes "a note saved from Claude Desktop is read
   by the next `quackd run`" true rather than intended.
 - A late provider answer ends the run as `budget`, and an in-budget one is still processed.
 - The built wheel's long description has no relative links left in it.

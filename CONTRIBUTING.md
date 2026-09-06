@@ -17,10 +17,13 @@ Windows, macOS and Linux are all first-class. Tests must never touch the network
 third of that is the five seeded acceptance sweeps, which CI holds at 10 of 10 by setting
 `QUACKD_STRICT_SEEDS=1`; locally they pass at 8 of 10 so a slow machine does not block you.
 
-Touching `bridge/open_duck/`? That is the only code here that runs on a robot, so it plays
-by different rules: it must never import quackd (its dependencies do not belong on a 512 MB
+Touching anything under `bridge/`? That is the code that runs on a robot, and there are
+three lots of it now (`open_duck/`, `alohamini/`, `toddlerbot/`). It plays by different
+rules: it must never import quackd (its dependencies do not belong on a 512 MB
 Raspberry Pi), it ships in the sdist and never in the wheel, and it stays testable with no
-hardware through its `--fake` mode and a pure core the tests drive directly.
+hardware through its `--fake` mode and a pure core the tests drive directly. The
+ToddlerBot daemon is the largest of the three, because it owns that robot's control
+loop rather than feeding one, so it carries the most of its own safety machinery.
 
 Touching `quackd/lan/` or `quackd/flock/mqtt_bus.py`? Neither imports its library at module
 level and neither is in the default install, so the tests run them on fakes: a fake zeroconf

@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Two hardware paths, each audited against upstream rather than against itself. Still nothing
-has run on a robot; what changed is that several things which could not have worked now can,
-and several claims that were not true no longer are.
+A sixth, a seventh and an eighth robot, and two hardware paths audited against upstream rather
+than against themselves. Two of the new robots quackd drives without importing anything from
+them, because neither is an installable package, and the third has no network API at all, so
+quackd ships the loop it runs on. Still nothing has run on a robot; what changed is that
+several things which could not have worked now can, and several claims that were not true no
+longer are.
 
 ### The Open Duck Mini v2 hardware path
 
@@ -71,7 +74,230 @@ that is wrong fails as a confident "not fallen".
 
 ### The Microduck's hardware path
 
+### Added
+
+- **Bring-up checklists for the XLeRobot and the AlohaMini**
+  ([docs/xlerobot-hardware-checklist.md](docs/xlerobot-hardware-checklist.md),
+  [docs/alohamini-hardware-checklist.md](docs/alohamini-hardware-checklist.md)). The two
+  bodies here you can buy today were the two without one. They are not copies of each other:
+  the cart's hazard is that its watchdog stops the wheels and leaves fourteen arm servos
+  holding, so it stays on blocks until step 9; the AlohaMini's is the opposite, that its arms
+  are limp until quackd's own host turns torque on, which makes upstream's stock host the
+  safest place to learn the base and the lift first.
+- **[docs/reading-robots.md](docs/reading-robots.md), the traps by pattern rather than by
+  robot.** quackd drives eight bodies and has run on none, so everything it does came from
+  reading upstream closely enough to be safe without executing it, and the same shapes kept
+  recurring: a number that looks like a different number, a default pose that is not neutral,
+  a stop that is not a stop, a partial message that means something else, a capability that is
+  only a claim, a name that exists on the wrong class, a line somebody commented out. The next
+  robot will not have the AlohaMini's bug; it will have one of the AlohaMini's shape.
+
+- **The ToddlerBot: a small open source humanoid, and the first body here that can hurt
+  itself** (`--robot toddlerbot:mock`, `sim2d` or `bridge`). Two arms, two legs, a two joint
+  neck and thirty servos, on a machine with no network API of any kind, so quackd ships the
+  daemon that runs on it. That is the Open Duck Mini's shape, but for a second reason that
+  matters more: a verb is episodic and this body is not. Its `step()` is a no-op, so nothing
+  times out and nothing re-arms, and a humanoid frozen mid-stride while a model thinks is a
+  humanoid on the floor. The daemon runs the fifty hertz loop and quackd's intents steer what
+  it is already doing. Design: `docs/adr/0028-toddlerbot.md`, with the page at
+  [docs/adapters/toddlerbot.md](docs/adapters/toddlerbot.md).
+- **Seven things upstream does not do, because reading it at the pin said so.** It clamps
+  nothing and never reads the joint limits that exist, on motors in multi-turn mode where the
+  firmware limits are off too. A dropped packet returns an all-zeros reading indistinguishable
+  from every joint at zero, which fed to a position controller commands a full-scale move to
+  zero. A controller fault arrives as a bare `KeyError`. There is no reset anywhere, no
+  watchdog, no timeout and no e-stop. So the daemon carries a clamp, a rate limit, an
+  all-zeros detector, a fault guard, a safe-pose slew, signal handlers and a construction
+  watchdog, and every one of them is exercised in CI against a fake body over a real socket.
+- **A shutdown that does not drop the robot.** Upstream's does: a C level `atexit` handler
+  disconnects every client and disconnecting disables torque, so any unhandled exception or
+  plain Ctrl-C de-torques a standing humanoid with no lowering and no ramp. `SIGTERM` does not
+  even reach that handler, and upstream installs no Python one, so systemd stopping it leaves
+  the robot fully torqued holding its last target instead. quackd's daemon settles to a safe
+  pose first, then closes under a hard deadline, because `close()` holds the GIL and retries
+  forever on a dead bus.
+- **A deadman that is a trajectory rather than a message.** On a duck, silence is safe and
+  zero velocity is a stop. Here the command is an absolute pose, so holding the last target,
+  jumping to a new one and going limp are the only three options and none of them is safe. The
+  daemon slews to upstream's own default pose at upstream's own rate, waist first as its own
+  reset does, and holds.
+- **`toddlerbot-lookout`**, the task to point at a real humanoid first, on its safety stand:
+  nothing in its allowlist moves a leg, an arm or the waist.
+- **The AlohaMini: two arms on a motorised lift, on a wheeled base** (`--robot alohamini:mock`,
+  `sim2d` or `zmq`). quackd's second bimanual body and its first with a vertical axis. Like the
+  XLeRobot it is reached by speaking its ZeroMQ host protocol rather than importing it, and for
+  a stronger reason: upstream is a fork of LeRobot that *calls itself* `lerobot`, is not on
+  PyPI, and installs only from a large git clone on Python 3.12 with torch. Speaking the wire is
+  also more correct than importing would have been, because upstream's own client throws away
+  the camera list the host sends and its robot-model default disagrees with the host's, with
+  nothing cross-checking either. quackd reads both off the wire, so neither can be silently
+  wrong. Design: `docs/adr/0027-alohamini.md`, with the page at
+  [docs/adapters/alohamini.md](docs/adapters/alohamini.md).
+- **A host wrapper for the robot, because upstream's own host leaves the arms limp.**
+  `configure()` disables arm torque and both of its `enable_torque()` calls are commented out;
+  nothing else in the driver turns it on. So `bridge/alohamini/` holds a wrapper that runs
+  upstream's loop with torque enabled and the lift stopped, and adds three fields so quackd can
+  tell it from a stock host. Without it, `move_joints`, `gripper` and `home_arms` refuse and say
+  why, rather than commanding joints that would not move.
+- **A stop that actually stops this robot.** Three upstream behaviours conspire against one.
+  All three velocity keys are mandatory in every payload, because `send_action` indexes them
+  with no default and would otherwise discard the whole action, arms included, without
+  refreshing its own watchdog. The lift latches, so a payload that says nothing about it leaves
+  it travelling. And the lift's two keys are not symmetric, so a payload carrying both freezes
+  it instead. One function builds every payload and holds all three invariants, and the fake
+  host reproduces the bugs so the tests mean something: `test_stop_zeroes_the_lift` fails
+  against the naive three-key stop that the shape of the driver invites.
+- **The XLeRobot: a dual-arm mobile manipulator on an IKEA cart, about $660 to build**
+  (`--robot xlerobot:mock` or `xlerobot:zmq`). Two five-joint arms with grippers on a
+  three-omniwheel base that really can drive sideways, so `move` here carries a `vy` that
+  means something for the first time. It is also the first body quackd talks to **without
+  importing anything from it**: XLeRobot is not a package — no PyPI entry, no `pyproject.toml`,
+  and its documented install is copying files into an existing lerobot tree — but it already
+  ships a ZeroMQ host, so quackd speaks that wire and its extra is `pyzmq` and nothing else.
+  That keeps the 3.11 floor and works on Windows, unlike `quackd[lerobot]`. Design:
+  `docs/adr/0026-xlerobot.md`, with the page at
+  [docs/adapters/xlerobot.md](docs/adapters/xlerobot.md).
+- **The whole wire format is exercised against a fake host over loopback**, on every CI
+  platform. Upstream ships no test, no CI and no simulator that runs — its ManiSkill host
+  imports `xlerobot_single`, which is defined nowhere in the repository — so the other end of
+  the protocol is written from upstream's source at a pinned commit and quackd's real client is
+  driven against it. That caught a bug no reading would have: `stop` rebuilt its hold from the
+  latest observation, which is several cycles behind and carries no timestamp, so stopping
+  would have commanded an arm back towards zero. A stop that moves an arm is the failure this
+  project exists to prevent. `stop` now zeroes the wheels and leaves every arm goal exactly
+  where it already was.
+- **`xlerobot-lookout`**, the task to point at a real cart first: nothing in its allowlist
+  moves a wheel or an arm. It is the thinnest starter quackd ships, and honestly so — without
+  a head to turn and without a voice, a task that moves nothing can only look and report.
+- **Video off a real Microduck** (`--camera-url webrtc://host:8443`, `quackd[microduck-camera]`).
+  There is no camera method in `duck-ipc-proto`, no snapshot route in `mediad` and no camera
+  subcommand in `robotctl`, so a picture means being a WebRTC peer. It runs on your machine and
+  writes nothing to the robot — the alternative needs `mediad` stopped, because its `v4l2src`
+  holds `/dev/video0`. Signalling is read off `mediad`'s own web client at the pin and tested
+  through a fake socket; the H.264 and the ICE are not tested and have never met a duck.
+- [docs/microduck-hardware-checklist.md](docs/microduck-hardware-checklist.md), an issue
+  template, and `microduck-lookout` — a bring-up task whose allowlist moves no legs, which
+  copes with having no camera and stops to say so when posture reads `unknown`. The checklist
+  assumes the duck is borrowed: nothing in it installs anything or needs `sudo`.
+- CI runs on Windows. `robotd` speaks over a unix socket, Windows cannot open one, and the test
+  covering quackd's `ssh -L` answer only runs there — so it had never run anywhere.
+
+### Changed
+
+- **The ToddlerBot's manifest is mostly absences, and every one of them is upstream's.** There
+  is no text to speech at this pin, so `say` does not exist. There is no get-up policy, so
+  `stand_up` is not declared and a fall ends the run with a message that names no verb and
+  asks for a human. Nothing reports a battery to Python, so a battery abort cannot fire. And
+  the walk policy is an ONNX checkpoint from a wandb artifact that upstream neither publishes
+  nor checks in, so on a bare install **there is no locomotion at all**: `move`, `go_to` and
+  `approach_and` are not gated off, they do not exist, and `mobility` reads `none` until the
+  daemon reports a checkpoint staged.
+- **No raw joint verb on the humanoid.** Thirty unclamped radians from a language model, on a
+  machine in multi-turn mode with no current limit and no position limit, is the exact failure
+  this project exists to prevent. quackd offers named moves and the daemon owns every
+  trajectory.
+- **The XLeRobot's manifest says no to more than it says yes to, and each no is upstream's.**
+  There is no speaker and no microphone in the bill of materials, so the `sound` intent is not
+  declared and `say` does not exist here. Which head motor is yaw is stated nowhere upstream,
+  so quackd never commands the head and `search_scan` turns the whole cart. The power station
+  has no data link, so `battery_percent` is permanently `None`. There is no odometry, so
+  `go_to` closes the loop on the camera alone. And a stock cart ships with every camera
+  commented out of its config, so `observe`, `go_to`, `search_scan` and `approach_and` exist
+  only once a camera has actually been seen on the wire.
+- Arm positions on **both** new robots are **normalised −100..100, not degrees**, because their
+  `use_degrees` defaults to False. That is a different contract from the SO-101 arm next door,
+  which sets degrees: the same number means a different angle, so `move_joints` validates
+  against `joint_norm` and never against `lerobot`'s `joint_deg`. Turn rate is converted on both
+  too, because each wire is deg/s while quackd is rad/s, and a pass-through would be a 57× error
+  on a robot heavy enough to hurt someone.
+- `pyzmq` joins the `dev` extra, and is the extra for both new robots. CI installs only
+  `dev`, and the fake-host tests are what the two `zmq` backends' 🧪 rest on, so a status claim
+  CI could not check would not have been honest.
+
 ### Fixed
+
+- **The ToddlerBot's `search_scan` sweeps its head rather than turning its body.** `scan_mode`
+  turns any robot with mobility and the twist intent, which is right for a duck and wrong for
+  a humanoid with no get-up policy: with a walk checkpoint staged the shared verb would have
+  pirouetted 3 kg of fall-prone robot to look for a ball. quackd supplies its own for this
+  body, and it waits for the neck to arrive before taking the frame, because the daemon rate
+  limits every joint and the shared sweep looks after a tenth of a second.
+- **The transport keeps the link alive, so a long verb is not cancelled by its own deadman.**
+  The daemon's deadman fires after half a second of silence and `stand` takes three, and the
+  executor sends one command and then only polls while it waits. quackd's own `Heartbeat`
+  cannot be that signal, because its period is a run setting rather than the manifest's and
+  defaults to the same half second. The ToddlerBot transport now sends `bot.keepalive` on its
+  own timer, and reading state or a frame deliberately does not count as being alive.
+- **Every ToddlerBot disconnect used to stall for the full request timeout.** `close()`
+  cancelled the read loop and then asked for a final stop, which waits on a future only that
+  read loop could resolve.
+- **A walk checkpoint that cannot move the robot is no longer offered as locomotion.** An
+  envelope of zero on every axis clamps every velocity to nothing, so `move`, `go_to` and
+  `approach_and` would have accepted every command and moved nothing.
+- **The mocks and the simulators stopped reporting a pose their robots do not have.** Neither
+  ZeroMQ wire carries a position, so the real backends report None and the offline doubles
+  were dead-reckoning one. A double that is easier than the robot is a task that passes here
+  and fails there.
+- **The ToddlerBot daemon moved to port 9873.** The Open Duck Mini already had 9871 for its
+  bridge and 9872 for its camera daemon, and `SECURITY.md` tells people to tunnel that pair.
+
+- **The ToddlerBot daemon stopped claiming four things it could not do.** An audit of the
+  three new adapters against their own plan found the same shape of bug three times, and it
+  is the shape this project exists to prevent: a capability flag the operator sets, a
+  manifest that promises verbs because of it, and a daemon with no implementation behind it.
+  `--camera` declared `observe`, `search_scan`, `go_to` and `approach_and` while the frame
+  handler read an attribute that was never defined, so every frame came back empty and
+  `toddlerbot-lookout`, the one task shipped for the first hardware day, could not have run.
+  `--walk` declared locomotion and returned `accepted: True` for every command while the
+  policy attribute it consulted was never assigned, so the robot would have stood still and
+  reported success. And `perform` refused every motion because the keyframe library was
+  initialised empty and never filled. A later pass found a fourth of the same shape: `grip`
+  answered accepted and commanded nothing at all, on a capability read from the command line
+  rather than from the body. All four are now real, and **the handshake reports what actually
+  loaded rather than what was asked for**: a camera that will not open means the camera verbs
+  never appear, a walk checkpoint is a file you supply rather than a claim you make, and the
+  gripper capability follows the motors.
+- **`policy.step_target()` never existed upstream.** It was quackd's invention, which is the
+  exact failure ADR-0022 is written to prevent. The real interface takes the whole
+  observation and the sim and answers with a pair, and it is now cited at a pinned line
+  along with sixteen other names the daemon needed and did not have: that motions carry a
+  per-variant suffix, that upstream ships no loader at all, that `cartwheel` cannot be
+  replayed because its file holds no action array, that `walk_zmp` is a lookup table rather
+  than a motion, and that `Camera.get_jpeg` hands RGB to an encoder that wants BGR and so
+  returns a picture with red and blue swapped.
+- **The walk envelope comes from the checkpoint now.** `command_range` is read at connect off
+  the policy that is actually loaded, rather than hardcoded from a gin file, so a robot whose
+  gait was trained tighter than quackd's caps gets the tighter number. It can only ever
+  narrow: a checkpoint trained wider does not get to widen `limits`.
+- **A daemon fault no longer looks like a healthy robot.** A raising tick used to kill the
+  control thread while the socket went on answering `ok`. It is now caught: the deadman is
+  forced, `bot.health` reports the fault so quackd's heartbeat trips, and a bus that never
+  comes back settles and stops rather than failing fifty times a second forever. The
+  `sys.excepthook` and `threading.excepthook` that Part C of the plan asked for are installed
+  too, because upstream's C level `atexit` disables torque on any interpreter exit and would
+  otherwise drop a standing robot before Python got a say.
+- **The ToddlerBot daemon moved off port 9872 to 9873.** The Open Duck Mini already had it:
+  9871 for its bridge and 9872 for its camera daemon, and `SECURITY.md` tells people to
+  tunnel that pair. The comment justifying the old choice named only the bridge. Its token is
+  also compared with `hmac.compare_digest` now, as the Open Duck's always was, rather than a
+  plain `!=` that returns as soon as two bytes differ.
+- **Two simulator rows earned the tick they were claiming.** `alohamini:sim2d` and
+  `toddlerbot:sim2d` were marked ✅ while their own text admitted no seeded sweep, on a page
+  where ✅ means exactly that. Both now run their lookout task on ten of ten seeds in CI, with
+  the ground truth checked: the AlohaMini never moves a wheel, an arm or the lift, and the
+  ToddlerBot never takes a step or turns its body. The `alohamini:zmq` row was also sitting
+  under the ToddlerBot's heading rather than its own robot's.
+- **`quackd[alohamini]` was never locked.** The extra shipped in `pyproject.toml` and never
+  reached `uv.lock`, so `uv sync --locked` refused it. `NOTICE` also credited every other
+  upstream and none of the three new ones, including the fact that ToddlerBot's design files
+  are non-commercially licensed and quackd therefore distributes none of them.
+- **The five-to-eight sweep reached the places the tests do not police.** `test_docs.py`
+  checks three exact phrases, so everything phrased differently had gone stale: `SECURITY.md`
+  counted five bodies and scoped on-robot code to the Open Duck's two daemons, `docs/safety.md`
+  had five rows in the table that answers "what stops this body when quackd goes quiet",
+  `docs/faq.md` listed five adapters, and the README said five in four more places while
+  saying eight in a fifth. The architecture pages also still said quackd hosts a control loop
+  on one body when it now does on two, and in very different ways.
 
 - **The API version quackd was written against had moved on.** `upstream_api.py` was the one
   adapter ADR-0022 let cite `main` instead of a commit hash, and in the week after it was
@@ -116,21 +342,6 @@ that is wrong fails as a confident "not fallen".
   could load a wider duck and start counting from zero. The limits still become the new
   contract's; the steps, the llm calls, the clock and the failure counts now stay the
   session's, and the tool's reply says what carried over.
-
-### Added
-
-- **Video off a real Microduck** (`--camera-url webrtc://host:8443`, `quackd[microduck-camera]`).
-  There is no camera method in `duck-ipc-proto`, no snapshot route in `mediad` and no camera
-  subcommand in `robotctl`, so a picture means being a WebRTC peer. It runs on your machine and
-  writes nothing to the robot — the alternative needs `mediad` stopped, because its `v4l2src`
-  holds `/dev/video0`. Signalling is read off `mediad`'s own web client at the pin and tested
-  through a fake socket; the H.264 and the ICE are not tested and have never met a duck.
-- [docs/microduck-hardware-checklist.md](docs/microduck-hardware-checklist.md), an issue
-  template, and `microduck-lookout` — a bring-up task whose allowlist moves no legs, which
-  copes with having no camera and stops to say so when posture reads `unknown`. The checklist
-  assumes the duck is borrowed: nothing in it installs anything or needs `sudo`.
-- CI runs on Windows. `robotd` speaks over a unix socket, Windows cannot open one, and the test
-  covering quackd's `ssh -L` answer only runs there — so it had never run anywhere.
 
 ## [0.6.0] — 2026-09-04
 

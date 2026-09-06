@@ -183,6 +183,59 @@ def microduck_lookout_strategy(obs: Observation, step: int, history: list[Exchan
     return ToolCall(name="gaze", arguments={"bearing_deg": _MICRODUCK_SWEEP[looks]})
 
 
+def xlerobot_lookout_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+    """One frame, then the answer — because this robot has neither a voice nor a head.
+
+    Every other lookout task ends by saying what it saw. There is no speaker in an XLeRobot's
+    bill of materials, so `say` does not exist for it, and there is no documented head axis
+    either, so it cannot look anywhere its owner did not point it. That leaves one frame and
+    one report, and the only place the report can go is the reason it succeeds with.
+    """
+    if _count_calls(history, "observe") == 0:
+        return ToolCall(name="observe", arguments={})
+    if balls := _detections(obs, "ball"):
+        return ToolCall(name="declare_success", arguments={"reason": _where(balls[0])})
+    return ToolCall(
+        name="declare_success",
+        arguments={"reason": "nothing in view, and this robot cannot turn to look further"},
+    )
+
+
+def alohamini_lookout_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+    """One frame, then the answer. Like the XLeRobot, this body has no voice and no head, so
+    the report has nowhere to go but the reason it succeeds with."""
+    if _count_calls(history, "observe") == 0:
+        return ToolCall(name="observe", arguments={})
+    if balls := _detections(obs, "ball"):
+        return ToolCall(name="declare_success", arguments={"reason": _where(balls[0])})
+    return ToolCall(
+        name="declare_success",
+        arguments={"reason": "nothing in view, and this robot cannot turn to look further"},
+    )
+
+
+def toddlerbot_lookout_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+    """Head only, no legs, and no voice to report with.
+
+    This robot cannot get up if it falls, so the strategy never walks, and there is no text
+    to speech on it at all, so the answer goes in the reason it succeeds with."""
+    if balls := _detections(obs, "ball"):
+        return ToolCall(name="declare_success", arguments={"reason": _where(balls[0])})
+    looks = _count_calls(history, "look")
+    if looks >= len(_TODDLER_SWEEP):
+        return ToolCall(
+            name="declare_success",
+            arguments={"reason": "nothing in view after looking left, right and centre"},
+        )
+    if _count_calls(history, "observe") <= looks:
+        return ToolCall(name="observe", arguments={})
+    return ToolCall(name="look", arguments={"yaw_deg": _TODDLER_SWEEP[looks]})
+
+
+#: Gentle on purpose: the neck is two small servos and this body has no fall recovery.
+_TODDLER_SWEEP = (30.0, -30.0, 0.0)
+
+
 def generic_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
     allowed = obs.features.get("allowed", [])
     if step == 0 and "quack" in allowed:
@@ -202,6 +255,9 @@ STRATEGIES: dict[str, Strategy] = {
     "open-duck-scout": open_duck_scout_strategy,
     "open-duck-lookout": open_duck_lookout_strategy,
     "microduck-lookout": microduck_lookout_strategy,
+    "xlerobot-lookout": xlerobot_lookout_strategy,
+    "alohamini-lookout": alohamini_lookout_strategy,
+    "toddlerbot-lookout": toddlerbot_lookout_strategy,
 }
 
 

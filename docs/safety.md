@@ -47,6 +47,49 @@ Nothing here has run on hardware yet, on any body. When it does, start with `--d
 every time, then a `.duck` whose `allow` list is the smallest thing that could work, then
 widen it. **You are responsible for your robot.**
 
+**An XLeRobot (a 12 kg dual-arm cart):**
+
+- **The watchdog stops the wheels and nothing else.** Upstream's 500 ms deadman calls
+  `stop_base()`, so the fourteen arm and head servos keep holding their last goal under
+  torque. `deadman_scope` says `base_only`, and that is the robot's entire safety authority.
+- **Nothing reports a battery**, so a battery abort can never fire. The power station's
+  switch is the only e-stop and it is not on the network.
+- **The host exits by itself after an hour** with no supervisor anywhere upstream, so a long
+  session ends as a heartbeat failure rather than an error.
+- Blocks under the wheels until you have checked the turn direction: quackd converts rad/s to
+  the deg/s the wire wants, and a wrong conversion is a 57x error.
+- Work through [xlerobot-hardware-checklist.md](xlerobot-hardware-checklist.md).
+
+**An AlohaMini (two arms on a 600 mm motorised lift):**
+
+- **As upstream ships it the arms are limp**, so the safest bring-up is on the stock host,
+  where the base and the lift can be exercised with no arm risk. quackd's own host wrapper is
+  what turns torque on, and upstream's `disconnect()` turns it off again, so a loaded arm
+  falls when that host exits.
+- **The watchdog covers the base and the lift, never the arms** (`base_and_lift_only`).
+- **`home()` leaves the lift travelling** at full speed, because the write that would zero
+  that register is commented out upstream. quackd sends `stop` as its first command after
+  connecting for exactly this reason.
+- Clear the lift's whole travel before powering it. How fast it moves in mm/s is not stated
+  anywhere upstream, so quackd's duration estimate for `lift` is an assumption.
+- Work through [alohamini-hardware-checklist.md](alohamini-hardware-checklist.md).
+
+**A ToddlerBot (a 56 cm, 3 kg humanoid):**
+
+- **It cannot get up.** There is no get-up policy for this body at the pinned commit, so
+  a fall ends the run and needs a human. Every moving verb refuses once it is down.
+- **Work through [toddlerbot-hardware-checklist.md](toddlerbot-hardware-checklist.md) in
+  order.** It keeps the feet off the ground until step 13, and steps 11 and 12 (pull the
+  network cable mid-move, then send `SIGTERM`) are the two that matter most.
+- **The deadman is a slew, not a stop.** There is no velocity at this hardware boundary:
+  the command is an absolute pose. On silence the daemon quackd ships slews to the safe
+  pose at upstream's own rate, waist first, and holds. It never goes limp, because on
+  this body torque off is a fall.
+- **quackd owns the control loop here**, which is true of no other body. Upstream's own
+  `step()` is a no-op, so nothing times out and nothing re-arms without the daemon.
+- A good first contract is the shipped `toddlerbot-lookout`: it moves no leg, no arm and
+  no waist.
+
 **A Microduck (a 25 cm biped):**
 
 - **Run on the floor, not a table.** A 25 cm biped and a table edge do not mix.
@@ -127,6 +170,9 @@ quackd goes quiet" differs per body. Each manifest says so
 | LeRobot arm (`lerobot:*`) | `torque_limit`: the gripper's torque and current caps, plus `max_relative_target` when configured; no deadman, a position-controlled arm holds its goal | re-sends the present position as the goal (hold) | `disable_torque` (LeRobot's own `disconnect()` does, by its default, at the end of a session) |
 | rosbridge base (`rosbridge:*`) | `none`: neither rosbridge nor the driver has a deadman we verified | publishes a zero Twist; quackd also re-sends the Twist at 10 Hz while a verb runs | silence |
 | Open Duck Mini v2 (`open_duck:*`) | `none` in the robot, but quackd's own bridge daemon runs on it and zeroes the velocity after 300 ms of silence, inside the 50 Hz loop | zero velocity, head held, torque still on | anything that reaches torque, the head-control mode button, any direct servo or IMU read |
+| XLeRobot (`xlerobot:*`) | `none`: the host's own 500 ms watchdog is real but calls `stop_base()`, which zeroes the three wheels and **nothing else**, so the 14 arm and head servos keep holding under torque. `deadman_scope` says `base_only` | zeroes the three velocity keys and leaves every arm goal exactly where it was, deliberately not rebuilding a hold from an unstamped reading that may be cycles old | `disconnect()`, which is upstream's torque-off, and any `enable(on=False)` |
+| AlohaMini (`alohamini:*`) | `none`: the host's 1 s watchdog calls `stop_motion()`, which is the base and the lift and never the arms. `deadman_scope` says `base_and_lift_only` | one payload carrying all three velocity zeros **and** a lift velocity zero, because omitting either leaves the robot travelling | anything that disables arm torque. As shipped the arms are already limp, which is why the arm verbs need quackd's own host wrapper and refuse without it |
+| ToddlerBot (`toddlerbot:*`) | `none` in the robot, and nothing upstream has a watchdog, timeout or e-stop at all. quackd's own daemon runs on it and after 500 ms of silence slews to the safe pose at upstream's own 0.3 rad/s, waist first, and **holds** | holds the last verified-good measured pose. There is no velocity at this hardware boundary, so `stop` cannot mean zero velocity | torque off, ever. Silence on this body means hold forever and torque off means fall, so the deadman is a trajectory rather than a message |
 
 The verbs a body lacks are not gated, they do not exist: a head cannot `kick`, an arm
 cannot `move`, a base cannot `say`, and `validate --robot` says so before a run starts.
