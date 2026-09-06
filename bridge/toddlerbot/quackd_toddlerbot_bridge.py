@@ -114,6 +114,9 @@ ERR_BAD_TOKEN = 2
 ERR_REFUSED = 3
 ERR_UNKNOWN = 4
 
+READ_ONLY_METHODS = frozenset({"bot.state", "bot.health", "bot.frame"})
+"""Questions rather than commands, so they do not feed the deadman."""
+
 log = logging.getLogger("quackd-toddlerbot")
 
 
@@ -546,7 +549,13 @@ class Handler(socketserver.StreamRequestHandler):
             }, True
         if not authed:
             raise _Refused(ERR_BAD_TOKEN, "say bot.hello with a token first")
-        d.touch()
+        # Only a method that drives the robot feeds the deadman. Reading state, health or a
+        # frame is a question, not driving: a client whose model stalled mid-verb, or which
+        # polls while it thinks, would otherwise hold the deadman off for as long as it kept
+        # asking. WALK is latched, so the robot would go on walking with nobody steering it,
+        # which is the exact failure the deadman exists for.
+        if method not in READ_ONLY_METHODS:
+            d.touch()
         if method == "bot.state":
             return d.state(), authed
         if method == "bot.health":

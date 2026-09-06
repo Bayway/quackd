@@ -360,3 +360,52 @@ def test_no_fenced_block_names_a_stale_subset_of_the_adapters() -> None:
                 f"{doc.relative_to(REPO)}: a fenced block names {len(named)} adapters "
                 f"and omits {missing}"
             )
+
+
+#: The README's verb table names bodies, not adapter ids, so the mapping is written down.
+_VERB_TABLE_ROWS = {
+    "microduck": "| Microduck |",
+    "reachy_mini": "| Reachy Mini |",
+    "lerobot": "| LeRobot arm |",
+    "rosbridge": "| rosbridge base |",
+    "open_duck": "| Open Duck Mini v2 |",
+    "xlerobot": "| XLeRobot |",
+    "alohamini": "| AlohaMini |",
+    "toddlerbot": "| ToddlerBot |",
+}
+
+_CORE_VERBS = frozenset(
+    {"observe", "report_state", "stop", "say", "move", "go_to", "search_scan", "approach_and"}
+)
+
+
+def test_the_readme_verb_table_has_a_row_per_body_listing_its_real_verbs() -> None:
+    """The other list-shaped thing no guard could see.
+
+    `test_readme_verbs_match_registry` only checks that each *core* verb appears somewhere in
+    the whole README, so a body could be added with its own verbs and never get a row. Four
+    were: Open Duck Mini, XLeRobot, AlohaMini and ToddlerBot all shipped verbs of their own
+    with nothing in the table.
+    """
+    import asyncio
+
+    from quackd.adapters.factory import ADAPTER_NAMES, make_adapter
+
+    assert set(_VERB_TABLE_ROWS) == set(ADAPTER_NAMES), "the row map has drifted from the code"
+
+    offline = {"microduck": "sim2d", "lerobot": "mock", "rosbridge": "mock"}
+    for adapter in ADAPTER_NAMES:
+        backend = offline.get(adapter, "mock")
+        manifest = asyncio.run(make_adapter(f"{adapter}:{backend}", seed=0).connect())
+        own = sorted(set(manifest.verb_names()) - _CORE_VERBS)
+        prefix = _VERB_TABLE_ROWS[adapter]
+        row = next((line for line in README.splitlines() if line.startswith(prefix)), None)
+        assert row is not None, f"the verb table has no row for {adapter}"
+        if not own:
+            continue  # a body with nothing of its own says so in prose
+        # The verbs cell only. Searching the whole row lets the description satisfy it, and
+        # these descriptions name verbs: the first version of this guard passed happily with
+        # two of the ToddlerBot's three verbs deleted from the cell.
+        cell = row.split("|")[2]
+        missing = [v for v in own if f"`{v}`" not in cell]
+        assert not missing, f"the {adapter} row does not list its own verbs: {missing}"

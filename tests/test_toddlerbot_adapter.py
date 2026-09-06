@@ -41,17 +41,24 @@ from quackd.verbs.registry import VerbNotFound, registry_from_manifest
 runner = CliRunner()
 
 
+#: Wide enough that rich never elides a verb name into `report_sta…`, which would make the
+#: absence checks below weaker than they look.
+WIDE = {"COLUMNS": "200"}
+
+
 def _verb_column(output: str) -> set[str]:
     """The names in the rendered table's first column.
 
     Searching the whole output is wrong: `approach_and`'s own description names `kick` and
     `grab` as example follow-up verbs, so a substring check finds verbs that are not there.
     """
-    return {
-        line.split(chr(9474))[1].strip().rstrip(chr(8230))
+    names = {
+        line.split(chr(9474))[1].strip()
         for line in output.splitlines()
         if line.count(chr(9474)) > 2
     }
+    assert not any(chr(8230) in n for n in names), f"rendered too narrow, names elided: {names}"
+    return names
 
 
 #: Verbs other robots have and this body has not, at this pin.
@@ -448,7 +455,7 @@ def test_a_kicking_task_is_refused_against_this_body_with_the_validators_words()
 
 
 def test_list_verbs_shows_the_real_set() -> None:
-    result = runner.invoke(app, ["list-verbs", "--robot", "toddlerbot:mock"])
+    result = runner.invoke(env=WIDE, app=app, args=["list-verbs", "--robot", "toddlerbot:mock"])
     assert result.exit_code == 0
     names = _verb_column(result.output)
     assert {"look", "stand", "perform", "observe"} <= names, names

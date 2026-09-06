@@ -128,11 +128,19 @@ async def test_connect_stops_before_it_does_anything_else() -> None:
 
 
 async def test_stop_holds_the_arms_where_they_were_asked_to_go() -> None:
+    """The base has to be moving when the stop arrives, or the velocity half of this proves
+    nothing: every payload carries all three velocity keys, so a joint command on its own
+    already leaves them at zero and the assertion would be true before `stop` was sent."""
     with FakeAlohaMiniHost(watchdog_s=10.0) as host:
         link = await _connected(host)
         await _lands(link, host, Intent.joint({"arm_left_shoulder_pan": 25.0}, 0.2))
+        await _lands(link, host, Intent.move(vx=0.2))
+        assert host.state["x.vel"] == pytest.approx(0.2), "the base really was moving"
+
+        seen = len(host.actions)
         await link.stop()
-        await _until(lambda: all(host.state[k] == 0.0 for k in VEL_KEYS))
+        await _until(lambda: len(host.actions) > seen)
+        assert all(host.state[k] == 0.0 for k in VEL_KEYS), "the stop zeroed the base"
         assert host.state["arm_left_shoulder_pan.pos"] == pytest.approx(25.0)
         assert host.actions[-1]["arm_left_shoulder_pan.pos"] == pytest.approx(25.0)
         await link.close()

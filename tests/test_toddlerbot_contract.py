@@ -24,6 +24,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -47,16 +48,6 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
-async def _wait_for(predicate: object, limit_s: float = 30.0) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + limit_s
-    while loop.time() < deadline:
-        if predicate():  # type: ignore[operator]
-            return
-        await asyncio.sleep(0.05)
-    raise AssertionError("the daemon never reached the expected state")
-
-
 class _Daemon:
     """The real daemon, as a real process, exactly as it runs on a robot."""
 
@@ -64,6 +55,7 @@ class _Daemon:
         root = os.environ.get("TODDLERBOT_ROOT")
         assert root, "TODDLERBOT_ROOT must point at an upstream checkout"
         self.port = _free_port()
+        self.output: list[str] = []
         self.proc = subprocess.Popen(
             [
                 sys.executable,
@@ -83,6 +75,18 @@ class _Daemon:
             stderr=subprocess.STDOUT,
             text=True,
         )
+        # Drain it. A full pipe buffer blocks the daemon's next log call, which would look
+        # exactly like a hung control loop and be diagnosed as one.
+        self._drain = threading.Thread(target=self._read, daemon=True, name="daemon-output")
+        self._drain.start()
+
+    def _read(self) -> None:
+        assert self.proc.stdout is not None
+        for line in self.proc.stdout:
+            self.output.append(line.rstrip())
+
+    def say_why(self) -> str:
+        return "\n".join(self.output[-40:]) or "(the daemon printed nothing)"
 
     @property
     def address(self) -> str:
@@ -134,9 +138,16 @@ async def test_the_handshake_describes_the_simulated_body() -> None:
 async def test_the_loop_runs_at_fifty_hertz_against_real_physics() -> None:
     with _Daemon() as daemon:
         link = await _connect(daemon)
-        await _wait_for(lambda: True)
+        # MuJoCo's first steps are slower than its steady state, and loop_hz is an average
+        # over the run, so give it real ticks rather than waiting on nothing.
+        seen = 0.0
+        for _ in range(40):
+            seen = float((await link.get_state()).extras["loop_hz"])
+            if seen > 40.0:
+                break
+            await asyncio.sleep(0.25)
+        assert seen > 40.0, f"the loop settled at {seen:.1f} Hz\n{daemon.say_why()}"
         state = await link.get_state()
-        assert state.extras["loop_hz"] > 40.0, state.extras["loop_hz"]
         assert state.extras["calibrated"] is True
         # There is no odometry at this boundary even in simulation, because the adapter
         # reports what the real robot could report and no more.
@@ -147,13 +158,32 @@ async def test_the_loop_runs_at_fifty_hertz_against_real_physics() -> None:
 
 async def test_stand_settles_on_a_body_that_pushes_back() -> None:
     """The fake body holds exactly what it is told. This one does not, so `stand` finishing
-    means the slew actually converged under gravity and the PD gains upstream ships."""
+    means the slew actually moved thirty joints under gravity and the PD gains upstream
+    ships, and then stopped moving them."""
     with _Daemon() as daemon:
         link = await _connect(daemon)
+        before = dict((await link.get_state()).extras["joints"])
         assert (await link.send_intent(Intent.do("stand"))).accepted
-        await _wait_for(lambda: True, limit_s=1.0)
-        state = await link.get_state()
-        assert state.extras["moving"] in (True, False)
+
+        moved = False
+        settled = False
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 25.0
+        while loop.time() < deadline:
+            extras = (await link.get_state()).extras
+            moved = moved or bool(extras["moving"])
+            if moved and not extras["moving"]:
+                settled = True
+                break
+            await asyncio.sleep(0.1)
+        assert moved, f"stand never reported moving\n{daemon.say_why()}"
+        assert settled, f"stand never finished\n{daemon.say_why()}"
+
+        after = dict((await link.get_state()).extras["joints"])
+        assert before.keys() == after.keys()
+        changed = [k for k in before if abs(after[k] - before[k]) > 1e-3]
+        assert changed, f"the slew commanded no joint at all\n{daemon.say_why()}"
+
         await link.stop()
         assert not (await link.get_state()).extras["deadman_tripped"]
         await link.close()
@@ -163,13 +193,14 @@ async def test_the_manifest_narrows_to_what_this_body_really_has() -> None:
     with _Daemon() as daemon:
         adapter = ToddlerBotAdapter(ToddlerBotBridge(address=daemon.address))
         for _ in range(60):
+            assert daemon.alive(), daemon.say_why()
             try:
                 manifest = await adapter.connect()
                 break
             except Exception:
                 await asyncio.sleep(1.0)
         else:
-            raise AssertionError("the daemon never accepted a connection")
+            raise AssertionError(f"the daemon never accepted a connection\n{daemon.say_why()}")
         # No walk checkpoint on a bare checkout, so locomotion does not exist here at all.
         assert manifest.mobility == "none"
         for verb in ("move", "go_to", "approach_and"):
@@ -185,10 +216,27 @@ async def test_a_client_that_goes_quiet_trips_the_deadman_on_real_physics() -> N
         link = await _connect(daemon)
         assert (await link.send_intent(Intent.do("stand"))).accepted
         await asyncio.sleep(2.0)  # longer than the daemon's 500 ms deadman
+        # Asking is not driving: `bot.state` deliberately does not feed the deadman, which is
+        # what makes this observable from here at all.
         state = await link.get_state()
-        assert state.extras["deadman_tripped"] is True
+        assert state.extras["deadman_tripped"] is True, daemon.say_why()
         health = await link.request("bot.health")
         assert isinstance(health, dict)
         assert health.get("loop_hz", 0) > 40.0, "it is still running the loop, not stopped"
         assert daemon.alive(), "and the daemon is still alive rather than having exited"
+        await link.close()
+
+
+async def test_the_motions_the_workflow_fetched_actually_loaded() -> None:
+    """The job spends five sparse-checkout patterns and two packages on the motion library.
+    If upstream moves or renames a keyframe file, the daemon degrades honestly to no
+    `perform` at all and nothing else would notice."""
+    with _Daemon() as daemon:
+        link = await _connect(daemon)
+        assert link.motions, f"no keyframe motion loaded\n{daemon.say_why()}"
+        assert set(link.motions) <= {"hold", "kneel", "cuddle", "push_up", "crawl"}
+        adapter = ToddlerBotAdapter(link)
+        manifest = await adapter.connect()
+        assert manifest.provides("perform")
+        assert manifest.extras["motions"] == sorted(link.motions)
         await link.close()

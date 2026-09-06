@@ -101,18 +101,18 @@ jobs:
         # Each of these isolates a distinct failure class, cheapest first.
         working-directory: upstream
         run: |
-          uv run python -c "import glfw, mujoco.viewer; print('glfw ok')"
-          uv run python -c "import cv2; print('cv2', cv2.__version__)"
-          uv run python -c "import joblib, lz4; print('joblib ok')"
+          uv run --no-sync python -c "import glfw, mujoco.viewer; print('glfw ok')"
+          uv run --no-sync python -c "import cv2; print('cv2', cv2.__version__)"
+          uv run --no-sync python -c "import joblib, lz4; print('joblib ok')"
 
       - name: The daemon starts and reports what it found
         working-directory: upstream
         run: |
-          uv run python "$GITHUB_WORKSPACE/bridge/toddlerbot/quackd_toddlerbot_bridge.py" \
+          uv run --no-sync python "$GITHUB_WORKSPACE/bridge/toddlerbot/quackd_toddlerbot_bridge.py" \
             --sim mujoco --robot toddlerbot_2xc --toddlerbot . --once
 
       - name: Contract
-        run: uv run pytest -q tests/test_toddlerbot_contract.py -p no:randomly
+        run: uv run --no-sync pytest -q tests/test_toddlerbot_contract.py -p no:randomly
 
       - name: Say what upstream looked like
         if: always()

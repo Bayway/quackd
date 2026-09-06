@@ -19,6 +19,7 @@ from collections.abc import Callable
 import pytest
 
 from quackd.adapters.xlerobot import XLerobotAdapter
+from quackd.adapters.xlerobot.verbs import GRIPPER_CLOSED, GRIPPER_OPEN
 from quackd.adapters.xlerobot.zmq_host import (
     CMD_PORT,
     OBS_PORT,
@@ -156,12 +157,16 @@ async def test_a_bare_gripper_intent_still_commands_a_goal() -> None:
     backend derives the goal rather than trusting the caller to have supplied one."""
     with FakeXLerobotHost() as host:
         link = await _connected(host)
-        assert (await link.send_intent(Intent.gripper(open=False))).accepted
-        await _until(lambda: host.state["right_arm_gripper.pos"] == 0.0)
-        assert link.holding == {"left": False, "right": True}
+        # Open first. The fake starts every key at 0.0, which is also the closed goal, so
+        # closing first would wait on a value that was already there.
+        assert host.state["right_arm_gripper.pos"] == 0.0, "the starting value"
         assert (await link.send_intent(Intent.gripper(open=True))).accepted
-        await _until(lambda: host.state["right_arm_gripper.pos"] == 100.0)
+        await _until(lambda: host.state["right_arm_gripper.pos"] == GRIPPER_OPEN)
         assert link.holding["right"] is False
+
+        assert (await link.send_intent(Intent.gripper(open=False))).accepted
+        await _until(lambda: host.state["right_arm_gripper.pos"] == GRIPPER_CLOSED)
+        assert link.holding == {"left": False, "right": True}
         await link.close()
 
 

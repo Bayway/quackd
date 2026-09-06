@@ -490,12 +490,31 @@ async def test_a_client_that_dies_mid_move_trips_the_deadman() -> None:
         assert not s.daemon.sim.closed, "it slewed to the safe pose and never went limp"
 
 
-def test_the_token_is_compared_in_constant_time() -> None:
+async def test_the_token_is_compared_in_constant_time() -> None:
     """A plain `!=` returns as soon as two bytes differ, which hands the token to anyone who
-    can time the reply. The Open Duck Mini's daemon has always used `compare_digest`."""
-    src = DAEMON.read_text(encoding="utf-8")
-    assert "hmac.compare_digest" in src
-    assert 'params.get("token") != self.token' not in src
+    can time the reply. The Open Duck Mini's daemon has always used `compare_digest`.
+
+    Driven rather than grepped: a source check passes on the string appearing in a comment,
+    and rules out exactly one spelling of the thing it is trying to forbid.
+    """
+    calls: list[tuple[str, str]] = []
+    real = D.hmac.compare_digest
+
+    def watched(a: object, b: object) -> bool:
+        calls.append((str(a), str(b)))
+        return bool(real(a, b))  # type: ignore[arg-type]
+
+    D.hmac.compare_digest = watched  # type: ignore[assignment]
+    try:
+        with _Serving(token="hunter2") as s:
+            link = ToddlerBotBridge(address=s.address, token="hunter2")
+            await link.connect()
+            await link.close()
+    finally:
+        D.hmac.compare_digest = real  # type: ignore[assignment]
+
+    assert calls, "the handshake never compared the token in constant time"
+    assert ("hunter2", "hunter2") in calls
 
 
 def test_this_robot_does_not_take_the_open_ducks_ports() -> None:
@@ -530,7 +549,9 @@ def test_a_real_body_offers_no_motion_it_could_not_load(tmp_path: object) -> Non
     assert library == {}
 
 
-def test_the_motion_files_are_looked_for_per_variant(tmp_path: object) -> None:
+def test_the_motion_files_are_looked_for_per_variant(
+    tmp_path: object, caplog: pytest.LogCaptureFixture
+) -> None:
     """There is no bare `cuddle.lz4` upstream: every motion is written once per variant, and
     the daemon picks the suffix from the robot name it was started with. A 2xc robot handed
     only 2xm files finds nothing, which is the correct answer rather than a wrong motion."""
@@ -540,7 +561,15 @@ def test_the_motion_files_are_looked_for_per_variant(tmp_path: object) -> None:
     root.mkdir(parents=True)
     for name in D.MOTIONS:
         (root / f"{name}_2xm.lz4").write_bytes(b"not a real keyframe file")
-    assert D.load_motions(str(tmp_path), "toddlerbot_2xc") == {}, "it looked for _2xc"
+
+    with caplog.at_level("WARNING"):
+        assert D.load_motions(str(tmp_path), "toddlerbot_2xc") == {}, "it looked for _2xc"
+    # It has to have looked for the right filenames, not merely failed to find anything: with
+    # no `_2xc` file present it returns before it ever needs joblib, so an empty answer alone
+    # would also be what a completely broken suffix rule produced.
+    looked_for = " ".join(r.getMessage() for r in caplog.records)
+    assert "hold_2xc.lz4" in looked_for, looked_for
+    assert "_2xm" not in looked_for, "it must not look for the other variant's files"
 
 
 async def test_the_manifest_offers_only_the_motions_the_daemon_reported() -> None:
@@ -640,3 +669,25 @@ async def test_a_daemon_that_loaded_no_motions_offers_no_perform() -> None:
         assert manifest.extras["motions"] == []
         assert manifest.provides("stand"), "and the verbs that need no keyframes survive"
         await adapter.transport.close()
+
+
+async def test_polling_state_does_not_count_as_driving_the_robot() -> None:
+    """A client that stops steering but keeps asking questions must still trip the deadman.
+
+    WALK is latched, so if `bot.state` fed the deadman a model that stalled mid-verb while
+    polling would leave the robot walking with nobody driving it. That is the exact failure
+    the deadman exists for, so the read-only methods deliberately do not touch it.
+    """
+    with _Serving(walk=True) as s:
+        link = ToddlerBotBridge(address=s.address)
+        await link.connect()
+        assert (await link.send_intent(Intent.move(vx=0.1))).accepted
+        deadline = asyncio.get_running_loop().time() + 5.0
+        polls = 0
+        while asyncio.get_running_loop().time() < deadline and not s.daemon.deadman_tripped:
+            await link.get_state()  # a question, over and over
+            polls += 1
+            await asyncio.sleep(0.02)
+        assert polls > 5, "it really was polling throughout"
+        assert s.daemon.deadman_tripped, "questions must not hold the deadman off"
+        await link.close()

@@ -51,17 +51,24 @@ from quackd.verbs.registry import VerbNotFound, registry_from_manifest
 runner = CliRunner()
 
 
+#: Wide enough that rich never elides a verb name into `report_sta…`, which would make the
+#: absence checks below weaker than they look.
+WIDE = {"COLUMNS": "200"}
+
+
 def _verb_column(output: str) -> set[str]:
     """The names in the rendered table's first column.
 
     Searching the whole output is wrong: `approach_and`'s own description names `kick` and
     `grab` as example follow-up verbs, so a substring check finds verbs that are not there.
     """
-    return {
-        line.split(chr(9474))[1].strip().rstrip(chr(8230))
+    names = {
+        line.split(chr(9474))[1].strip()
         for line in output.splitlines()
         if line.count(chr(9474)) > 2
     }
+    assert not any(chr(8230) in n for n in names), f"rendered too narrow, names elided: {names}"
+    return names
 
 
 ALOHAMINI_VERBS = {
@@ -194,7 +201,21 @@ def test_the_sku_is_read_from_the_keys_not_guessed() -> None:
 
 
 def test_joint_goals_are_normalised_and_not_degrees() -> None:
-    assert MoveJointsParams(arm="left", positions={"shoulder_pan": 100.0}).positions
+    """`use_degrees` is False upstream, so a joint goal is a normalised -100..100 number and
+    reading it as degrees would make every one of them mean something else.
+
+    The old version of this test asserted that a one-entry dict was truthy and an empty one
+    raised, which is true of any model and says nothing about units at all.
+    """
+    manifest = alohamini_manifest("zmq", camera=True, arms=True)
+    assert manifest.limits["joint_norm"] == 100.0
+    assert "joint_deg" not in manifest.limits, "that is the LeRobot arm's contract, not this one"
+
+    # and the value reaches the wire unscaled: no degree conversion anywhere on this path
+    goal = 42.5
+    params = MoveJointsParams(arm="left", positions={"shoulder_pan": goal})
+    assert params.positions["shoulder_pan"] == pytest.approx(goal)
+
     with pytest.raises(ValueError, match="at least one joint"):
         MoveJointsParams(arm="left", positions={})
 
@@ -465,7 +486,7 @@ def test_a_kicking_task_is_refused_against_this_robot_with_the_validators_words(
 
 
 def test_list_verbs_shows_the_real_set() -> None:
-    result = runner.invoke(app, ["list-verbs", "--robot", "alohamini:mock"])
+    result = runner.invoke(env=WIDE, app=app, args=["list-verbs", "--robot", "alohamini:mock"])
     assert result.exit_code == 0
     names = _verb_column(result.output)
     assert {"move", "lift", "gripper", "observe"} <= names, names
