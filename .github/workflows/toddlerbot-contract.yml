@@ -4,8 +4,8 @@ name: toddlerbot contract
 #
 # This is the only job that installs upstream, and it is deliberately not part of `ci`: the
 # main suite has to stay installable on Windows with nothing but quackd's own dependencies.
-# It runs nightly and on demand, and it is allowed to fail without blocking a release,
-# because what it watches for is upstream drift rather than a regression in this repository.
+# It runs nightly and on demand, so it gates nothing: what it watches for is upstream
+# drift rather than a regression here. A red run means go and look, not stop the release.
 #
 # Nothing here has run on a robot. A green run means the protocol, the fifty hertz loop and
 # the deadman hold up against 30 simulated motors, and no more than that.
@@ -27,7 +27,9 @@ jobs:
     name: quackd ⇄ daemon ⇄ MuJoCo
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    continue-on-error: true
+    # Deliberately NOT continue-on-error. It runs on a schedule and on demand, so it
+    # gates no pull request and blocks no release by construction. All that flag would
+    # buy is a green tick on a run that failed, which is the opposite of the point.
     env:
       # Upstream never reads MUJOCO_GL, and the headless path builds neither a viewer nor a
       # renderer, so no GL context is created and osmesa/xvfb are not needed. What IS needed

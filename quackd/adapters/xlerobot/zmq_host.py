@@ -188,6 +188,15 @@ class XLerobotZmq:
         with self._lock:
             return self._require_link().recv(timeout_ms)
 
+    def _open_locked(self) -> None:
+        with self._lock:
+            self._require_link().open(self.host, self.cmd_port, self.obs_port)
+
+    def _close_locked(self) -> None:
+        with self._lock:
+            if self._link is not None:
+                self._link.close()
+
     async def _call(self, fn: Any, *args: Any) -> Any:
         try:
             return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=self.timeout_s)
@@ -243,7 +252,10 @@ class XLerobotZmq:
     async def connect(self) -> None:
         if self._link is None:
             self._link = await asyncio.to_thread(_PyZmqLink)
-        await self._call(self._link.open, self.host, self.cmd_port, self.obs_port)
+        # Under the lock like every other socket call. A leftover worker from a timed-out
+        # `_call` can still be inside poll() or send_string() on this socket, and ZeroMQ
+        # sockets are not safe across threads.
+        await self._call(self._open_locked)
         self._connected = True
         # the handshake is "did an observation come back": there is no hello on this wire
         deadline = time.monotonic() + self.connect_timeout_s
@@ -262,7 +274,9 @@ class XLerobotZmq:
             await self.stop()
             with contextlib.suppress(Exception):
                 # closing a socket that is already gone is not a failure worth propagating
-                await self._call(self._link.close)
+                # Under the lock: a worker left behind by a timed-out `_call` may still be
+                # inside a poll on this socket, and closing it underneath one is undefined.
+                await self._call(self._close_locked)
         self._connected = False
 
     async def get_frame(self) -> Image.Image | None:

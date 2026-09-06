@@ -62,6 +62,14 @@ and land in transcripts.
 
 ## Running it
 
+It runs **in upstream's own environment**, and that separation is the first of the
+three reasons this is a daemon rather than a library call. Upstream hard-pins
+`numpy==1.26.4`, `jax==0.4.28`, `jaxlib==0.4.28`, `setuptools==75.6.0`,
+`moviepy==1.0.3` and `opencv-python==4.9.0.80`. Those cannot share a process with
+quackd's own dependencies, and quackd is not going to ask anyone to downgrade numpy
+to drive a robot. This runs over there and speaks a socket, so neither side has to
+win.
+
 ```bash
 git clone https://github.com/hshi74/toddlerbot && cd toddlerbot
 git checkout 84e02d14261292eec5d06f896e3145b35c54856c

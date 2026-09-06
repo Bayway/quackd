@@ -15,12 +15,15 @@ import os
 import time
 from pathlib import Path
 
+import pytest
+
 from quackd.adapters.factory import make_adapter
 from quackd.agent.loop import RunConfig, run_duck
 from quackd.agent.providers.fake import FakeProvider
 from quackd.agent.transcript import Transcript
 from quackd.duckfile.parser import load_duck
 from quackd.perception.color_blob import ColorBlobDetector
+from quackd.transport.base import Intent
 
 SEEDS = range(10)
 MIN_SUCCESSES = 10 if os.environ.get("QUACKD_STRICT_SEEDS") == "1" else 8
@@ -95,3 +98,26 @@ async def test_the_lookout_reports_without_a_voice_and_without_a_battery(tmp_pat
     assert result.outcome == "success", result.reason
     events = Transcript.read(result.run_dir / "transcript.jsonl")
     assert "say" not in {e["name"] for e in events if e["kind"] == "verb"}
+
+
+async def test_the_simulated_head_actually_turns(tmp_path: Path) -> None:
+    """The sweep above would pass without this.
+
+    `ToddlerBotSim2D.send_intent` used to store the neck angle and return, never touching the
+    cartoon head, so `observe` after a `look` saw exactly what it saw before and a ten seed
+    acceptance run proved only that nothing crashed.
+    """
+    adapter = make_adapter("toddlerbot:sim2d", seed=0)
+    await adapter.connect()
+    duck = adapter.world.ducks[adapter.duck_index]
+    before = duck.head_yaw
+
+    ack = await adapter.send_intent(Intent.look(x=0.0, y=1.0, z=0.0))  # ninety degrees left
+    assert ack.accepted
+    after = adapter.world.ducks[adapter.duck_index].head_yaw
+    assert after != pytest.approx(before), "the cartoon head never moved"
+    assert after > before, "and it turned the way it was asked to"
+
+    state = await adapter.get_state()
+    assert state.extras["neck"]["yaw_deg"] == pytest.approx(90.0, abs=1.0)
+    assert state.extras["head_yaw_deg"] == pytest.approx(90.0, abs=1.0)

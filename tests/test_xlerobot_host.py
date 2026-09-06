@@ -259,11 +259,18 @@ async def test_stop_is_safe_when_the_host_has_already_gone() -> None:
 
 
 async def test_silence_trips_the_hosts_watchdog_and_stops_the_base() -> None:
-    with FakeXLerobotHost(watchdog_s=0.05) as host:
+    """The window matters. At a 50 ms watchdog and a 30 Hz fake there are barely two pumps
+    between the move landing and the watchdog zeroing it, so the observation of a moving base
+    was a coin flip on a loaded machine. Half a second is still fast and is not a race."""
+    with FakeXLerobotHost(watchdog_s=0.5) as host:
         link = await _connected(host)
         await link.send_intent(Intent.move(vx=0.25))
         await _until(lambda: host.state["x.vel"] == pytest.approx(0.25))
-        await _until(lambda: host.watchdog_trips >= 1)
+
+        # A trip AFTER the move landed. `watchdog_trips` is cumulative, so waiting for `>= 1`
+        # can be satisfied by a trip that happened before it.
+        tripped = host.watchdog_trips
+        await _until(lambda: host.watchdog_trips > tripped, limit_s=5.0)
         assert host.state["x.vel"] == 0.0
         await link.close()
 

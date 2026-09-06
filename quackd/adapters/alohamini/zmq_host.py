@@ -41,6 +41,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from PIL import Image, UnidentifiedImageError
 
+from quackd.adapters.alohamini import upstream_api as up
 from quackd.adapters.alohamini.verbs import (
     ARMS,
     DEFAULT_MODEL,
@@ -53,8 +54,10 @@ from quackd.adapters.base import AdapterNotInstalled
 from quackd.transport.base import Ack, DuckState, HeartbeatError, Intent, TransportError
 
 DEFAULT_HOST = "127.0.0.1"
-CMD_PORT = 5555
-OBS_PORT = 5556
+CMD_PORT = int(up.PORT_ZMQ_CMD.name)
+OBS_PORT = int(up.PORT_ZMQ_OBSERVATIONS.name)
+"""Both from `upstream_api`, not retyped here. `upstream_api.py` is the one file to
+edit when an upstream moves, and a port spelled twice can disagree with itself."""
 WATCHDOG_MS = 1000.0
 POLL_MS = 200
 """Upstream's own client poll window: it must exceed one host cycle at 30 Hz."""
@@ -207,6 +210,15 @@ class AlohaMiniZmq:
             self._token += 1
             return self._require_link().request(str(self._token).encode("ascii"), timeout_ms)
 
+    def _open_locked(self) -> None:
+        with self._lock:
+            self._require_link().open(self.host, self.cmd_port, self.obs_port)
+
+    def _close_locked(self) -> None:
+        with self._lock:
+            if self._link is not None:
+                self._link.close()
+
     async def _call(self, fn: Any, *args: Any) -> Any:
         try:
             return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=self.timeout_s)
@@ -273,7 +285,10 @@ class AlohaMiniZmq:
     async def connect(self) -> None:
         if self._link is None:
             self._link = await asyncio.to_thread(_PyZmqLink)
-        await self._call(self._link.open, self.host, self.cmd_port, self.obs_port)
+        # Under the lock like every other socket call. A leftover worker from a timed-out
+        # `_call` can still be inside poll() or send_string() on this socket, and ZeroMQ
+        # sockets are not safe across threads.
+        await self._call(self._open_locked)
         self._connected = True
         # Before anything else: homing left full-speed descent in the lift's register and the
         # zeroing write after it is commented out upstream, so the lift is travelling right
@@ -294,7 +309,9 @@ class AlohaMiniZmq:
             # never upstream's disconnect(): it disables torque and a loaded arm falls
             await self.stop()
             with contextlib.suppress(Exception):
-                await self._call(self._link.close)
+                # Under the lock: a worker left behind by a timed-out `_call` may still be
+                # inside a poll on this socket, and closing it underneath one is undefined.
+                await self._call(self._close_locked)
         self._connected = False
 
     async def get_frame(self) -> Image.Image | None:

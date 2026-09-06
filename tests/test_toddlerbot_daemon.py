@@ -60,6 +60,19 @@ def _daemon(**kwargs: object) -> object:
     return D.Daemon(robot, D.FakeSim(robot), fake=True, **kwargs)  # type: ignore[arg-type]
 
 
+def _ticks(d: object, n: int) -> None:
+    """Run `n` ticks with the client kept alive.
+
+    `tick()` reads the real clock and trips the deadman after `DEADMAN_S`, and there is no
+    clock injection here, so a few hundred ticks on a loaded machine could cross half a
+    second of wall time and silently start slewing to the safe pose. Every test that is not
+    about the deadman itself drives the loop through this.
+    """
+    for _ in range(n):
+        d.touch()  # type: ignore[attr-defined]
+        d.tick()  # type: ignore[attr-defined]
+
+
 async def _until(predicate: object, limit_s: float = 5.0) -> None:
     """The daemon's loop is a real thread on a real clock, so these waits are real waits."""
     loop = asyncio.get_running_loop()
@@ -97,8 +110,7 @@ def test_the_daemon_clamps_and_rate_limits_every_tick() -> None:
     d.command.hold(np.ones(d.robot.nu, np.float32) * 50.0)
     d.tick()
     assert float(np.max(d.target)) == pytest.approx(D.MAX_STEP_RAD)
-    for _ in range(500):
-        d.tick()
+    _ticks(d, 500)
     assert float(np.max(d.target)) <= 2.0, "the joint limit holds however long it is pushed"
 
 
@@ -115,8 +127,7 @@ def test_an_all_zeros_reading_is_refused_rather_than_believed() -> None:
 def test_the_last_good_pose_survives_a_dropped_read() -> None:
     d = _daemon()
     d.command.hold(np.ones(d.robot.nu, np.float32) * 0.5)
-    for _ in range(200):
-        d.tick()
+    _ticks(d, 200)
     settled = d.safe.pose.copy()
     assert float(np.max(settled)) > 0.1, "the fake body moved"
 
@@ -167,8 +178,7 @@ def test_a_straight_waist_goes_straight_to_the_goal() -> None:
 def test_settling_reaches_the_safe_pose_before_shutdown() -> None:
     d = _daemon()
     d.command.hold(np.ones(d.robot.nu, np.float32) * 1.5)
-    for _ in range(300):
-        d.tick()
+    _ticks(d, 300)
     assert float(np.max(d.target)) > 0.5
     assert d.settle(timeout_s=30.0) is True
     assert float(np.max(np.abs(d.target))) < 0.05, "it ended at the default pose"
@@ -177,8 +187,7 @@ def test_settling_reaches_the_safe_pose_before_shutdown() -> None:
 def test_shutdown_settles_and_then_closes() -> None:
     d = _daemon()
     d.command.hold(np.ones(d.robot.nu, np.float32) * 0.4)
-    for _ in range(100):
-        d.tick()
+    _ticks(d, 100)
     d.shutdown()
     assert d.sim.closed, "the bus was closed"
     assert float(np.max(np.abs(d.target))) < 0.05, "and only after reaching the safe pose"
@@ -192,8 +201,7 @@ def test_silence_slews_to_the_safe_pose_and_never_goes_limp() -> None:
     so the deadman manufactures a third option."""
     d = _daemon()
     d.command.hold(np.ones(d.robot.nu, np.float32) * 1.0)
-    for _ in range(200):
-        d.tick()
+    _ticks(d, 200)
     assert float(np.max(d.target)) > 0.3
 
     d.command.last_client -= D.DEADMAN_S * 4  # quackd went quiet
@@ -201,7 +209,8 @@ def test_silence_slews_to_the_safe_pose_and_never_goes_limp() -> None:
     assert d.deadman_tripped
     assert d.command.mode == D.Command.DEADMAN
     for _ in range(500):
-        d.tick()
+        d.tick()  # silence, deliberately: this is the one loop that must not touch
+    assert d.deadman_tripped, "and it stayed tripped throughout"
     assert float(np.max(np.abs(d.target))) < 0.05, "it settled rather than collapsing"
     assert not d.sim.closed, "and never disabled torque"
 
@@ -715,8 +724,7 @@ def test_a_non_finite_target_is_refused_rather_than_latched() -> None:
     assert np.all(np.isfinite(d.target)), "NaN never reached the target"
     assert np.allclose(d.target, good), "and it held the last good pose"
     d.command.hold(np.full(d.robot.nu, 0.2, np.float32))
-    for _ in range(200):
-        d.tick()
+    _ticks(d, 200)
     assert float(np.max(d.target)) > 0.1, "and it recovered once the numbers were numbers"
 
 
@@ -745,8 +753,7 @@ def test_looking_around_does_not_cancel_what_the_body_is_doing() -> None:
     d.command.play("kneel", [np.full(d.robot.nu, 0.2, np.float32)] * 600)
     assert d.command.mode == D.Command.MOTION
     d.aim_neck(0.4, -0.2)
-    for _ in range(400):  # the head is rate limited like every other joint
-        d.tick()
+    _ticks(d, 400)
     assert d.command.mode == D.Command.MOTION, "the motion is still running"
     assert d.target[d.neck_yaw] == pytest.approx(0.4, abs=0.05)
     assert d.target[d.neck_pitch] == pytest.approx(-0.2, abs=0.05)
@@ -770,8 +777,7 @@ def test_one_dropped_read_does_not_cancel_a_walk() -> None:
     # Move it off zero first: the all-zeros detector refuses a fresh fake's opening reading,
     # correctly, because that is exactly what a dropped packet looks like on this bus.
     d.command.hold(np.full(d.robot.nu, 0.2, np.float32))
-    for _ in range(200):
-        d.tick()
+    _ticks(d, 200)
     assert d.last_obs is not None
     d.sim.drop_next = True
     d.tick()
@@ -804,13 +810,11 @@ def test_closing_a_gripper_actually_commands_the_motor() -> None:
 
     moved = d.set_grip("right", close=True)
     assert moved == ["right_gripper"]
-    for _ in range(400):
-        d.tick()
+    _ticks(d, 400)
     assert d.target[index] == pytest.approx(float(d.lo[index]), abs=0.05)
 
     d.set_grip("right", close=False)
-    for _ in range(400):
-        d.tick()
+    _ticks(d, 400)
     assert d.target[index] == pytest.approx(float(d.hi[index]), abs=0.05)
 
     assert d.set_grip("left", close=True) == ["left_gripper"]
