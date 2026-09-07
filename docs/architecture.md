@@ -65,6 +65,7 @@ sequenceDiagram
 | `quackd/sim2d/` | The cartoon world, two renders (top-down, duck-cam), the GIF recorder, the optional live window. |
 | `quackd/perception/` | `Detection` + `Detector`; the HSV colour-blob default; the lazy YOLO extra. |
 | `quackd/agent/` | The loop, the prompts, the transcript, and one provider per vendor behind `LLMProvider`. |
+| `quackd/trace.py` | The run narrating itself: `TraceEvent`, the `Tracer` that fans out to the transcript and to any number of views, the transport wrapper that turns every intent into an event, and the renderer both surfaces share ([ADR-0029](adr/0029-tracing.md)). |
 | `quackd/memory.py` | What a robot keeps between runs: one JSONL file per `adapter:backend` with the notes the pilot saved (`remember`) and an episode per run; rendered into the prompt next time ([memory.md](memory.md), ADR-0025). |
 | `quackd/mcp_server.py` | A robot, or a fleet (`--robots`), as MCP tools: eight `robot_*` tools through one executor per robot. |
 | `bridge/toddlerbot/` | quackd's own ToddlerBot daemon: the fifty hertz loop upstream has no daemon for, plus the ten things it does not do at all, enumerated in the daemon's own docstring and in `bridge/toddlerbot/README.md` rather than a third time here. It owns the control loop rather than feeding one, which is true of no other body quackd drives. Standard library plus numpy, never imported by quackd, shipped in the sdist and never in the wheel ([ADR-0028](adr/0028-toddlerbot.md)). |
@@ -91,10 +92,14 @@ sequenceDiagram
    `stop` is exempt from the abort gate, so the brake still works after one.
 4. **Act.** The verb runs; composites loop on the camera at 10 Hz; `move` re-sends its
    velocity every 100 ms to feed the robot's deadman.
-5. **Record.** `transcript.jsonl` gets `observation`, `llm` (with usage), `verb` events
-   (`name` as called plus `canonical`) and a `memory` event for every `remember`;
-   `summary.json` at the end; `run.gif` from the recorder on sim2d. With memory on, the
-   run ends by appending one episode line to the robot's memory file ([memory.md](memory.md)).
+5. **Record.** Every step above is a `TraceEvent`, and `transcript.jsonl` is the sink that
+   never turns off: `observation`, `llm_request`, `llm` (usage, latency, what the model
+   thought), `verb_start`, a `gate` per rule that fired, an `intent` per command sent to the
+   robot, `verb_end`, `verb` (`name` as called plus `canonical`) and a `memory` event for
+   every `remember`; `summary.json` at the end; `run.gif` from the recorder on sim2d. With
+   memory on, the run ends by appending one episode line to the robot's memory file
+   ([memory.md](memory.md)). The terminal and the MCP tool results are views of the same
+   stream (see [Trace](#trace)).
 
 Step 0, before all of that: the loop calls `connect()` and, when an adapter answers with a
 manifest, builds the registry from it (`registry_from_manifest`). A bare transport answers
@@ -106,10 +111,46 @@ Outcomes: `success` / `failure` (the LLM's claim via the meta tools), `budget`, 
 
 ## Transcript format
 
-One JSON object per line: `{"t": seconds, "kind": ..., ...}` with kinds `run_start`
-(contract, system prompt, tools), `observation`, `llm` (text, tool_calls, usage,
-stop_reason), `enforce`, `verb` (name, params, ok, summary, data), `declare`, `memory`, `frame`,
-`run_end`. Example: [`assets/transcript-example.jsonl`](assets/transcript-example.jsonl).
+One JSON object per line: `{"t": seconds, "kind": ..., ...}`.
+
+| Kind | What it records |
+|---|---|
+| `run_start` | contract, system prompt, tool names, robot manifest, how long connecting took |
+| `observation` | what the model was shown this turn, and how long gathering it took |
+| `llm_request` | how many messages went out, how many still carry an image, whether this is the re-prompt |
+| `llm` | text, `thinking`, tool_calls, usage (this turn and the run's total), stop_reason, latency, or `error` when the call failed |
+| `enforce` | zero tool calls (re-prompt) or several (first only) |
+| `verb_start` | name as called, canonical name, params, source (`agent` · `mcp` · `cli`), whether it is nested inside a composite |
+| `gate` | one per executor rule that fired: `abort` · `allowlist` · `unknown` · `params` · `confirm` · `budget` · `abort_when` · `precondition` · `dry_run`, with the reason and, where it matters, the robot state that caused it |
+| `intent` | every command sent to the robot: kind, params, whether it was accepted |
+| `verb_end` | outcome (`ok` · `fail` · `refused` · `denied` · `budget` · `aborted` · `error`), summary, seconds, and how many intents of each kind it sent |
+| `verb` | the loop's own record of the call it made (name, params, ok, summary, data) |
+| `declare`, `memory`, `note`, `frame`, `run_end` | the model's verdict, a saved note, a free-text line, a captured frame, the summary |
+
+Example: [`assets/transcript-example.jsonl`](assets/transcript-example.jsonl), recorded
+before the trace kinds existed.
+
+## Trace
+
+The transcript is one *sink* of an event stream, not a thing the loop writes directly
+([ADR-0029](adr/0029-tracing.md)). The same events drive two live views, both on by default:
+
+- **The terminal** (`quackd run`), on stderr, so `2> trace.log` keeps the outcome on screen.
+  It shows the system prompt once, then per turn: the observation, what the model thought,
+  the tool it called, tokens and latency, each gate that fired, each intent, and the result.
+  A burst of intents from a steering loop is one line with its parameter ranges, because
+  `go_to` recomputes its twist every 100 ms: `-> move x26 over 0.5 s (vx 0.1..0.2, wz -0.01..0.88)`.
+- **The MCP tool result**, as a `trace` list on every call that reaches an executor, capped
+  at thirty lines, with the uncapped version on the server's stderr. Over MCP the pilot is
+  the client, so its reasoning and its token counts are not quackd's to show. What quackd can
+  see it says: the verb, the gates, the intents, the result and the budget.
+
+`--no-trace` or `QUACKD_TRACE=0` removes the views. The transcript is unaffected, because a
+run that cannot be argued about afterwards is the thing this project cannot give up.
+
+The trace shows intents as verbs issue them. A keepalive inside an adapter, a daemon's own
+deadman resend and an adapter's stop-on-close are that adapter's business and appear only in
+its logs.
 
 ## Where the seams are
 

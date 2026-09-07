@@ -200,6 +200,89 @@ async def test_bundled_ducks_load_by_name(path: str) -> None:
         assert _data(await client.call_tool("robot_load_duckfile", {"path": path}))["ok"]
 
 
+def _flat(trace: list[str]) -> str:
+    """The trace as one string, with the label column's padding squeezed out."""
+    return " | ".join(" ".join(line.split()) for line in trace)
+
+
+async def test_a_call_comes_back_with_what_happened_behind_it() -> None:
+    """Over MCP the model is the pilot, so its own reasoning is not quackd's to show. What
+    quackd can see, it says: the verb, the intents, what came back, and how long it took."""
+    async with connected() as (client, _session, _transport):
+        result = _data(
+            await client.call_tool(
+                "robot_run_verb", {"verb": "move", "params": {"vx": 0.2, "duration_s": 1.0}}
+            )
+        )
+        trace = _flat(result["trace"])
+        assert "move(vx=0.2" in trace
+        assert "-> move" in trace
+        assert "-> stop" in trace  # `move` stops the robot when it is done
+        assert "<- move ok" in trace and "walked" in trace
+        assert "step 1/" in trace  # the budget it just spent
+
+
+async def test_a_refusal_says_which_rule_refused_it() -> None:
+    async with connected() as (client, _session, _transport):
+        assert _data(await client.call_tool("robot_load_duckfile", {"path": "hello-world"}))["ok"]
+        refused = _data(await client.call_tool("robot_run_verb", {"verb": "kick"}))
+        assert refused["ok"] is False
+        assert "allowlist" in _flat(refused["trace"])
+
+
+async def test_the_observe_tool_appends_its_trace_as_text() -> None:
+    async with connected() as (client, _session, _transport):
+        frame = await client.call_tool("robot_observe", {})
+        kinds = [c.type for c in frame.content]
+        assert kinds == ["text", "image", "text"]  # summary, picture, trace
+        assert frame.content[0].text.startswith("duck camera:") or "camera" in frame.content[0].text
+        assert frame.content[-1].text.startswith("trace:")
+        assert "observe" in frame.content[-1].text
+
+
+async def test_the_tools_that_never_reach_the_robot_carry_no_trace() -> None:
+    """A trace on `robot_list` would be two lines of envelope, read by the model, saying
+    nothing about a robot."""
+    async with connected() as (client, _session, _transport):
+        for tool, args in (
+            ("robot_list", {}),
+            ("robot_list_verbs", {}),
+            ("robot_recall", {}),
+            ("robot_remember", {"text": "the ball lives by the sofa"}),
+        ):
+            assert "trace" not in _data(await client.call_tool(tool, args)), tool
+
+
+async def test_the_trace_can_be_turned_off() -> None:
+    async with connected(trace=False) as (client, _session, _transport):
+        assert "trace" not in _data(await client.call_tool("robot_run_verb", {"verb": "quack"}))
+        frame = await client.call_tool("robot_observe", {})
+        assert [c.type for c in frame.content] == ["text", "image"]
+
+
+async def test_two_calls_at_once_never_swap_traces() -> None:
+    """The SDK runs every tool call as its own task. A buffer on the session would put one
+    call's intents into the other call's result."""
+    async with connected() as (client, _session, _transport):
+        slow, fast = await asyncio.gather(
+            client.call_tool(
+                "robot_run_verb", {"verb": "move", "params": {"vx": 0.1, "duration_s": 2.0}}
+            ),
+            client.call_tool("robot_run_verb", {"verb": "quack", "params": {"text": "hi"}}),
+        )
+        moved, quacked = _flat(_data(slow)["trace"]), _flat(_data(fast)["trace"])
+        assert "-> move" in moved and "quack" not in moved
+        assert "quack" in quacked and "-> move" not in quacked
+
+
+async def test_an_aborted_session_says_why_it_refused() -> None:
+    async with connected() as (client, session, _transport):
+        session.executor.abort.set()
+        refused = _data(await client.call_tool("robot_run_verb", {"verb": "walk"}))
+        assert refused["ok"] is False
+        assert "session_aborted" in _flat(refused["trace"])
+
+
 async def test_stop_still_works_after_the_session_aborts() -> None:
     """The abort gate refused every verb by name, `stop` included. But the abort is set
     exactly when the pilot needs the brake — the heartbeat has just failed, and a verb that

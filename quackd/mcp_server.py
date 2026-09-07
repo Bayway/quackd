@@ -6,6 +6,12 @@ and the heartbeat apply to an interactive session too. Since 0.4 one server can 
 several robots (`--robots duck=microduck:sim2d,reachy=reachy_mini:mock`): eight `robot_*`
 tools take a robot name and every robot has its own executor, budget, heartbeat and
 contract. stdout is the wire, and every log line goes to stderr.
+
+The model here is the client, so what it thinks never reaches this process. What quackd can
+see it narrates (`quackd.trace`): each call that reaches an executor comes back with a
+`trace` list saying which gates fired, which intents went to the robot, what came back and
+how long it took, and the same lines go to stderr. `--no-trace` or `QUACKD_TRACE=0` turns
+both off.
 """
 
 from __future__ import annotations
@@ -13,7 +19,8 @@ from __future__ import annotations
 import contextlib
 import logging
 import sys
-from collections.abc import AsyncIterator, Callable, Mapping
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,6 +48,14 @@ from quackd.safety import (
     VerbNotAllowed,
     allow_all,
     deny_all,
+)
+from quackd.trace import (
+    LineTrace,
+    Tracer,
+    capture_sink,
+    capturing,
+    render_call,
+    trace_enabled_default,
 )
 from quackd.transport.base import DuckTransport
 from quackd.verbs.registry import (
@@ -99,6 +114,16 @@ def _prefixed(emit: Callable[..., None], name: str) -> Callable[[str], None]:
     return log_line
 
 
+def _stderr_view(name: str) -> LineTrace:
+    """The trace's stderr view for one robot: one INFO line per rendered line, prefixed the
+    way every other log line is, so Claude Desktop's log file reads as one story."""
+
+    def write(text: str, _style: str) -> None:
+        log.info("%s: %s", name, text)
+
+    return LineTrace(write, prompt=False)
+
+
 def _stash_frames(session: RobotSession) -> Callable[[Any, str], None]:
     """The executor's `on_frame` hook: keep the frame `observe` captured for `robot_observe`."""
 
@@ -130,6 +155,37 @@ class RobotSession:
     """A caller-supplied registry is kept as is; otherwise the manifest builds one."""
     memory: RobotMemory | None = None
     """What this robot keeps between sessions (`quackd memory`). None = off."""
+    tracer: Tracer | None = None
+    """Narrates this robot's calls to stderr and into each result's `trace`. None = off."""
+
+    def _gate(self, name: str, gate: str, reason: str) -> None:
+        """A refusal the session makes before the executor sees the call, told the same way."""
+        if self.tracer is not None:
+            self.tracer.emit("gate", name=name, gate=gate, outcome="refused", reason=reason)
+
+    async def _call(
+        self, tool: str, args: dict[str, Any], fn: Callable[[], Awaitable[dict[str, Any]]]
+    ) -> dict[str, Any]:
+        """One tool call, narrated. The SDK runs every call as its own task, and `capturing`
+        is a context variable, so two calls on one robot never see each other's events. The
+        rendered lines land in the result's `trace`; stderr gets them as they happen."""
+        if self.tracer is None:
+            return await fn()
+        with capturing() as events:
+            started = time.perf_counter()
+            self.tracer.emit("tool_call", tool=tool, robot=self.name, **args)
+            payload = await fn()
+            budget = self.executor.budget
+            self.tracer.emit(
+                "tool_result",
+                tool=tool,
+                ok=bool(payload.get("ok")),
+                summary=payload.get("summary"),
+                elapsed_s=round(time.perf_counter() - started, 3),
+                budget=budget.status() if budget is not None else None,
+            )
+        payload["trace"] = render_call(events)
+        return payload
 
     def shown_name(self, verb: Verb) -> str:
         """The name a client sees: the loaded contract's own spelling when it used an alias."""
@@ -185,18 +241,26 @@ class RobotSession:
             await self.transport.close()
 
     async def run(self, name: str, params: dict[str, Any] | None) -> dict[str, Any]:
+        """`robot_run_verb`: the verb through the executor, with its trace."""
+        return await self._call(
+            "robot_run_verb",
+            {"verb": name, "params": params or {}},
+            lambda: self._run(name, params),
+        )
+
+    async def _run(self, name: str, params: dict[str, Any] | None) -> dict[str, Any]:
         self.calls += 1
         # `stop` is exempt on purpose, the same way the Executor exempts it. An aborted
         # session is exactly the situation the pilot reaches for the brake in — the heartbeat
         # has just fired, and a verb that was already walking may still be finishing — and
         # refusing `stop` here closed the only control the tool surface offers.
         if self.executor.abort.is_set() and self.registry.canonical(name) != "stop":
-            return _result(
-                VerbResult.fail(
-                    "session aborted (heartbeat failed or kill switch); restart quackd. "
-                    "`stop` still works and is worth sending."
-                )
+            reason = (
+                "session aborted (heartbeat failed or kill switch); restart quackd. "
+                "`stop` still works and is worth sending."
             )
+            self._gate(name, "session_aborted", reason)
+            return _result(VerbResult.fail(reason))
         try:
             result = await self.executor.run_verb(name, params or {}, source="mcp")
         except VerbNotAllowed as e:
@@ -264,27 +328,34 @@ class RobotSession:
         }
 
     async def observe(self) -> list[str | Image]:
-        """The `observe` verb through the executor, then the frame it captured."""
+        """The `observe` verb through the executor, then the frame it captured, then the
+        trace as one text block (this tool returns content, not a dict)."""
         self.last_frame = None
-        result = await self.run("observe", {})
+        result = await self._call("robot_observe", {}, lambda: self._run("observe", {}))
+        content: list[str | Image]
         if not result["ok"] or self.last_frame is None:
             # refused, no camera, or a dry run (nothing was captured): words only
-            return [f"{self.name}: {result['summary']}"]
-        self.frames += 1
-        summary = str(result["summary"]).removeprefix("frame captured; ")
-        return [
-            f"{self.name} camera: {summary}",
-            Image(data=png_bytes(self.last_frame), format="png"),
-        ]
+            content = [f"{self.name}: {result['summary']}"]
+        else:
+            self.frames += 1
+            summary = str(result["summary"]).removeprefix("frame captured; ")
+            content = [
+                f"{self.name} camera: {summary}",
+                Image(data=png_bytes(self.last_frame), format="png"),
+            ]
+        if result.get("trace"):
+            content.append("trace:\n" + "\n".join(result["trace"]))
+        return content
 
     async def say(self, text: str) -> dict[str, Any]:
-        if self.manifest is not None and "sound" not in self.manifest.intents:
-            return {
-                "ok": False,
-                "summary": f"{self.name} ({self.manifest.model}) has no sound intent",
-                "data": {},
-            }
-        return await self.run("say", {"text": text})
+        async def inner() -> dict[str, Any]:
+            if self.manifest is not None and "sound" not in self.manifest.intents:
+                reason = f"{self.name} ({self.manifest.model}) has no sound intent"
+                self._gate("say", "no_sound_intent", reason)
+                return {"ok": False, "summary": reason, "data": {}}
+            return await self._run("say", {"text": text})
+
+        return await self._call("robot_say", {"text": text}, inner)
 
     def recall(self) -> dict[str, Any]:
         if self.memory is None:
@@ -443,17 +514,23 @@ def build_fleet_server(
     default: str | None = None,
     memory: bool = True,
     memory_dir: str | Path | None = None,
+    trace: bool = True,
 ) -> tuple[MCPServer, Fleet]:
     """One MCP server over several robots, each behind its own executor.
 
     `--yes` and `--dry-run` are global; contracts, budgets and abort flags are per robot.
     A `.duck` given at startup is adopted by the default robot. With `memory` on, each
     robot gets its `RobotMemory` (keyed adapter:backend, so a simulated body never
-    inherits a real one's notes) behind `robot_recall` / `robot_remember`."""
+    inherits a real one's notes) behind `robot_recall` / `robot_remember`. With `trace` on,
+    each robot narrates its calls: a `trace` list in every result that reached its executor,
+    and the same lines on stderr in place of the executor's own log lines."""
     if not robots:
         raise ValueError("a fleet needs at least one robot")
     sessions: dict[str, RobotSession] = {}
     for name, transport in robots.items():
+        tracer: Tracer | None = None
+        if trace:
+            tracer = Tracer(observers=[_stderr_view(name), capture_sink])
         reg = registry or default_registry()
         det = detector
         if det is None and backend_name(transport) == "sim2d":
@@ -476,13 +553,17 @@ def build_fleet_server(
             detector=det,
             dry_run=dry_run,
             confirm=allow_all if yes else deny_all,
-            log=_prefixed(log.info, name),
+            # with the trace on, its lines replace the executor's own (which would say the
+            # same verb twice on stderr); those drop to DEBUG rather than vanish
+            log=_prefixed(log.debug if trace else log.info, name),
+            trace=tracer,
         )
         heartbeat = Heartbeat(
             transport,
             executor.abort,
             period_s=heartbeat_period_s,
             log=_prefixed(log.warning, name),
+            trace=tracer,
         )
         session = RobotSession(
             name=name,
@@ -499,6 +580,7 @@ def build_fleet_server(
                 if memory
                 else None
             ),
+            tracer=tracer,
         )
         executor.on_frame = _stash_frames(session)
         sessions[name] = session
@@ -565,7 +647,8 @@ def build_fleet_server(
 
     @mcp.tool(
         description="Run a verb on one robot through its executor, with JSON params. "
-        "Refusals come back as ok=false; a verb its manifest lacks is a refusal too."
+        "Refusals come back as ok=false; a verb its manifest lacks is a refusal too. "
+        "`trace` lists what happened behind the scenes: gates, intents sent, timing."
     )
     async def robot_run_verb(
         verb: str, params: dict[str, Any] | None = None, robot: str | None = None
@@ -575,7 +658,7 @@ def build_fleet_server(
 
     @mcp.tool(
         description="The observe verb on one robot, through its executor: the camera frame "
-        "as a PNG plus a detection summary.",
+        "as a PNG plus a detection summary, then a trace block of what happened.",
         structured_output=False,
     )
     async def robot_observe(robot: str | None = None) -> list[str | Image]:
@@ -633,6 +716,7 @@ def build_server(
     heartbeat_period_s: float = 0.5,
     memory: bool = True,
     memory_dir: str | Path | None = None,
+    trace: bool = True,
 ) -> tuple[MCPServer, RobotSession]:
     """One robot, the 0.3 entry point: a fleet of one named after its adapter."""
     name = adapter_name(transport) or "duck"
@@ -646,6 +730,7 @@ def build_server(
         heartbeat_period_s=heartbeat_period_s,
         memory=memory,
         memory_dir=memory_dir,
+        trace=trace,
     )
     return mcp, fleet.sessions[name]
 
@@ -664,6 +749,7 @@ def serve(
     warn: Any = None,
     memory: bool = True,
     memory_dir: str | None = None,
+    trace: bool | None = None,
 ) -> None:
     from quackd.adapters.factory import (
         RobotSpec,
@@ -721,6 +807,8 @@ def serve(
         yes=yes,
         memory=memory,
         memory_dir=memory_dir,
+        # the env is the switch a desktop-spawned server has (no shell, no cwd `.env`)
+        trace=trace if trace is not None else trace_enabled_default(),
     )
     mcp.run(transport="stdio")
 

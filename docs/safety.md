@@ -38,7 +38,8 @@ always sends `stop` and closes the transport. Works on Windows (signal handler, 
 
 ## Dry run
 
-`--dry-run` prints every intent a model *would* send and sends nothing. Read-only verbs
+`--dry-run` sends nothing, and the trace names every verb a model *would* have run with the
+parameters it chose (`gate dry_run: would send move(vx=0.15, duration_s=1)`). Read-only verbs
 (`observe`, alias `get_frame`, and `report_state`) still run. Use it the first time you
 point a new `.duck` at hardware.
 

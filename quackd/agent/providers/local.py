@@ -33,8 +33,21 @@ TOOL_HINT = (
 )
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
+_THINK_RE = re.compile(r"<think>(.*?)</think>", re.S)
 _NAME_KEYS = ("name", "tool", "function", "verb")
 _ARGS_KEYS = ("arguments", "parameters", "params", "args", "input")
+
+
+def split_thinking(text: str) -> tuple[str | None, str]:
+    """`<think>...</think>` out of a reply, as (thinking, the rest).
+
+    A server that does not separate reasoning (llama.cpp without `--reasoning-format`, LM
+    Studio with separation off, vLLM without a parser) leaves the model's thoughts inline in
+    `content`. Left there they would be shown as the answer and replayed to the model next
+    turn as something it said."""
+    thoughts = [m.group(1).strip() for m in _THINK_RE.finditer(text)]
+    rest = _THINK_RE.sub("", text).strip()
+    return "\n\n".join(t for t in thoughts if t) or None, rest
 
 
 def _candidates(text: str) -> list[dict[str, Any]]:
@@ -162,7 +175,12 @@ class LocalProvider(OpenAIProvider):
         self, system: str, history: list[Any], tools: list[dict[str, Any]]
     ) -> ProviderTurn:
         await self.ensure_model()
-        return await super().step(system, history, tools)
+        turn = await super().step(system, history, tools)
+        if turn.thinking is None and turn.text and "<think>" in turn.text:
+            thinking, rest = split_thinking(turn.text)
+            if thinking is not None:
+                turn = turn.model_copy(update={"thinking": thinking, "text": rest or None})
+        return turn
 
     def _fallback(self, turn: ProviderTurn, tools: list[dict[str, Any]]) -> ProviderTurn:
         call = parse_tool_call_from_text(turn.text or "", {t["name"] for t in tools})

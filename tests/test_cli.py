@@ -13,6 +13,74 @@ from .conftest import DUCKS
 runner = CliRunner()
 
 
+# ── the trace ───────────────────────────────────────────────────────────────────────────
+
+
+def _trace_run(tmp_path: Path, monkeypatch, *flags: str, env: str | None = "") -> str:
+    """A run whose stderr the CliRunner folds into `output`, with the label column's padding
+    squeezed out so an assertion can name a line as a reader would say it. `env` is what
+    QUACKD_TRACE says: "" is on (an empty value must never read as off), None removes it."""
+    if env is None:
+        monkeypatch.delenv("QUACKD_TRACE", raising=False)
+    else:
+        monkeypatch.setenv("QUACKD_TRACE", env)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "hello-world",
+            "--provider",
+            "fake",
+            "--robot",
+            "microduck:mock",
+            "--runs-dir",
+            str(tmp_path),
+            "--no-gif",
+            *flags,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    return " ".join(result.output.split())
+
+
+def test_the_trace_is_on_by_default(tmp_path: Path, monkeypatch) -> None:
+    """Someone who types `quackd run` and watches a robot move should see why it moved."""
+    out = _trace_run(tmp_path, monkeypatch)
+    assert "system prompt" in out  # what the model was told
+    assert "quack(text='hello!')" in out  # what it chose
+    assert "-> sound" in out  # what went to the robot
+    assert "<- quack ok" in out  # what came back
+    assert "SUCCESS" in out  # and the outcome still reaches stdout
+
+
+def test_no_trace_leaves_the_header_and_the_outcome(tmp_path: Path, monkeypatch) -> None:
+    out = _trace_run(tmp_path, monkeypatch, "--no-trace")
+    assert "-> sound" not in out and "system prompt" not in out
+    assert "SUCCESS" in out and "hello-world" in out
+
+
+def test_the_env_can_turn_the_trace_off_too(tmp_path: Path, monkeypatch) -> None:
+    """A `.env` line has to work, so the default is read when the command runs, not when the
+    module is imported."""
+    assert "-> sound" not in _trace_run(tmp_path, monkeypatch, env="0")
+    assert "-> sound" in _trace_run(tmp_path, monkeypatch, env=None)
+
+
+def test_the_flag_beats_the_env(tmp_path: Path, monkeypatch) -> None:
+    assert "-> sound" in _trace_run(tmp_path, monkeypatch, "--trace", env="0")
+
+
+def test_verbose_is_the_compact_view_and_does_not_double_the_trace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """With the trace on, the executor's own log lines would say every verb a second time."""
+    traced = _trace_run(tmp_path, monkeypatch, "--verbose")
+    assert "-> sound" in traced
+    assert "→ quack" not in traced, "the old compact line must not double the trace"
+    compact = _trace_run(tmp_path, monkeypatch, "--verbose", "--no-trace")
+    assert "→ quack" in compact and "-> sound" not in compact
+
+
 def test_validate_starter_ducks() -> None:
     result = runner.invoke(app, ["validate", *[str(p) for p in sorted(DUCKS.glob("*.duck"))]])
     assert result.exit_code == 0, result.output

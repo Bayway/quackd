@@ -17,9 +17,9 @@ one, else the first Microduck, else the first declared.
 |---|---|
 | `robot_list` | Every robot this server fronts: name, adapter, backend, vendor, model, embodiment, mobility, manifest id and digest, loaded contract, health, and which one is the default. Call this first. |
 | `robot_list_verbs(robot?)` | That robot's verbs from its own manifest: params, safety class, `canonical` name and `aliases`, whether it is `core`, and whether its current contract allows it. |
-| `robot_run_verb(robot?, verb, params?)` | Run any verb through that robot's executor (`search_scan`, `go_to` or its alias `walk_to`, `kick`, `gaze`, `express`, …). Refusals come back as `ok: false`, and a verb the manifest does not list is a refusal too. |
-| `robot_observe(robot?)` | The `observe` verb through the executor (it counts against the budget), returning the camera frame as a PNG image plus a one-line detection summary. |
-| `robot_say(robot?, text)` | The `say` verb. No robot here has text to speech, so it degrades: one of seven tones on a Microduck, an expressive sound on a Reachy Mini, one of the duck's own sounds on an Open Duck. A robot without a `sound` intent refuses with `ok: false`. |
+| `robot_run_verb(robot?, verb, params?)` | Run any verb through that robot's executor (`search_scan`, `go_to` or its alias `walk_to`, `kick`, `gaze`, `express`, …). Refusals come back as `ok: false`, and a verb the manifest does not list is a refusal too. The result carries a `trace` list of what happened behind it (see below). |
+| `robot_observe(robot?)` | The `observe` verb through the executor (it counts against the budget), returning the camera frame as a PNG image, a one-line detection summary, and the trace as a final text block. |
+| `robot_say(robot?, text)` | The `say` verb, with a `trace` like `robot_run_verb`. No robot here has text to speech, so it degrades: one of seven tones on a Microduck, an expressive sound on a Reachy Mini, one of the duck's own sounds on an Open Duck. A robot without a `sound` intent refuses with `ok: false`. |
 | `robot_load_duckfile(robot?, path)` | Adopt a `.duck` contract on one robot: its `requires` (or, for `duck: 0`, its allowlist) is checked against that robot's manifest first, then allowlist and budgets are enforced for that robot only; the body is returned as instructions. Flock ducks are refused. |
 | `robot_recall(robot?)` | What that robot remembers from earlier sessions and runs: the notes a pilot saved and how its recent runs ended ([memory.md](memory.md)). Costs no step; the server's instructions ask the model to call it early. |
 | `robot_remember(robot?, text, tags?)` | Keep one short fact for future sessions on that robot. Moves nothing, costs no step; the same sentence twice updates the old note. Off with `--no-memory`. |
@@ -32,6 +32,37 @@ flags are per robot: loading a contract on `duck` changes nothing for `reachy`.
 Simulated robots in one fleet each get their own world; a shared arena over MCP is future
 work (a flock needs a coordinator, and one MCP pilot is not one). Run a heterogeneous task
 with `quackd run reachy-spots-duck-kicks` instead ([flock.md](flock.md)).
+
+## What the trace shows
+
+Every call that reaches a robot's executor comes back with a `trace`: a short list of plain
+lines saying what happened behind it. `robot_observe` returns the same thing as a final text
+block, because that tool answers with content rather than a dict. The five tools that never
+touch a robot carry none, because there is nothing behind the scenes to show.
+
+```
+tool    robot_run_verb verb='go_to', params={'target': 'ball'} on duck
+verb    go_to(target='ball') from mcp
+->      look(x=1, y=0, z=0)
+->      move x24 over 0.1 s (vx 0.1..0.2, vy 0, wz 0..0.88)
+->      stop
+<-      go_to ok: reached the ball: ~0.25 m away, bearing +0° (0.1 s, 26 intents)
+done    ok in 0.2 s budget: step 2/40, llm calls 0/40, 0.1/5 min
+```
+
+A `gate` line appears whenever a rule fires, and says which one: `gate allowlist: refused
+verb 'kick' is not in this duck's allowlist (quack, walk, stop)`. That is the difference
+between a refusal you can act on and an `ok: false` you cannot.
+
+Over MCP the pilot is the client, so the model's own reasoning and token counts live in
+Claude Code or Claude Desktop, not here. quackd shows what quackd can see.
+
+The list is capped at thirty lines per call so a long approach does not fill the model's
+context. The uncapped version goes to the server's stderr, which is
+`%APPDATA%\Claude\logs\mcp-server-quackd.log` on Windows and `~/Library/Logs/Claude/` on
+macOS. Turn it all off with `--no-trace`, or with `QUACKD_TRACE=0` in the server's
+environment, which is the switch to reach for in a desktop config because it needs no change
+to the command line.
 
 ## Claude Code
 
@@ -81,11 +112,15 @@ Edit `claude_desktop_config.json` — Settings → Developer → *Edit Config*:
   "mcpServers": {
     "quackd": {
       "command": "uvx",
-      "args": ["quackd", "serve-mcp", "--robot", "microduck:sim2d"]
+      "args": ["quackd", "serve-mcp", "--robot", "microduck:sim2d"],
+      "env": {"QUACKD_TRACE": "1"}
     }
   }
 }
 ```
+
+(`QUACKD_TRACE` is `1` by default and is shown here because `env` is where you would set it
+to `0`: a desktop-spawned server has no shell and no working directory to read a `.env` from.)
 
 Restart Claude Desktop completely. The duck appears under *Connectors → Manage connectors*.
 
@@ -124,6 +159,7 @@ quackd serve-mcp --dry-run                           # intents are logged, never
 quackd serve-mcp --yes                               # allow confirm-gated verbs (no terminal to ask)
 quackd serve-mcp --robot microduck:jsonrpc --address tcp://127.0.0.1:9870   # real robot, experimental
 quackd serve-mcp --robots duck=microduck:sim2d,reachy=reachy_mini:mock       # a fleet: robot_* tools, one executor each
+quackd serve-mcp --no-trace                          # stop every result carrying a trace of what happened
 quackd serve-mcp --robot open_duck:sim2d                                     # a buildable duck, no hardware needed
 ```
 

@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from quackd.agent.loop import RunConfig, run_duck
-from quackd.agent.providers.base import Exchange, ProviderTurn, ToolCall
+from quackd.agent.providers.base import Exchange, ProviderError, ProviderTurn, ToolCall, Usage
 from quackd.agent.providers.fake import FakeProvider
 from quackd.agent.transcript import Transcript
 from quackd.duckfile.schema import Budgets, DuckFile
@@ -197,3 +197,181 @@ async def test_dry_run_touches_nothing(hello_duck: DuckFile, tmp_path: Path) -> 
     )
     assert result.outcome == "success"
     assert [i.kind for i in transport.intents] == ["stop"]  # only the final safety stop
+
+
+# ── the trace: the run narrates itself ──────────────────────────────────────────────────
+
+
+class ThinkingProvider:
+    """A model that reasons out loud, which no scripted strategy does."""
+
+    name = "thinker"
+    model = "test"
+    supports_vision = False
+
+    def __init__(self, *calls: ToolCall) -> None:
+        self.script = list(calls)
+        self.calls = 0
+
+    async def step(
+        self, system: str, history: list[Exchange], tools: list[dict[str, Any]]
+    ) -> ProviderTurn:
+        call = self.script[min(self.calls, len(self.script) - 1)]
+        self.calls += 1
+        return ProviderTurn(
+            tool_calls=[call],
+            text="on it",
+            thinking=f"turn {self.calls}: I will {call.name}",
+            usage=Usage(input_tokens=100, output_tokens=10),
+            stop_reason="tool_use",
+        )
+
+
+async def test_the_transcript_carries_the_whole_conversation(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """Every step the run takes on the model's behalf is a line: what was asked, what it
+    thought, what it answered, what the executor decided, what went to the robot."""
+    result = await run_duck(
+        RunConfig(
+            duck=hello_duck,
+            provider=ThinkingProvider(
+                ToolCall(name="quack", arguments={"text": "hi"}),
+                ToolCall(name="declare_success", arguments={"reason": "quacked"}),
+            ),
+            transport=MockTransport(),
+            runs_dir=tmp_path,
+        )
+    )
+    assert result.outcome == "success"
+    events = Transcript.read(result.run_dir / "transcript.jsonl")
+    kinds = {e["kind"] for e in events}
+    assert {"llm_request", "verb_start", "intent", "verb_end"} <= kinds
+
+    llm = next(e for e in events if e["kind"] == "llm")
+    assert llm["thinking"] == "turn 1: I will quack"
+    assert llm["latency_s"] >= 0 and llm["usage_total"]["input_tokens"] == 100
+
+    request = next(e for e in events if e["kind"] == "llm_request")
+    assert request["messages"] == 1 and request["reprompt"] is False
+
+    start = next(e for e in events if e["kind"] == "verb_start")
+    assert start["name"] == "quack" and start["source"] == "agent" and start["nested"] is False
+
+    intent = next(e for e in events if e["kind"] == "intent")
+    assert intent["intent"] == "sound" and intent["accepted"] is True
+
+    end = next(e for e in events if e["kind"] == "verb_end")
+    assert end["outcome"] == "ok" and end["intents"] == {"sound": 1} and end["elapsed_s"] >= 0
+    # the loop's own `verb` record is unchanged, so everything that reads it still can
+    verb = next(e for e in events if e["kind"] == "verb")
+    assert verb["name"] == "quack" and verb["ok"] is True
+
+
+async def test_the_final_safety_stop_is_in_the_trace_too(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """The intents that matter most are the ones sent because something went wrong."""
+    result = await run_duck(
+        RunConfig(
+            duck=hello_duck,
+            provider=FakeProvider.for_duck("hello-world"),
+            transport=MockTransport(),
+            runs_dir=tmp_path,
+        )
+    )
+    events = Transcript.read(result.run_dir / "transcript.jsonl")
+    stops = [e for e in events if e["kind"] == "intent" and e["intent"] == "stop"]
+    assert stops, "the run always stops the robot on the way out, and must say so"
+
+
+async def test_a_provider_that_fails_says_so_instead_of_exiting_unexpectedly(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """A bad key, a 429 or a dropped connection is what a first real run hits. The run used
+    to end with `loop exited unexpectedly` and no record of the call that failed."""
+
+    class Failing:
+        name, model, supports_vision = "failing", "test", False
+
+        async def step(self, system: str, history: Any, tools: Any) -> ProviderTurn:
+            raise ProviderError("anthropic: rate limited (retry-after 7s)")
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    with pytest.raises(ProviderError):
+        await run_duck(
+            RunConfig(
+                duck=hello_duck,
+                provider=Failing(),
+                transport=MockTransport(),
+                run_dir=run_dir,
+                runs_dir=tmp_path,
+            )
+        )
+    events = Transcript.read(run_dir / "transcript.jsonl")
+    failed = next(e for e in events if e["kind"] == "llm")
+    assert "rate limited" in failed["error"] and failed["latency_s"] >= 0
+    end = next(e for e in events if e["kind"] == "run_end")
+    assert end["outcome"] == "error" and "rate limited" in end["reason"]
+
+
+async def test_a_console_sees_the_run_as_it_happens(hello_duck: DuckFile, tmp_path: Path) -> None:
+    seen: list[str] = []
+    await run_duck(
+        RunConfig(
+            duck=hello_duck,
+            provider=FakeProvider.for_duck("hello-world"),
+            transport=MockTransport(),
+            runs_dir=tmp_path,
+            trace=lambda event: seen.append(event.kind),
+        )
+    )
+    assert seen[0] == "run_start" and seen[-1] == "run_end"
+    assert {"observation", "llm", "verb_start", "intent", "verb_end", "declare"} <= set(seen)
+
+
+async def test_a_broken_console_never_ends_a_run(hello_duck: DuckFile, tmp_path: Path) -> None:
+    """A terminal that cannot print is not a reason to stop a robot mid-task."""
+
+    def broken(_event: Any) -> None:
+        raise RuntimeError("the terminal went away")
+
+    result = await run_duck(
+        RunConfig(
+            duck=hello_duck,
+            provider=FakeProvider.for_duck("hello-world"),
+            transport=MockTransport(),
+            runs_dir=tmp_path,
+            trace=broken,
+        )
+    )
+    assert result.outcome == "success"
+    assert Transcript.read(result.run_dir / "transcript.jsonl")  # the record is unaffected
+
+
+async def test_the_log_callback_still_gets_the_lines_that_only_it_had(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """`log` is a contract other callers rely on: the flock's member records, the MCP
+    logger, and tests that assert on what a run said. The trace observes it, never replaces
+    it."""
+    # a v1 task may allow more than it needs; a verb this body lacks is dropped with a line
+    hello_duck.frontmatter.duck = 1
+    hello_duck.frontmatter.requires = ["quack"]
+    hello_duck.frontmatter.verbs.allow = ["quack", "walk", "stop", "fly"]
+    lines: list[str] = []
+    seen: list[Any] = []
+    await run_duck(
+        RunConfig(
+            duck=hello_duck,
+            provider=FakeProvider.for_duck("hello-world"),
+            transport=MockTransport(),
+            runs_dir=tmp_path,
+            log=lines.append,
+            trace=seen.append,
+        )
+    )
+    assert any("does not have fly" in line for line in lines)
+    notes = [e.data["text"] for e in seen if e.kind == "note"]
+    assert any("does not have fly" in note for note in notes)

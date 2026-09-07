@@ -2,7 +2,9 @@
 
 Function calling with `mode="ANY"` so a turn always yields a call; images ride as inline
 PNG parts; tool results go back as `function_response` parts. Gemini's schema dialect
-rejects a few JSON-Schema keywords, so `render_tools` strips them.
+rejects a few JSON-Schema keywords, so `render_tools` strips them. Thought summaries are
+asked for (`thinking_config.include_thoughts`) so the trace can show them; a model that
+rejects the field gets one retry without it, and `QUACKD_GEMINI_THOUGHTS=0` never asks.
 """
 
 from __future__ import annotations
@@ -93,6 +95,7 @@ def _previous_decision(history: list[Exchange], current: Exchange) -> Any:
 def parse_response(response: Any) -> ProviderTurn:
     tool_calls: list[ToolCall] = []
     texts: list[str] = []
+    thoughts: list[str] = []
     candidates = getattr(response, "candidates", None) or []
     parts = (
         getattr(getattr(candidates[0], "content", None), "parts", None) or [] if candidates else []
@@ -103,7 +106,12 @@ def parse_response(response: Any) -> ProviderTurn:
             args = dict(getattr(fc, "args", None) or {})
             tool_calls.append(ToolCall(id=f"gemini-{i}", name=str(fc.name), arguments=args))
         elif getattr(part, "text", None):
-            texts.append(part.text)
+            # a thought part is the model's reasoning, not its answer: kept out of `text`, or
+            # it would be shown as the reply and replayed to the model as something it said
+            if getattr(part, "thought", False) is True:
+                thoughts.append(str(part.text).strip())
+            else:
+                texts.append(part.text)
     meta = getattr(response, "usage_metadata", None)
     finish = getattr(candidates[0], "finish_reason", None) if candidates else None
     return ProviderTurn(
@@ -112,10 +120,17 @@ def parse_response(response: Any) -> ProviderTurn:
         usage=Usage(
             input_tokens=int(getattr(meta, "prompt_token_count", 0) or 0),
             output_tokens=int(getattr(meta, "candidates_token_count", 0) or 0),
+            reasoning_tokens=int(getattr(meta, "thoughts_token_count", 0) or 0),
         ),
         stop_reason=str(finish) if finish is not None else None,
         raw=None,
+        thinking="\n\n".join(t for t in thoughts if t) or None,
     )
+
+
+def _rejects_thoughts(e: Exception) -> bool:
+    """The API's INVALID_ARGUMENT for a model without thinking names the config it refused."""
+    return "thinking" in str(e).lower() or "thought" in str(e).lower()
 
 
 class GeminiProvider:
@@ -123,10 +138,25 @@ class GeminiProvider:
     supports_vision = True
 
     def __init__(
-        self, model: str = DEFAULT_MODEL, *, client: Any = None, api_key: str | None = None
+        self,
+        model: str = DEFAULT_MODEL,
+        *,
+        client: Any = None,
+        api_key: str | None = None,
+        include_thoughts: bool | None = None,
     ) -> None:
         self.model = model
         self.calls = 0
+        if include_thoughts is None:
+            include_thoughts = os.environ.get(
+                "QUACKD_GEMINI_THOUGHTS", "1"
+            ).strip().lower() not in (
+                "0",
+                "false",
+                "no",
+                "off",
+            )
+        self.include_thoughts = include_thoughts
         if client is None:
             key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
             if not key:
@@ -139,24 +169,40 @@ class GeminiProvider:
         self.client = client
 
     def _config(self, system: str, tools: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
+        config: dict[str, Any] = {
             "system_instruction": system,
             "tools": render_tools(tools),
             "tool_config": {"function_calling_config": {"mode": "ANY"}},
         }
+        if self.include_thoughts:
+            config["thinking_config"] = {"include_thoughts": True}
+        return config
+
+    async def _generate(
+        self, system: str, history: list[Exchange], tools: list[dict[str, Any]]
+    ) -> Any:
+        return await self.client.aio.models.generate_content(
+            model=self.model,
+            contents=render_contents(history),
+            config=self._config(system, tools),
+        )
 
     async def step(
         self, system: str, history: list[Exchange], tools: list[dict[str, Any]]
     ) -> ProviderTurn:
         self.calls += 1
         try:
-            response = await self.client.aio.models.generate_content(
-                model=self.model,
-                contents=render_contents(history),
-                config=self._config(system, tools),
-            )
+            response = await self._generate(system, history, tools)
         except ProviderError:
             raise
         except Exception as e:
-            raise ProviderError(f"gemini: {type(e).__name__}: {e}") from e
+            if not (self.include_thoughts and _rejects_thoughts(e)):
+                raise ProviderError(f"gemini: {type(e).__name__}: {e}") from e
+            # a model without thinking (gemini-1.5, gemini-2.0-flash): one retry without the
+            # field, and no later turn asks again. The run loses the thoughts, not itself.
+            self.include_thoughts = False
+            try:
+                response = await self._generate(system, history, tools)
+            except Exception as again:
+                raise ProviderError(f"gemini: {type(again).__name__}: {again}") from again
         return parse_response(response)

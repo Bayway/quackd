@@ -27,6 +27,26 @@ writes its tool call as plain JSON is still understood. Details: [local-llms.md]
 turns; every provider gets a text line like `ball at bearing 12° left, ~0.80 m` from the
 detector. Composite verbs steer on detections at 10 Hz and never wait for the model.
 
+**How do I see what the model was told, what it thought, and what it sent the robot?**
+You already do: the trace is on by default. `quackd run` narrates the whole run to stderr as
+it happens, and every MCP tool call that reaches a robot comes back with a `trace` list of
+the same lines. You get the system prompt once, then per turn the observation, the model's
+reasoning where the provider returns any, the tool it chose, the tokens and latency, every
+executor gate that fired, every intent that went to the robot (a steering loop's burst
+collapsed into one line with its parameter ranges), and the result. `--no-trace` or
+`QUACKD_TRACE=0` turns the views off; `runs/<ts>/transcript.jsonl` keeps everything either
+way, uncapped. Details and the event list: [architecture.md](architecture.md#trace),
+[ADR-0029](adr/0029-tracing.md).
+
+**Why is the thinking line empty for my model?** Because that model did not return any. Only
+some do, and each in its own way: Claude returns a summary (quackd asks for one, since the
+default is to send the blocks back empty), an OpenAI-compatible server may fill
+`reasoning_content` or `reasoning`, Gemini returns thought parts when asked, and a local
+server that separates nothing gets its `<think>` block split out of the answer. OpenAI's own
+Chat Completions returns a reasoning token count and no text, so that is what the trace
+shows. The scripted pilot has no reasoning at all, which is why `--provider fake` never has a
+thinking line.
+
 **Does the robot need a powerful onboard computer?** No. quackd's own process, the part
 that calls the LLM and runs the detector, never runs on the robot itself — you run
 `quackd run` on a laptop or a server, a network hop away, and it talks to the robot (or the

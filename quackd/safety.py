@@ -16,6 +16,7 @@ import signal
 import sys
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -24,6 +25,7 @@ from pydantic import ValidationError
 
 from quackd.duckfile.schema import Budgets, DuckFrontmatter
 from quackd.perception.base import Detector
+from quackd.trace import TracedTransport, Tracer
 from quackd.transport.base import DuckState, DuckTransport
 from quackd.verbs.registry import Verb, VerbContext, VerbNotFound, VerbRegistry, VerbResult
 
@@ -125,6 +127,31 @@ class Executor:
     history: list[tuple[str, dict[str, Any], VerbResult]] = field(default_factory=list)
     manifest: RobotManifest | None = None
     """The connected robot's manifest, handed to verbs so composites can pick a strategy."""
+    trace: Tracer | None = None
+    """Where the executor narrates itself: `verb_start`, every `gate` that fires, every
+    `intent` a verb sends, `verb_end`. None is silent, which is what tests and the flock get."""
+    intent_stack: list[Counter[str]] = field(default_factory=list, init=False, repr=False)
+    """One tally per verb in flight, innermost last; a nested verb's intents count for its
+    parent too."""
+
+    # ── narration ───────────────────────────────────────────────────────────────────
+
+    def _emit(self, kind: str, **data: Any) -> None:
+        if self.trace is not None:
+            self.trace.emit(kind, **data)
+
+    def _note(self, text: str) -> None:
+        """A free-text line for both audiences: `log` is a contract other callers rely on
+        (the flock's `member_log`, the MCP logger, tests), and the trace observes it."""
+        self.log(text)
+        self._emit("note", text=text)
+
+    def traced_transport(self) -> Any:
+        """The transport as verbs see it: the real one, or a wrapper that narrates every
+        intent. Also what the executor itself sends its safety stops through."""
+        if self.trace is None:
+            return self.transport
+        return TracedTransport(self.transport, self.trace, self.intent_stack)
 
     # ── policy ──────────────────────────────────────────────────────────────────────
 
@@ -151,14 +178,16 @@ class Executor:
                 return True
         return verb.safety_class in ("confirm", "dangerous")
 
-    def context(self) -> VerbContext:
+    def context(self, source: Source = "agent") -> VerbContext:
+        """`source` is the outer call's, so a composite's nested verbs are narrated as coming
+        from the same pilot (an MCP session's `approach_and` runs an MCP `go_to`)."""
         return VerbContext(
-            transport=self.transport,
+            transport=self.traced_transport(),
             detector=self.detector,
             dry_run=self.dry_run,
             log=self.log,
             on_frame=self.on_frame,
-            run_verb=lambda name, params: self.run_verb(name, params, source="agent", nested=True),
+            run_verb=lambda name, params: self.run_verb(name, params, source=source, nested=True),
             # an adapter carries its manifest after connect; a bare transport has none
             manifest=self.manifest or getattr(self.transport, "manifest", None),
         )
@@ -173,21 +202,98 @@ class Executor:
         source: Source = "agent",
         nested: bool = False,
     ) -> VerbResult:
+        """Every verb call, from the agent loop, an MCP client or a composite.
+
+        The narration wraps the gates: exactly one `verb_start` and, whatever happens after
+        it, exactly one `verb_end` with an `outcome`, so a reader of the trace never sees a
+        verb that started and vanished. `ok`/`fail` are the verb's own verdict; `refused`,
+        `denied`, `budget` and `aborted` are the executor's, and `error` is a bug."""
         params = params or {}
+        canonical = self.registry.canonical(name)
+        started = time.perf_counter()
+        counter: Counter[str] = Counter()
+        self.intent_stack.append(counter)
+        self._emit(
+            "verb_start",
+            name=name,
+            canonical=canonical,
+            params=params,
+            source=source,
+            nested=nested,
+        )
+        outcome, summary, ok = "error", "verb exited unexpectedly", False
+        data_keys: list[str] = []
+        try:
+            result = await self._run_verb(name, canonical, params, source=source, nested=nested)
+        except VerbNotAllowed as e:
+            outcome, summary = "refused", str(e)
+            raise
+        except ConfirmDenied as e:
+            outcome, summary = "denied", str(e)
+            raise
+        except BudgetExceeded as e:
+            outcome, summary = "budget", str(e)
+            raise
+        except Aborted as e:
+            outcome, summary = "aborted", str(e)
+            raise
+        except BaseException as e:  # a cancelled task ends the verb too, and says so
+            outcome, summary = "error", f"{type(e).__name__}: {e}"
+            raise
+        else:
+            ok = result.ok
+            outcome, summary, data_keys = (
+                ("ok" if ok else "fail"),
+                result.summary,
+                list(result.data),
+            )
+            return result
+        finally:
+            self.intent_stack.pop()
+            self._emit(
+                "verb_end",
+                name=name,
+                canonical=canonical,
+                ok=ok,
+                outcome=outcome,
+                summary=summary,
+                data_keys=data_keys,
+                elapsed_s=round(time.perf_counter() - started, 3),
+                intents=dict(counter),
+                source=source,
+                nested=nested,
+            )
+
+    async def _run_verb(
+        self,
+        name: str,
+        canonical: str,
+        params: dict[str, Any],
+        *,
+        source: Source,
+        nested: bool,
+    ) -> VerbResult:
         # `stop` is the one verb an aborted session must still be able to run. The abort is
         # set precisely when something has gone wrong — a failed heartbeat, a kill switch —
         # which is the moment the pilot reaches for the brake, and refusing it here closed
         # the panic button exactly when it was needed.
-        canonical = self.registry.canonical(name)
         if self.abort.is_set() and canonical != "stop":
+            self._emit("gate", name=name, gate="abort", outcome="refused", reason="run aborted")
             raise Aborted("run aborted")
         if not self.is_allowed(name):
-            raise VerbNotAllowed(
-                f"verb {name!r} is not in this duck's allowlist ({', '.join(self.allowed)})"
-            )
+            reason = f"verb {name!r} is not in this duck's allowlist ({', '.join(self.allowed)})"
+            self._emit("gate", name=name, gate="allowlist", outcome="refused", reason=reason)
+            raise VerbNotAllowed(reason)
         try:
             verb = self.registry.get(name)
         except VerbNotFound:
+            self._emit(
+                "gate",
+                name=name,
+                gate="unknown",
+                outcome="refused",
+                reason=f"unknown verb {name!r}",
+            )
             raise VerbNotAllowed(f"unknown verb {name!r}") from None
 
         try:
@@ -196,42 +302,88 @@ class Executor:
             msgs = "; ".join(
                 f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors()
             )
+            self._emit("gate", name=name, gate="params", outcome="refused", reason=msgs)
             return VerbResult.fail(f"invalid params for {name}: {msgs}")
 
-        if self.needs_confirm(verb) and not self.confirm(name, parsed.model_dump()):
-            raise ConfirmDenied(f"human declined {name}")
+        if self.needs_confirm(verb):
+            answer = bool(self.confirm(name, parsed.model_dump()))
+            self._emit(
+                "gate",
+                name=name,
+                gate="confirm",
+                outcome="asked",
+                answer=answer,
+                reason="a human was asked" if answer else "a human declined",
+            )
+            if not answer:
+                raise ConfirmDenied(f"human declined {name}")
 
         if self.budget is not None and not nested:
-            self.budget.note_step()
+            try:
+                self.budget.note_step()
+            except BudgetExceeded as e:
+                self._emit("gate", name=name, gate="budget", outcome="exceeded", reason=str(e))
+                raise
 
         state = await self.transport.get_state()
-        self._check_abort_conditions(state)
+        try:
+            self._check_abort_conditions(state)
+        except Aborted as e:
+            self._emit(
+                "gate",
+                name=name,
+                gate="abort_when",
+                outcome="fired",
+                reason=str(e),
+                state=state.summary(),
+            )
+            raise
         for pre in verb.preconditions:
-            reason = pre(state)
-            if reason:
-                return self._record(name, params, VerbResult.fail(f"cannot {name}: {reason}"))
+            refusal = pre(state)
+            if refusal:
+                self._emit(
+                    "gate",
+                    name=name,
+                    gate="precondition",
+                    outcome="refused",
+                    reason=refusal,
+                    state=state.summary(),
+                )
+                return self._record(name, params, VerbResult.fail(f"cannot {name}: {refusal}"))
 
         if self.dry_run and not verb.read_only:
             self.log(f"[dry-run] would run {name}({parsed.model_dump()})")
+            self._emit(
+                "gate",
+                name=name,
+                gate="dry_run",
+                outcome="skipped",
+                reason=f"would run {name}, sent nothing",
+                params=parsed.model_dump(),
+            )
             return self._record(
                 name, params, VerbResult.success(f"[dry-run] {name} not sent", dry_run=True)
             )
 
         self.log(f"→ {name}({parsed.model_dump()})")
         try:
-            result = await self._execute(verb, parsed, interruptible=canonical != "stop")
+            result = await self._execute(
+                verb, parsed, interruptible=canonical != "stop", source=source
+            )
         except TimeoutError:
-            await self.transport.stop()
+            await self.traced_transport().stop()
             result = VerbResult.fail(f"{name} timed out after {verb.timeout_s:g}s; stopped")
         except SafetyStop:
             raise
         except Exception as e:  # a buggy verb must not take the run down un-stopped
-            await self.transport.stop()
+            await self.traced_transport().stop()
             result = VerbResult.fail(f"{name} raised {type(e).__name__}: {e}; stopped")
         self.log(f"← {name}: {'ok' if result.ok else 'FAIL'} {result.summary}")
         return self._record(name, params, result)
 
-    async def _execute(self, verb: Verb, parsed: Any, *, interruptible: bool) -> VerbResult:
+    async def _execute(
+        self, verb: Verb, parsed: Any, *, interruptible: bool, source: Source = "agent"
+    ) -> VerbResult:
         """Run one verb, racing it against the abort event as well as the clock.
 
         `asyncio.wait_for` knows only about the clock, so a kill switch, a Ctrl-C or a failed
@@ -242,7 +394,7 @@ class Executor:
 
         `stop` is never interruptible: it is what the abort is trying to achieve."""
         verb_task: asyncio.Task[VerbResult] = asyncio.ensure_future(
-            verb.execute(self.context(), parsed)
+            verb.execute(self.context(source), parsed)
         )
         abort_task: asyncio.Task[bool] | None = None
         waiting: set[asyncio.Future[Any]] = {verb_task}
@@ -269,7 +421,14 @@ class Executor:
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await verb_task
         if abort_task is not None and abort_task in done:
-            await self.transport.stop()
+            self._emit(
+                "gate",
+                name=verb.name,
+                gate="abort",
+                outcome="fired",
+                reason="aborted mid-verb: the verb was cancelled and a stop was sent",
+            )
+            await self.traced_transport().stop()
             raise Aborted("aborted mid-verb; the verb was cancelled and a stop was sent")
         raise TimeoutError
 
@@ -286,6 +445,14 @@ class Executor:
             limit = self.contract.repeat_failure_abort if self.contract else None
             if limit is not None and n >= limit:
                 self.abort.set()
+                self._emit(
+                    "gate",
+                    name=name,
+                    gate="abort_when",
+                    outcome="fired",
+                    reason=f"{name} failed {n} times in a row",
+                    last=result.summary,
+                )
                 raise Aborted(f"abort_when: {name} failed {n} times in a row")
         return result
 
@@ -312,11 +479,13 @@ class Heartbeat:
         *,
         period_s: float = 0.5,
         log: Callable[[str], None] = lambda _m: None,
+        trace: Tracer | None = None,
     ) -> None:
         self.transport = transport
         self.abort = abort
         self.period_s = period_s
         self.log = log
+        self.trace = trace
         self.beats = 0
         self.failure: Exception | None = None
         self._task: asyncio.Task[None] | None = None
@@ -331,9 +500,14 @@ class Heartbeat:
                 # "sending stop", not "stopping the duck": the heartbeat fails precisely when
                 # the link is in doubt, which is when a stop is least likely to arrive. What
                 # actually stops a body whose deadman we cannot reach is the deadman itself.
-                self.log(f"heartbeat failed: {e} — sending stop")
+                message = f"heartbeat failed: {e} — sending stop"
+                self.log(message)
+                stopper: Any = self.transport
+                if self.trace is not None:
+                    self.trace.emit("note", text=message)
+                    stopper = TracedTransport(self.transport, self.trace)
                 with contextlib.suppress(Exception):
-                    await self.transport.stop()
+                    await stopper.stop()
                 self.abort.set()
                 return
             await asyncio.sleep(self.period_s)

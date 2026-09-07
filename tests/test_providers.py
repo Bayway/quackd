@@ -106,7 +106,9 @@ async def test_anthropic_request_and_response_mapping() -> None:
     assert kw["model"] == "claude-opus-5" and kw["system"] == "SYS"
     assert kw["tool_choice"] == {"type": "any", "disable_parallel_tool_use": True}
     assert kw["output_config"] == {"effort": "medium"}
-    assert "thinking" not in kw  # adaptive by default on Opus 5
+    # adaptive is the model's default; `display` is what makes the blocks carry text at all,
+    # and without it the trace's "what it thought" would be blank on every turn
+    assert kw["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert kw["betas"] == ["server-side-fallback-2026-07-01"] and kw["fallbacks"] == "default"
     assert kw["tools"][0]["input_schema"]["additionalProperties"] is False
     msgs = kw["messages"]
@@ -312,3 +314,186 @@ def test_factory_reports_missing_extra_or_key(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(ProviderError):
         make_provider("openai")
+
+
+# ── what the model thought: the `thinking` field the trace shows ────────────────────────
+
+
+class BadRequestError(Exception):
+    """Named as the SDK names it, because `_classify` and the thinking retry match on that."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+def thinking_block(text: str) -> Any:
+    dump = {"type": "thinking", "thinking": text, "signature": "sig"}
+    return NS(type="thinking", thinking=text, model_dump=lambda: dump)
+
+
+def tool_use_block(name: str = "walk") -> Any:
+    dump = {"type": "tool_use", "id": "t1", "name": name, "input": {}}
+    return NS(type="tool_use", id="t1", name=name, input={}, model_dump=lambda: dump)
+
+
+async def test_anthropic_thinking_skips_empty_blocks_and_names_redacted_ones() -> None:
+    """A response carries zero or more thinking blocks and any of them can be empty (a
+    progress block, or a display that returns none). An empty one renders nothing."""
+    redacted = NS(
+        type="redacted_thinking", data="xx", model_dump=lambda: {"type": "redacted_thinking"}
+    )
+    client = FakeAnthropic(
+        anthropic_response(
+            thinking_block(""),
+            thinking_block("the ball is left, so turn first"),
+            redacted,
+            thinking_block("   "),
+            tool_use_block(),
+        )
+    )
+    turn = await AnthropicProvider(client=client).step("S", history()[:1], TOOLS)
+    assert turn.thinking == "the ball is left, so turn first\n\n[redacted thinking]"
+
+
+async def test_anthropic_all_empty_thinking_is_none_not_a_blank_line() -> None:
+    client = FakeAnthropic(anthropic_response(thinking_block(""), tool_use_block()))
+    turn = await AnthropicProvider(client=client).step("S", history()[:1], TOOLS)
+    assert turn.thinking is None
+
+
+async def test_anthropic_retries_once_without_thinking_on_an_older_model() -> None:
+    """A model older than Claude 4.6 rejects the parameter. Losing the thinking text is
+    acceptable; losing the run because the trace asked for it is not."""
+    calls: list[dict[str, Any]] = []
+
+    async def create(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        if "thinking" in kwargs:
+            raise BadRequestError("thinking: unsupported parameter for this model")
+        return anthropic_response(tool_use_block())
+
+    client = NS(messages=NS(create=create), beta=NS(messages=NS(create=create)))
+    p = AnthropicProvider(client=client, fallbacks=False)
+    turn = await p.step("S", history()[:1], TOOLS)
+    assert [tc.name for tc in turn.tool_calls] == ["walk"]
+    assert len(calls) == 2 and "thinking" in calls[0] and "thinking" not in calls[1]
+    assert p.thinking_display is None
+    await p.step("S", history()[:1], TOOLS)  # and no later turn asks again
+    assert len(calls) == 3 and "thinking" not in calls[2]
+
+
+async def test_anthropic_other_bad_requests_still_raise() -> None:
+    async def boom(**_: Any) -> Any:
+        raise BadRequestError("max_tokens is too large")
+
+    client = NS(messages=NS(create=boom), beta=NS(messages=NS(create=boom)))
+    with pytest.raises(ProviderError, match="bad request"):
+        await AnthropicProvider(client=client, fallbacks=False).step("S", history()[:1], TOOLS)
+
+
+def test_anthropic_thinking_display_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("QUACKD_THINKING_DISPLAY", "")
+    assert AnthropicProvider(client=FakeAnthropic(None)).thinking_display is None
+    monkeypatch.setenv("QUACKD_THINKING_DISPLAY", "omitted")
+    assert AnthropicProvider(client=FakeAnthropic(None)).thinking_display == "omitted"
+
+
+@pytest.mark.parametrize("field", ["reasoning_content", "reasoning"])
+async def test_openai_reads_reasoning_from_either_field(field: str) -> None:
+    """DeepSeek, vLLM, llama.cpp, LM Studio and xAI answer with `reasoning_content`; Ollama's
+    OpenAI-compatible endpoint and OpenRouter with `reasoning`."""
+    response = openai_response("walk", "{}")
+    setattr(response.choices[0].message, field, "  I should walk  ")
+    response.usage.completion_tokens_details = NS(reasoning_tokens=44)
+    turn = await OpenAIProvider(client=FakeOpenAI(response)).step("S", history()[:1], TOOLS)
+    assert turn.thinking == "I should walk" and turn.usage.reasoning_tokens == 44
+
+
+async def test_openai_without_reasoning_reports_none() -> None:
+    client = FakeOpenAI(openai_response("walk", "{}"))
+    turn = await OpenAIProvider(client=client).step("S", history()[:1], TOOLS)
+    assert turn.thinking is None and turn.usage.reasoning_tokens == 0
+
+
+async def test_openai_ignores_a_non_string_reasoning_field() -> None:
+    response = openai_response("walk", "{}")
+    response.choices[0].message.reasoning = {"summary": "an object, not text"}
+    turn = await OpenAIProvider(client=FakeOpenAI(response)).step("S", history()[:1], TOOLS)
+    assert turn.thinking is None
+
+
+async def test_local_splits_inline_think_tags_out_of_the_answer() -> None:
+    """A server with no reasoning separation leaves `<think>` in `content`, where it would be
+    shown as the answer and replayed to the model next turn as something it said."""
+    from quackd.agent.providers.local import LocalProvider
+
+    response = openai_response("walk", "{}", content="<think>ball is left</think>turning left")
+    p = LocalProvider("m", preset="ollama", client=FakeOpenAI(response))
+    turn = await p.step("S", history()[:1], TOOLS)
+    assert turn.thinking == "ball is left" and turn.text == "turning left"
+
+
+async def test_gemini_asks_for_thoughts_and_keeps_them_out_of_the_text() -> None:
+    thought = NS(function_call=None, text="I will walk", thought=True)
+    answer = NS(function_call=None, text="walking now", thought=False)
+    call = NS(function_call=NS(name="walk", args={}), text=None)
+    response = NS(
+        candidates=[NS(content=NS(parts=[thought, answer, call]), finish_reason="STOP")],
+        usage_metadata=NS(prompt_token_count=1, candidates_token_count=2, thoughts_token_count=9),
+    )
+    client = FakeGemini(response)
+    turn = await GeminiProvider(client=client).step("SYS", history()[:1], TOOLS)
+    assert client.kwargs["config"]["thinking_config"] == {"include_thoughts": True}
+    assert turn.thinking == "I will walk"
+    assert turn.text == "walking now"  # a thought is not something the model said
+    assert turn.usage.reasoning_tokens == 9
+
+
+async def test_gemini_retries_once_without_thoughts_on_a_model_without_them() -> None:
+    seen: list[dict[str, Any]] = []
+    answered = NS(
+        candidates=[
+            NS(
+                content=NS(parts=[NS(function_call=NS(name="walk", args={}), text=None)]),
+                finish_reason="STOP",
+            )
+        ],
+        usage_metadata=NS(prompt_token_count=1, candidates_token_count=1),
+    )
+
+    async def generate_content(**kwargs: Any) -> Any:
+        seen.append(kwargs)
+        if "thinking_config" in kwargs["config"]:
+            raise ValueError("INVALID_ARGUMENT: thinking_config is not supported by this model")
+        return answered
+
+    client = NS(aio=NS(models=NS(generate_content=generate_content)))
+    p = GeminiProvider(model="gemini-2.0-flash", client=client)
+    turn = await p.step("S", history()[:1], TOOLS)
+    assert [tc.name for tc in turn.tool_calls] == ["walk"]
+    assert len(seen) == 2 and not p.include_thoughts
+
+
+async def test_gemini_other_errors_still_raise() -> None:
+    async def boom(**_: Any) -> Any:
+        raise ValueError("quota exhausted")
+
+    client = NS(aio=NS(models=NS(generate_content=boom)))
+    with pytest.raises(ProviderError, match="quota exhausted"):
+        await GeminiProvider(client=client).step("S", history()[:1], TOOLS)
+
+
+def test_gemini_thoughts_can_be_turned_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("QUACKD_GEMINI_THOUGHTS", "0")
+    p = GeminiProvider(client=NS())
+    assert not p.include_thoughts and "thinking_config" not in p._config("S", TOOLS)
+
+
+def test_usage_adds_reasoning_tokens_too() -> None:
+    from quackd.agent.providers.base import Usage
+
+    total = Usage(input_tokens=1, output_tokens=2, reasoning_tokens=3) + Usage(
+        input_tokens=10, output_tokens=20, reasoning_tokens=30
+    )
+    assert total.model_dump() == {"input_tokens": 11, "output_tokens": 22, "reasoning_tokens": 33}

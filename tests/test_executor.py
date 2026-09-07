@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from typing import Any
 
 import pytest
 
@@ -271,3 +273,231 @@ async def test_a_stop_that_never_left_is_not_reported_as_a_stop(
     assert not result.ok
     assert "could not be delivered" in result.summary
     assert "deadman" in result.summary
+
+
+# ── the trace: the executor says what it decided and what it sent ───────────────────────
+
+
+def traced(
+    registry: VerbRegistry,
+    transport: MockTransport,
+    allow: str = "quack, walk, kick",
+    **kwargs: str,
+) -> tuple[Executor, list[Any]]:
+    """An executor whose narration is collected, for the tests below."""
+    from quackd.trace import Tracer
+
+    seen: list[Any] = []
+    ex = Executor(
+        registry,
+        transport,
+        contract=duck(allow, **kwargs).frontmatter,
+        trace=Tracer(observers=[seen.append]),
+    )
+    return ex, seen
+
+
+def gates(seen: list[Any]) -> list[tuple[str, str]]:
+    return [(e.data["gate"], e.data["outcome"]) for e in seen if e.kind == "gate"]
+
+
+def ends(seen: list[Any]) -> list[dict[str, Any]]:
+    return [e.data for e in seen if e.kind == "verb_end"]
+
+
+async def test_a_verb_that_ran_is_bracketed_by_a_start_and_an_end(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    ex, seen = traced(registry, mock_transport)
+    await ex.run_verb("quack", {"text": "hi"})
+    assert [e.kind for e in seen] == ["verb_start", "intent", "verb_end"]
+    assert seen[0].data["name"] == "quack" and seen[0].data["params"] == {"text": "hi"}
+    assert seen[1].data["intent"] == "sound"
+    assert ends(seen)[0]["outcome"] == "ok" and ends(seen)[0]["intents"] == {"sound": 1}
+
+
+@pytest.mark.parametrize(
+    ("verb", "params", "gate"),
+    [("kick", {}, "allowlist"), ("fly", {}, "allowlist"), ("walk", {"vx": 99.0}, "params")],
+)
+async def test_every_refusal_names_the_rule_that_refused(
+    registry: VerbRegistry,
+    mock_transport: MockTransport,
+    verb: str,
+    params: dict[str, Any],
+    gate: str,
+) -> None:
+    """A refusal is a rule, not a bug, and the trace has to say which rule."""
+    ex, seen = traced(registry, mock_transport, allow="quack, walk")
+    with contextlib.suppress(VerbNotAllowed):
+        await ex.run_verb(verb, params)
+    assert gates(seen) == [(gate, "refused")]
+    assert len(ends(seen)) == 1, "a verb that started must always end"
+
+
+async def test_a_refused_verb_still_ends(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    ex, seen = traced(registry, mock_transport, allow="quack")
+    with pytest.raises(VerbNotAllowed):
+        await ex.run_verb("kick")
+    assert ends(seen)[0]["outcome"] == "refused" and "allowlist" in ends(seen)[0]["summary"]
+
+
+async def test_the_confirm_gate_records_the_answer(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    ex, seen = traced(registry, mock_transport, allow="quack, kick", confirm="kick")
+    ex.confirm = deny_all
+    with pytest.raises(ConfirmDenied):
+        await ex.run_verb("kick")
+    assert gates(seen) == [("confirm", "asked")]
+    assert seen[1].data["answer"] is False
+    assert ends(seen)[0]["outcome"] == "denied"
+
+    ex2, seen2 = traced(registry, mock_transport, allow="quack, kick", confirm="kick")
+    ex2.confirm = allow_all
+    assert (await ex2.run_verb("kick")).ok
+    assert [e.data["answer"] for e in seen2 if e.kind == "gate"] == [True]
+
+
+async def test_the_budget_gate_fires_before_anything_is_sent(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    ex, seen = traced(registry, mock_transport)
+    ex.budget = Budget(Budgets(max_steps=1))
+    ex.budget.start()
+    assert (await ex.run_verb("quack")).ok
+    with pytest.raises(BudgetExceeded):
+        await ex.run_verb("quack")
+    assert ("budget", "exceeded") in gates(seen)
+    assert ends(seen)[-1]["outcome"] == "budget"
+    assert len(mock_transport.intents_of("sound")) == 1
+
+
+async def test_the_dry_run_gate_shows_what_it_would_have_sent(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """The docs have always promised --dry-run shows every intent a model would send. The
+    intent is never built, so the gate carrying the parsed params is what makes that true."""
+    ex, seen = traced(registry, mock_transport)
+    ex.dry_run = True
+    assert (await ex.run_verb("walk", {"vx": 0.2, "duration_s": 1.0})).ok
+    gate = next(e for e in seen if e.kind == "gate")
+    assert gate.data["gate"] == "dry_run" and gate.data["params"]["vx"] == 0.2
+    assert mock_transport.intents == []
+    assert ends(seen)[0]["intents"] == {}
+
+
+async def test_a_precondition_refusal_carries_the_state_that_caused_it(
+    registry: VerbRegistry,
+) -> None:
+    transport = MockTransport(states=[DuckState(policy="p", posture="fallen", fallen=True)])
+    ex, seen = traced(registry, transport)
+    result = await ex.run_verb("walk", {"vx": 0.1})
+    assert not result.ok
+    gate = next(e for e in seen if e.kind == "gate")
+    assert gate.data["gate"] == "precondition" and "fallen" in gate.data["state"]
+    assert ends(seen)[0]["outcome"] == "fail"
+
+
+async def test_the_repeat_failure_abort_names_the_last_failure(registry: VerbRegistry) -> None:
+    transport = MockTransport(refuse_kinds={"sound"})
+    ex, seen = traced(registry, transport, allow="quack", abort="Same verb fails 2 times in a row")
+    await ex.run_verb("quack")
+    with pytest.raises(Aborted):
+        await ex.run_verb("quack")
+    fired = [e for e in seen if e.kind == "gate" and e.data["gate"] == "abort_when"]
+    assert fired and "failed 2 times" in fired[0].data["reason"] and fired[0].data["last"]
+    assert len(ends(seen)) == 2, "both attempts started and both ended"
+
+
+async def test_a_verb_aborted_mid_flight_still_ends_and_the_stop_is_traced(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """A heartbeat failure or a kill switch cancels the running verb. That is the case a
+    reader most needs to see, and the stop it sends is the most important intent there is."""
+
+    async def long_walk(ctx: VerbContext, _p: NoParams) -> VerbResult:
+        for _ in range(500):
+            await ctx.transport.send_intent(Intent.move(0.1, 0.0, 0.0))
+            await asyncio.sleep(0.01)
+        return VerbResult.success("finished on its own")
+
+    registry.register(Verb("long_walk", "walks a long way", long_walk, timeout_s=30))
+    ex, seen = traced(registry, mock_transport, allow="long_walk")
+    running = asyncio.create_task(ex.run_verb("long_walk"))
+    await asyncio.sleep(0.1)
+    ex.abort.set()
+    with pytest.raises(Aborted):
+        await asyncio.wait_for(running, timeout=2.0)
+
+    assert ends(seen)[0]["outcome"] == "aborted"
+    assert ("abort", "fired") in gates(seen)
+    assert [e for e in seen if e.kind == "intent" and e.data["intent"] == "stop"], (
+        "the stop that took the legs back has to be in the trace"
+    )
+
+
+async def test_a_verb_that_times_out_ends_and_stops(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    async def hangs(ctx: VerbContext, _p: NoParams) -> VerbResult:
+        await asyncio.sleep(10)
+        return VerbResult.success("never")
+
+    registry.register(Verb("hangs", "hangs", hangs, timeout_s=0.05))
+    ex, seen = traced(registry, mock_transport, allow="hangs")
+    result = await ex.run_verb("hangs")
+    assert not result.ok and "timed out" in result.summary
+    assert ends(seen)[0]["outcome"] == "fail"
+    assert [e.data["intent"] for e in seen if e.kind == "intent"] == ["stop"]
+
+
+async def test_a_composite_reports_the_intents_its_nested_verbs_sent(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """`approach_and` sends nothing itself. A parent that reported zero intents would be the
+    misleading kind of true."""
+
+    async def both(ctx: VerbContext, _p: NoParams) -> VerbResult:
+        assert ctx.run_verb is not None
+        await ctx.run_verb("quack", {"text": "one"})
+        await ctx.run_verb("quack", {"text": "two"})
+        return VerbResult.success("did both")
+
+    registry.register(Verb("both", "runs two verbs", both))
+    ex, seen = traced(registry, mock_transport, allow="both, quack")
+    assert (await ex.run_verb("both", {}, source="mcp")).ok
+    starts = [e.data for e in seen if e.kind == "verb_start"]
+    assert [s["name"] for s in starts] == ["both", "quack", "quack"]
+    assert [s["nested"] for s in starts] == [False, True, True]
+    # a nested call inside an MCP session is still an MCP call, not an agent one
+    assert {s["source"] for s in starts} == {"mcp"}
+    parent = next(e for e in ends(seen) if e["name"] == "both")
+    assert parent["intents"] == {"sound": 2}
+
+
+async def test_the_heartbeats_stop_is_traced_too() -> None:
+    from quackd.trace import Tracer
+
+    seen: list[Any] = []
+    transport = MockTransport(fail_heartbeat_after=0)
+    abort = asyncio.Event()
+    beat = Heartbeat(transport, abort, period_s=0.001, trace=Tracer(observers=[seen.append]))
+    beat.start()
+    await asyncio.wait_for(abort.wait(), timeout=2.0)
+    await beat.stop()
+    assert any(e.kind == "note" and "heartbeat failed" in e.data["text"] for e in seen)
+    assert any(e.kind == "intent" and e.data["intent"] == "stop" for e in seen)
+
+
+async def test_without_a_tracer_the_executor_is_silent_and_hands_over_the_real_transport(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """The flock and every direct user build an Executor with no trace, and get exactly what
+    they got before."""
+    ex = Executor(registry, mock_transport, contract=duck("quack").frontmatter)
+    assert ex.traced_transport() is mock_transport
+    assert ex.context().transport is mock_transport
+    assert (await ex.run_verb("quack")).ok

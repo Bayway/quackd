@@ -45,6 +45,16 @@ def _memory_in_tmp(
     monkeypatch.setenv("QUACKD_MEMORY_DIR", str(tmp_path_factory.mktemp("quackd-memory")))
 
 
+@pytest.fixture(autouse=True)
+def _trace_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The trace is on by default and goes to stderr, which CliRunner folds into `output`,
+    so every CLI and acceptance test would carry pages of it in its failure message and its
+    substring assertions would match by accident. Off for the suite; the tests that prove
+    the default is on set `QUACKD_TRACE` to an empty string themselves (an empty value is
+    on, and unlike `delenv` it also shields them from a developer's own `.env`)."""
+    monkeypatch.setenv("QUACKD_TRACE", "0")
+
+
 @pytest.fixture
 def registry() -> VerbRegistry:
     return default_registry()

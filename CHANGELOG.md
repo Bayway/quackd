@@ -7,7 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **quackd narrates itself now, on both surfaces, on by default.** Ask it to walk in a circle
+  and the terminal used to print a header, an outcome and a run directory. It now shows the
+  whole conversation as it happens: the system prompt once, then per turn the observation the
+  model was given, what it reasoned, the tool it chose with its parameters, the tokens and the
+  latency, every executor gate that fired and why, every intent that actually went to the
+  robot, and what came back. A steering loop's burst becomes one line with real ranges
+  (`-> move x26 over 0.5 s (vx 0.1..0.2, wz -0.01..0.88)`), because `go_to` recomputes its
+  twist every 100 ms and a line per intent would be two hundred lines. Over MCP, where the
+  pilot is the client and its reasoning is not quackd's to see, every call that reaches an
+  executor comes back with a `trace` list of the same lines, capped at thirty, with the
+  uncapped version on the server's stderr. `--no-trace` or `QUACKD_TRACE=0` turns the views
+  off. The transcript is unaffected either way: it is the record, and it now carries
+  `llm_request`, `verb_start`, `gate`, `intent`, `verb_end` and `note` alongside the kinds it
+  always had ([ADR-0029](docs/adr/0029-tracing.md),
+  [docs/architecture.md](docs/architecture.md#trace)).
+- **The providers return what the model thought.** `ProviderTurn.thinking`, filled from
+  Anthropic's thinking blocks, from `reasoning_content` or `reasoning` on an OpenAI-compatible
+  server, from Gemini's thought parts, and from an inline `<think>` block a local server did
+  not separate. Every one degrades on its own: a model that rejects the request parameter gets
+  one retry without it and the run carries on with no thinking text. Reasoning token counts
+  ride along in `usage` where the vendor reports them.
+
 ### Changed
+
+- **Claude runs now ask for a thinking display.** Adaptive thinking is the model's default on
+  Opus 5, but the blocks come back with empty text unless the request says
+  `display: "summarized"`, so "what it thought" would have been a blank line on every turn.
+  Display changes what is shown, never what is thought or billed, and the raw chain of thought
+  is never returned by any model. `QUACKD_THINKING_DISPLAY=omitted` opts out.
+- **Gemini's thought parts no longer land in the answer.** They were appended to `text`
+  regardless, so with thoughts on they would have been replayed to the model next turn as
+  things it had said.
+- **`--verbose` is the compact view, not a second one.** With the trace on, the executor's own
+  one-line-per-verb log would say every verb twice, so it stands down: `--verbose` is what you
+  get with `--no-trace`, and on the MCP server the executor's log drops to DEBUG. Nothing lost
+  its `log` callback, which the flock's member records and several tests read.
+- **A verb that starts always ends.** `Executor.run_verb` now emits exactly one start and one
+  end with an outcome, through a `finally`. Seven exits used to leave nothing behind, among
+  them the two that matter most: a verb cancelled mid-flight by a kill switch or a heartbeat
+  failure, and the repeat-failure abort.
 
 - **A documentation pass for 0.7.0, for fewer words rather than more.** The README lost about
   a fifth of its length: the table that listed all eight bodies a third time is gone, the bullet
@@ -59,6 +100,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   minutes with the frame in the log.
 
 ### Fixed
+
+- **A run that failed outside the safety layer said `loop exited unexpectedly`.** A bad key, a
+  429, a dropped connection or a dead camera is not a `SafetyStop`, so nothing caught it, the
+  summary recorded a default string, and the CLI printed a traceback. The call that failed is
+  now in the transcript with its error and its latency, `run_end` says what happened, and the
+  CLI answers in one line like every other failure.
+- **`--dry-run` never showed the intents it promised.** `docs/safety.md` has always said it
+  prints every intent a model would send; the dry-run branch logged a verb name, and only
+  under `--verbose`. The trace now names the verb and the parameters it would have sent.
 
 - **A failed ZeroMQ test could hold the interpreter's exit forever.** pyzmq's `Context.__del__`
   closes each surviving socket with its own linger, which defaults to forever, and a test that

@@ -75,6 +75,8 @@ def test_readme_promises() -> None:
         "--flock",
         "flock-kick",
         "docs/flock.md",
+        "--no-trace",
+        "QUACKD_TRACE",
     ):
         assert needle in README, needle
     assert "quadruped" not in README.lower()
@@ -126,6 +128,43 @@ def test_readme_images_are_absolute_and_exist() -> None:
 def test_readme_verbs_match_registry() -> None:
     for name in default_registry().names():
         assert f"`{name}`" in README, f"README does not mention verb {name}"
+
+
+def test_the_docs_describe_every_trace_event_the_code_emits() -> None:
+    """A kind nobody documented is a kind nobody knows to look for. architecture.md is the
+    one place that enumerates the transcript, so it is the one place this can go stale."""
+    import ast
+
+    # the three modules that write a *run* transcript. The flock keeps its own `flock.jsonl`
+    # (docs/flock.md) and the MCP server's two envelope kinds are documented in docs/mcp.md.
+    emitted: set[str] = set()
+    for name in ("agent/loop.py", "safety.py", "trace.py"):
+        path = REPO / "quackd" / name
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            fn = node.func
+            called = fn.attr if isinstance(fn, ast.Attribute) else None
+            if called in ("emit", "write", "_emit") and isinstance(node.args[0], ast.Constant):
+                value = node.args[0].value
+                if isinstance(value, str) and value.islower():
+                    emitted.add(value)
+    doc = (REPO / "docs" / "architecture.md").read_text(encoding="utf-8")
+    missing = [kind for kind in sorted(emitted) if f"`{kind}`" not in doc]
+    assert not missing, f"docs/architecture.md does not describe: {missing}"
+
+
+def test_the_trace_is_documented_where_it_is_configured() -> None:
+    for path, needles in (
+        ("docs/architecture.md", ("## Trace", "--no-trace", "QUACKD_TRACE")),
+        ("docs/mcp.md", ("trace", "--no-trace", "QUACKD_TRACE")),
+        ("docs/safety.md", ("--dry-run", "dry_run")),
+        (".env.example", ("QUACKD_TRACE", "QUACKD_TRACE_THINKING")),
+    ):
+        text = (REPO / path).read_text(encoding="utf-8")
+        for needle in needles:
+            assert needle in text, f"{path} does not mention {needle!r}"
 
 
 def test_mcp_doc_lists_every_tool() -> None:

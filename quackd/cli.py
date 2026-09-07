@@ -289,6 +289,7 @@ def _run_impl(
     robots: str | None = None,
     memory: bool = True,
     memory_dir: str | None = None,
+    trace: bool | None = None,
 ) -> None:
     from quackd.adapters.factory import describe, make_adapter, registry_for
     from quackd.agent.loop import RunConfig, run_duck
@@ -298,6 +299,7 @@ def _run_impl(
     from quackd.duckfile.validate import validate_duck
     from quackd.perception import detector_for
     from quackd.safety import KillSwitch, allow_all
+    from quackd.trace import ConsoleTrace, trace_enabled_default
     from quackd.transport.base import TransportError
 
     if (duckfile is None) == (goal is None):
@@ -388,9 +390,17 @@ def _run_impl(
 
         recorder = FrameRecorder(duck_transport, size=gif_size)
 
+    # The flag wins; else QUACKD_TRACE, read here rather than at import so a `.env` line
+    # counts (the root callback loads it after the option defaults exist).
+    trace_on = trace if trace is not None else trace_enabled_default()
+    console_trace = ConsoleTrace(err_console) if trace_on else None
+
     def log(msg: str) -> None:
-        if verbose:
-            err_console.print(f"[dim]{msg}[/dim]")
+        # the compact view: one line per verb and the executor's notes. The trace shows all
+        # of that and more, so with it on this prints nothing rather than every verb twice.
+        # Plain text: a message can carry brackets Rich would read as markup.
+        if verbose and console_trace is None:
+            err_console.print(msg, style="dim", markup=False, highlight=False, soft_wrap=True)
 
     robot_memory = None
     if memory:
@@ -412,6 +422,7 @@ def _run_impl(
         memory=robot_memory,
         fov_deg=fov_deg,
         acknowledge=None if yes else _acknowledge_prompt,
+        trace=console_trace,
     )
     console.print(
         f"🦆 [bold]{duck.name}[/bold] · provider=[cyan]{llm.name}[/cyan] "
@@ -447,7 +458,8 @@ def _run_impl(
     _ = run_duck  # imported for symmetry; AgentLoop is used directly so the kill switch can bind
     try:
         result = asyncio.run(main())
-    except TransportError as e:
+    except (TransportError, ProviderError) as e:
+        # the trace has already shown the call that failed; this is the one-line verdict
         _fail(str(e))
         return
     if recorder is not None:
@@ -703,7 +715,20 @@ _FOV = typer.Option(
     "default is the simulator's 90; a Pi Camera Module 2 is about 62. Getting it wrong "
     "scales every bearing and distance, so detections say so until you set it.",
 )
-_VERBOSE = typer.Option(False, "--verbose", "-v", help="Log every intent to stderr.")
+_VERBOSE = typer.Option(
+    False,
+    "--verbose",
+    "-v",
+    help="The compact view on stderr: one line per verb plus the executor's notes. The trace "
+    "(on by default) shows all of that and more, so this only adds anything with --no-trace.",
+)
+_TRACE = typer.Option(
+    None,
+    "--trace/--no-trace",
+    help="Show everything behind the scenes on stderr: the prompt, each observation, what the "
+    "model thought and answered, every executor decision, every intent sent to the robot, "
+    "every result, tokens and timings. On by default; QUACKD_TRACE=0 turns it off too.",
+)
 
 
 @app.command()
@@ -733,6 +758,7 @@ def run(
     flock: int | None = _FLOCK,
     memory: bool = _MEMORY,
     memory_dir: str | None = _MEMORY_DIR,
+    trace: bool | None = _TRACE,
 ) -> None:
     """Run a .duck file (or a --goal): the LLM picks verbs, quackd enforces the contract."""
     _run_impl(
@@ -761,6 +787,7 @@ def run(
         robots=robots,
         memory=memory,
         memory_dir=memory_dir,
+        trace=trace,
     )
 
 
@@ -779,6 +806,7 @@ def record(
     api_key: str | None = _APIKEY,
     vision: bool | None = _VISION,
     flock: int | None = _FLOCK,
+    trace: bool | None = _TRACE,
 ) -> None:
     """Like `run` on sim2d, but always writes a GIF (for READMEs and launches)."""
     _run_impl(
@@ -804,6 +832,7 @@ def record(
         vision=vision,
         flock=flock,
         robot="microduck:sim2d",
+        trace=trace,
     )
 
 
@@ -858,6 +887,7 @@ def serve_mcp(
     ),
     memory: bool = _MEMORY,
     memory_dir: str | None = _MEMORY_DIR,
+    trace: bool | None = _TRACE,
 ) -> None:
     """Expose the robot as MCP tools over stdio (Claude Code / Claude Desktop)."""
     from quackd.adapters.base import AdapterError
@@ -876,6 +906,7 @@ def serve_mcp(
             yes=yes,
             memory=memory,
             memory_dir=memory_dir,
+            trace=trace,
         )
     except AdapterError as e:
         _fail(str(e))

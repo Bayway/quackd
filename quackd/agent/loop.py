@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -52,6 +53,7 @@ from quackd.safety import (
     VerbNotAllowed,
     deny_all,
 )
+from quackd.trace import Sink, Tracer
 from quackd.transport.base import DuckTransport
 from quackd.verbs.registry import (
     VerbRegistry,
@@ -61,6 +63,8 @@ from quackd.verbs.registry import (
 )
 
 Outcome = Literal["success", "failure", "budget", "aborted", "error"]
+
+REPROMPT = "You must call exactly one tool. Choose now."
 
 
 @dataclass
@@ -92,6 +96,9 @@ class RunConfig:
     """Asked once, before the first leg moves, when the robot cannot see a fall and cannot
     recover from one — so the only guard is the person in the room. None means nobody is
     there to ask (MCP, tests), and the warning is logged instead of blocking."""
+    trace: Sink | None = None
+    """Where to show the run as it happens (the CLI passes a `ConsoleTrace`). The transcript
+    gets every event whether this is set or not; this is a second reader of the same stream."""
 
 
 @dataclass
@@ -121,6 +128,11 @@ class AgentLoop:
             )
         self.run_dir = cfg.run_dir or new_run_dir(cfg.runs_dir, self.fm.name)
         self.transcript = Transcript(self.run_dir)
+        # the transcript is the record, so its failure is the run's; a console is an observer
+        self.tracer = Tracer(
+            record=self.transcript.sink,
+            observers=[cfg.trace] if cfg.trace is not None else [],
+        )
         self.budget = Budget(self.fm.budgets, now=cfg.transport.now)
         self.registry = cfg.registry or default_registry()
         self.executor = Executor(
@@ -133,14 +145,29 @@ class AgentLoop:
             confirm=cfg.confirm,
             log=cfg.log,
             on_frame=self._on_frame,
+            trace=self.tracer,
         )
         self.heartbeat = Heartbeat(
-            cfg.transport, self.executor.abort, period_s=cfg.heartbeat_period_s, log=cfg.log
+            cfg.transport,
+            self.executor.abort,
+            period_s=cfg.heartbeat_period_s,
+            log=cfg.log,
+            trace=self.tracer,
         )
         self.history: list[Exchange] = []
         self.usage = Usage()
         self.highlights: list[str] = []
         """Verb results worth carrying into the episode memory (the last few that went ok)."""
+
+    # ── narration ───────────────────────────────────────────────────────────────────
+
+    def _emit(self, kind: str, **data: Any) -> None:
+        self.tracer.emit(kind, **data)
+
+    def _note(self, text: str) -> None:
+        """`log` is a contract (tests and the CLI's --verbose read it); the trace observes it."""
+        self.cfg.log(text)
+        self.tracer.emit("note", text=text)
 
     # ── frames ──────────────────────────────────────────────────────────────────────
 
@@ -186,7 +213,7 @@ class AgentLoop:
             # `--dry-run` sends nothing and leaves nothing behind. A note here would be a
             # permanent conclusion drawn from verb results the dry run itself invented.
             text = " ".join(str(arguments.get("text", "")).split())
-            self.cfg.log(f"[dry-run] would remember: {text}")
+            self._note(f"[dry-run] would remember: {text}")
             return VerbResult.success(f"[dry-run] not saved: {text}", dry_run=True)
         text = str(arguments.get("text", "")).strip()
         tags_raw = arguments.get("tags") or []
@@ -195,7 +222,7 @@ class AgentLoop:
             entry = memory.remember(text, tags=tags, duck=self.fm.name, run_dir=self.run_dir)
         except (ValueError, OSError) as e:
             return VerbResult.fail(f"could not remember: {e}")
-        self.cfg.log(f"remembered: {entry.text}")
+        self._note(f"remembered: {entry.text}")
         return VerbResult.success(
             f"remembered for future runs: {entry.text}", notes=len(memory.notes())
         )
@@ -244,7 +271,9 @@ class AgentLoop:
         cfg = self.cfg
         # connect FIRST: an adapter answers with its manifest, and the vocabulary (tools,
         # prompt, allowlist universe) is built from that, not hardcoded (ADR-0017)
+        connect_started = time.perf_counter()
         connected = await cfg.transport.connect()
+        connect_s = round(time.perf_counter() - connect_started, 3)
         manifest = connected if isinstance(connected, RobotManifest) else None
         if manifest is not None:
             if cfg.registry is None:
@@ -281,9 +310,9 @@ class AgentLoop:
         dropped = [n for n in allow if n not in registry]
         if dropped:
             allow = [n for n in allow if n in registry]
-            cfg.log(f"this robot does not have {', '.join(dropped)}; running without")
+            self._note(f"this robot does not have {', '.join(dropped)}; running without")
         if (warning := await self._fall_blind_warning(registry, allow)) is not None:
-            cfg.log(warning)
+            self._note(warning)
             if cfg.acknowledge is not None and not cfg.acknowledge(warning):
                 raise Aborted("nobody confirmed they were watching a robot that cannot see a fall")
         tools = registry.tool_schemas(allow) + META_TOOLS
@@ -299,7 +328,7 @@ class AgentLoop:
             memory_text=memory_text,
         )
         system += getattr(cfg.provider, "prompt_hint", "") or ""  # e.g. the local JSON fallback
-        self.transcript.write(
+        self._emit(
             "run_start",
             duck=self.fm.name,
             duck_path=self.duck.path,
@@ -313,6 +342,7 @@ class AgentLoop:
             system_prompt=system,
             tools=[t["name"] for t in tools],
             memory=cfg.memory.summary() if cfg.memory is not None else None,
+            connect_s=connect_s,
         )
         outcome: Outcome = "error"
         reason = "loop exited unexpectedly"
@@ -329,24 +359,49 @@ class AgentLoop:
                     raise Aborted(
                         str(self.heartbeat.failure) if self.heartbeat.failure else "kill switch"
                     )
+                observe_started = time.perf_counter()
                 obs, _ = await self._observe(last_verb, last_result)
                 if self.history and self.history[-1].decision is not None:
                     obs = obs.model_copy(
                         update={"tool_call_id": self.history[-1].decision.tool_call.id}
                     )
                 self.history.append(Exchange(observation=obs))
-                self.transcript.write(
+                self._emit(
                     "observation",
                     step=self.budget.steps,
                     text=obs.text,
                     has_image=obs.image_png is not None,
                     features=obs.features,
+                    elapsed_s=round(time.perf_counter() - observe_started, 3),
                 )
 
-                self.budget.note_llm_call()
-                turn = await cfg.provider.step(system, self._history_for_provider(), tools)
+                self.budget.note_llm_call()  # may raise BudgetExceeded: then no request is made
+                history = self._history_for_provider()
+                self._emit(
+                    "llm_request",
+                    step=self.budget.steps,
+                    provider=cfg.provider.name,
+                    model=cfg.provider.model,
+                    messages=len(history),
+                    images=sum(1 for ex in history if ex.observation.image_png is not None),
+                    reprompt=retry_prompted,
+                )
+                llm_started = time.perf_counter()
+                try:
+                    turn = await cfg.provider.step(system, history, tools)
+                except Exception as e:
+                    # the call that failed is part of the record: what, and after how long
+                    self._emit(
+                        "llm",
+                        step=self.budget.steps,
+                        provider=cfg.provider.name,
+                        model=cfg.provider.model,
+                        error=f"{type(e).__name__}: {e}",
+                        latency_s=round(time.perf_counter() - llm_started, 3),
+                    )
+                    raise
                 self.usage = self.usage + turn.usage
-                self.transcript.write(
+                self._emit(
                     "llm",
                     step=self.budget.steps,
                     provider=cfg.provider.name,
@@ -355,6 +410,10 @@ class AgentLoop:
                     tool_calls=[tc.model_dump() for tc in turn.tool_calls],
                     usage=turn.usage.model_dump(),
                     stop_reason=turn.stop_reason,
+                    thinking=turn.thinking,
+                    latency_s=round(time.perf_counter() - llm_started, 3),
+                    usage_total=self.usage.model_dump(),
+                    llm_calls=self.budget.llm_calls,
                 )
                 self.budget.check_time()
 
@@ -363,25 +422,21 @@ class AgentLoop:
                         retry_prompted = True
                         self.history[-1].decision = None
                         self.history.append(
-                            Exchange(
-                                observation=Observation(
-                                    text="You must call exactly one tool. Choose now.",
-                                    features=obs.features,
-                                )
-                            )
+                            Exchange(observation=Observation(text=REPROMPT, features=obs.features))
                         )
-                        self.transcript.write(
+                        self._emit(
                             "enforce",
                             step=self.budget.steps,
                             issue="no_tool_call",
                             action="re-prompt",
+                            text=REPROMPT,
                         )
                         continue
                     outcome, reason = "failure", "the model produced no tool call twice in a row"
                     break
                 retry_prompted = False
                 if len(turn.tool_calls) > 1:
-                    self.transcript.write(
+                    self._emit(
                         "enforce",
                         step=self.budget.steps,
                         issue="multiple_tool_calls",
@@ -394,7 +449,7 @@ class AgentLoop:
                     # a note for next time: no robot motion, no step against the budget
                     last_verb = REMEMBER_NAME
                     last_result = self._remember(call.arguments)
-                    self.transcript.write(
+                    self._emit(
                         "memory",
                         step=self.budget.steps,
                         ok=last_result.ok,
@@ -406,9 +461,7 @@ class AgentLoop:
                 if call.name in META_TOOL_NAMES:
                     outcome = "success" if call.name == "declare_success" else "failure"
                     reason = str(call.arguments.get("reason", ""))
-                    self.transcript.write(
-                        "declare", step=self.budget.steps, outcome=outcome, reason=reason
-                    )
+                    self._emit("declare", step=self.budget.steps, outcome=outcome, reason=reason)
                     break
 
                 last_verb = call.name
@@ -420,7 +473,7 @@ class AgentLoop:
                     last_result = VerbResult.fail(str(e))
                 except ConfirmDenied as e:
                     last_result = VerbResult.fail(f"{e}; choose something else or declare_failure")
-                self.transcript.write(
+                self._emit(
                     "verb",
                     step=self.budget.steps,
                     name=call.name,
@@ -439,10 +492,17 @@ class AgentLoop:
             outcome, reason = "aborted", str(e)
         except SafetyStop as e:
             outcome, reason = "aborted", str(e)
+        except Exception as e:
+            # a provider that errored, a transport that died mid-observation, a bug: the run
+            # still ends with a stop and a run_end, and run_end says with what
+            outcome, reason = "error", f"{type(e).__name__}: {e}"
+            self._emit("note", text=f"run ended with an error: {reason}")
+            raise
         finally:
             await self.heartbeat.stop()
             with contextlib.suppress(Exception):
-                await cfg.transport.stop()
+                # the run's last intent, narrated like every other one
+                await self.executor.traced_transport().stop()
             final_state: dict[str, Any] = {}
             with contextlib.suppress(Exception):
                 final_state = (await cfg.transport.get_state()).model_dump()
@@ -463,7 +523,7 @@ class AgentLoop:
                 "dry_run": cfg.dry_run,
                 "final_state": final_state,
             }
-            self.transcript.write("run_end", **summary)
+            self._emit("run_end", **summary)
             self.transcript.write_summary(summary)
             self.transcript.close()
             if cfg.memory is not None and not cfg.dry_run:

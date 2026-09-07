@@ -12,9 +12,12 @@ import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PIL import Image
+
+if TYPE_CHECKING:
+    from quackd.trace import TraceEvent
 
 
 def new_run_dir(base: str | Path = "runs", name: str | None = None) -> Path:
@@ -50,6 +53,12 @@ class Transcript:
         self._fh.write(json.dumps(record, default=str, ensure_ascii=False) + "\n")
         self._fh.flush()
         self.events += 1
+
+    def sink(self, event: TraceEvent) -> None:
+        """The transcript as a `Tracer` record: the event's kind and payload, on the
+        transcript's own clock, so a `frame` written directly and an `observation` that came
+        through the tracer never disagree about the time."""
+        self.write(event.kind, **event.data)
 
     def save_frame(self, img: Image.Image, caption: str = "") -> Path:
         self.frames_dir.mkdir(exist_ok=True)
