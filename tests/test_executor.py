@@ -351,7 +351,7 @@ async def test_the_confirm_gate_records_the_answer(
     ex.confirm = deny_all
     with pytest.raises(ConfirmDenied):
         await ex.run_verb("kick")
-    assert gates(seen) == [("confirm", "asked")]
+    assert gates(seen) == [("confirm", "denied")]
     assert seen[1].data["answer"] is False
     assert ends(seen)[0]["outcome"] == "denied"
 
@@ -359,6 +359,7 @@ async def test_the_confirm_gate_records_the_answer(
     ex2.confirm = allow_all
     assert (await ex2.run_verb("kick")).ok
     assert [e.data["answer"] for e in seen2 if e.kind == "gate"] == [True]
+    assert gates(seen2) == [("confirm", "allowed")]
 
 
 async def test_the_budget_gate_fires_before_anything_is_sent(
@@ -490,6 +491,63 @@ async def test_the_heartbeats_stop_is_traced_too() -> None:
     await beat.stop()
     assert any(e.kind == "note" and "heartbeat failed" in e.data["text"] for e in seen)
     assert any(e.kind == "intent" and e.data["intent"] == "stop" for e in seen)
+
+
+async def test_a_confirm_prompt_that_raises_is_a_denial_that_names_the_exception(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """typer's y/N prompt raises click's `Abort` on Ctrl-C, whose `str()` is empty. That used
+    to escape as `verb_end error "Abort: "` with no gate at all, so the trace never recorded
+    that a human had been asked."""
+
+    class Abort(RuntimeError):  # the shape click's own Abort has
+        pass
+
+    def raises(_name: str, _params: dict[str, Any]) -> bool:
+        raise Abort
+
+    ex, seen = traced(registry, mock_transport, allow="quack, kick", confirm="kick")
+    ex.confirm = raises
+    with pytest.raises(ConfirmDenied, match="Abort"):
+        await ex.run_verb("kick")
+    assert gates(seen) == [("confirm", "denied")]
+    assert "Abort" in seen[1].data["reason"] and seen[1].data["answer"] is False
+    assert ends(seen)[0]["outcome"] == "denied"
+    assert mock_transport.intents_of("do") == []
+
+
+async def test_a_state_read_that_fails_still_sends_a_stop(registry: VerbRegistry) -> None:
+    """Every other in-verb failure stops the robot. A link that died one line earlier, while
+    reading the state the gates need, was the one that did not."""
+
+    class Dead(MockTransport):
+        async def get_state(self) -> DuckState:
+            raise ConnectionError("the link is gone")
+
+    transport = Dead()
+    ex, seen = traced(registry, transport, allow="quack")
+    with pytest.raises(ConnectionError):
+        await ex.run_verb("quack")
+    assert transport.stops == 1
+    assert ends(seen)[0]["outcome"] == "error"
+
+
+async def test_a_broken_record_sink_cannot_stop_the_heartbeat_from_aborting() -> None:
+    """The abort is the one thing that must happen when the link dies. A trace sink that
+    raised inside the failure handler used to kill the heartbeat task with the abort unset,
+    and then explode again at the first line of the loop's teardown."""
+    from quackd.trace import Tracer
+
+    def broken(_event: Any) -> None:
+        raise OSError("disk full")
+
+    transport = MockTransport(fail_heartbeat_after=0)
+    abort = asyncio.Event()
+    beat = Heartbeat(transport, abort, period_s=0.001, trace=Tracer(record=broken))
+    beat.start()
+    await asyncio.wait_for(abort.wait(), timeout=2.0)
+    await beat.stop()  # must not re-raise the sink's error
+    assert transport.stops >= 1
 
 
 async def test_cancelling_the_call_cancels_the_verb_and_sends_a_stop(

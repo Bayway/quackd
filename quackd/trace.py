@@ -353,8 +353,6 @@ def render_lines(
         return [(text, "bold")]
     if k == "gate":
         text = f"{_label('gate')}{d.get('gate')}: {d.get('outcome')}"
-        if d.get("gate") == "confirm":
-            text += " yes" if d.get("answer") else " no"
         if d.get("reason"):
             text += f" {d['reason']}"
         if d.get("params"):

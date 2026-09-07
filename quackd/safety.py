@@ -306,14 +306,24 @@ class Executor:
             return VerbResult.fail(f"invalid params for {name}: {msgs}")
 
         if self.needs_confirm(verb):
-            answer = bool(self.confirm(name, parsed.model_dump()))
+            try:
+                answer = bool(self.confirm(name, parsed.model_dump()))
+            except Exception as e:
+                # typer's y/N prompt raises click's `Abort` (a RuntimeError) on Ctrl-C or
+                # EOF. An asker that raised has not said yes, and the run deserves to be told
+                # so in the gate's words rather than as `verb_end error "Abort: "`.
+                why = f"the prompt raised {type(e).__name__}" + (f": {e}" if str(e) else "")
+                self._emit(
+                    "gate", name=name, gate="confirm", outcome="denied", answer=False, reason=why
+                )
+                raise ConfirmDenied(f"human declined {name} ({why})") from e
             self._emit(
                 "gate",
                 name=name,
                 gate="confirm",
-                outcome="asked",
+                outcome="allowed" if answer else "denied",
                 answer=answer,
-                reason="a human was asked" if answer else "a human declined",
+                reason="a human said yes" if answer else "a human said no",
             )
             if not answer:
                 raise ConfirmDenied(f"human declined {name}")
@@ -325,7 +335,14 @@ class Executor:
                 self._emit("gate", name=name, gate="budget", outcome="exceeded", reason=str(e))
                 raise
 
-        state = await self.transport.get_state()
+        try:
+            state = await self.transport.get_state()
+        except Exception:
+            # the one in-verb transport failure that used to send no stop. A link that
+            # cannot report state cannot be trusted to be holding a zero twist either.
+            with contextlib.suppress(Exception):
+                await self.traced_transport().stop()
+            raise
         try:
             self._check_abort_conditions(state)
         except Aborted as e:
@@ -523,18 +540,27 @@ class Heartbeat:
                 self.beats += 1
             except Exception as e:
                 self.failure = e
-                # "sending stop", not "stopping the duck": the heartbeat fails precisely when
-                # the link is in doubt, which is when a stop is least likely to arrive. What
-                # actually stops a body whose deadman we cannot reach is the deadman itself.
-                message = f"heartbeat failed: {e} — sending stop"
-                self.log(message)
-                stopper: Any = self.transport
-                if self.trace is not None:
-                    self.trace.emit("note", text=message)
-                    stopper = TracedTransport(self.transport, self.trace)
-                with contextlib.suppress(Exception):
-                    await stopper.stop()
-                self.abort.set()
+                # Everything in here is best effort and the abort is in a `finally`, because
+                # setting it is the one thing that must happen: a log or a trace sink that
+                # raised used to kill this task outright, leaving the abort unset and the run
+                # with no idea the link had gone.
+                try:
+                    # "sending stop", not "stopping the duck": the heartbeat fails precisely
+                    # when the link is in doubt, which is when a stop is least likely to
+                    # arrive. What actually stops a body whose deadman we cannot reach is the
+                    # deadman itself.
+                    message = f"heartbeat failed: {e} — sending stop"
+                    with contextlib.suppress(Exception):
+                        self.log(message)
+                    stopper: Any = self.transport
+                    if self.trace is not None:
+                        with contextlib.suppress(Exception):
+                            self.trace.emit("note", text=message)
+                        stopper = TracedTransport(self.transport, self.trace)
+                    with contextlib.suppress(Exception):
+                        await stopper.stop()
+                finally:
+                    self.abort.set()
                 return
             await asyncio.sleep(self.period_s)
 
@@ -544,7 +570,10 @@ class Heartbeat:
     async def stop(self) -> None:
         if self._task is not None:
             self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            # a task that already died of its own exception re-raises it here, and this is
+            # the first line of the loop's teardown: it must not take the stop, the final
+            # state and the transcript's close down with it
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._task
             self._task = None
 
