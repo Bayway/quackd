@@ -80,8 +80,10 @@ default is to send the blocks back empty), an OpenAI-compatible server may fill
 `reasoning_content` or `reasoning`, Gemini returns thought parts when asked, and a local
 server that separates nothing gets its `<think>` block split out of the answer. OpenAI's own
 Chat Completions returns a reasoning token count and no text, so that is what the trace
-shows. The scripted pilot has no reasoning at all, which is why `--provider fake` never has a
-thinking line.
+shows. The scripted pilot has no reasoning either, but it does report which rule it followed
+— what it saw, how the last verb ended, and the verb that fell out — on the same line, marked
+`[scripted]` so it can never be mistaken for a model's own words. So a run with no API key
+still shows you the shape of the trace.
 
 **Does the robot need a powerful onboard computer?** No. quackd's own process, the part
 that calls the LLM and runs the detector, never runs on the robot itself — you run

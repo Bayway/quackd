@@ -438,6 +438,60 @@ STRATEGIES: dict[str, Strategy] = {
 }
 
 
+def _seen_label(detection: dict[str, Any]) -> str:
+    """One label, whitespace-collapsed and clipped, so a garbage label cannot run away with
+    the line: perception labels come from whatever model is loaded, not from a fixed list."""
+    return " ".join(str(detection.get("label") or "thing").split())[:24] or "thing"
+
+
+def _seen(detections: list[dict[str, Any]]) -> str:
+    """What the rule saw, as counts per label plus where the nearest thing is."""
+    if not detections:
+        return "nothing it knows"
+    counts: dict[str, int] = {}
+    for d in detections:
+        label = _seen_label(d)
+        counts[label] = counts.get(label, 0) + 1
+    groups = ", ".join(
+        f"{n} {label}{'' if n == 1 or label.endswith('s') else 's'}" for label, n in counts.items()
+    )
+    # Unknown distances sort last, so "nearest" is the nearest thing actually ranged.
+    nearest = min(
+        detections,
+        key=lambda d: (d.get("est_distance_m") is None, d.get("est_distance_m") or 0.0),
+    )
+    dist, bearing = nearest.get("est_distance_m"), nearest.get("bearing_deg")
+    where = f"{dist:.2f} m" if dist is not None else "distance unknown"
+    if bearing is None:
+        where += ", bearing unknown"
+    else:
+        where += f", {abs(bearing):.0f} deg {'left' if bearing >= 0 else 'right'}"
+    return f"{groups} (nearest {where})"
+
+
+def _scripted_thinking(obs: Observation, step: int, call: ToolCall) -> str:
+    """The one line the scripted pilot puts on the trace's `think` row.
+
+    It is not reasoning and must never be mistaken for it, hence the bracketed `[scripted]`
+    prefix: it is the rule reporting the two inputs it actually branched on — what the camera
+    saw and how the last verb ended — and the verb that fell out. Without it every keyless
+    run (which is every runnable example in the README, and every recorded asset) shows a
+    trace whose thinking line is permanently blank, so the headline feature cannot be
+    demonstrated at all without an API key.
+
+    Double quotes are stripped on the way out. `tests/test_cli.py` greps the raw transcript
+    for `"kick"` and `"name": "kick"` to prove the duck really kicked; a quoted verb name in
+    the thinking would satisfy those assertions whether or not it did.
+    """
+    last = _last(obs)
+    verb = last.get("verb")
+    after = f" after {verb} {'ok' if last.get('ok') else 'failed'}" if verb else ""
+    seen = _seen(obs.features.get("detections") or [])
+    return f"[scripted] step {step}: sees {seen}{after}, so the rule picks {call.name}".replace(
+        '"', "'"
+    )
+
+
 class FakeProvider:
     name = "fake"
     supports_vision = False
@@ -486,4 +540,12 @@ class FakeProvider:
         self.calls += 1
         call = call.model_copy(update={"id": f"fake-{self.calls}"})
         usage = Usage(input_tokens=len(system) // 4 + len(obs.text) // 4, output_tokens=16)
-        return ProviderTurn(tool_calls=[call], text=None, usage=usage, stop_reason="tool_use")
+        # No `text` and no `reasoning_tokens`: a rule has nothing to say to the human and
+        # spends nothing thinking, and a made-up count in the token line would be theatre.
+        return ProviderTurn(
+            tool_calls=[call],
+            text=None,
+            usage=usage,
+            stop_reason="tool_use",
+            thinking=_scripted_thinking(obs, decisions, call),
+        )
