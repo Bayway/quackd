@@ -405,7 +405,10 @@ def render_lines(
         out.append((tokens, "dim"))
         return out
     if k == "enforce":
-        return [(f"{_label('enforce')}{d.get('issue')}: {d.get('action')}", "yellow")]
+        text = f"{_label('enforce')}{d.get('issue')}: {d.get('action')}"
+        if d.get("text"):  # the re-prompt's own words, which the record already carried
+            text += f" ({d['text']})"
+        return [(text, "yellow")]
     if k == "verb_start":
         text = f"{_label('verb')}{d.get('name')}({fmt_params(d.get('params'))})"
         if d.get("nested"):

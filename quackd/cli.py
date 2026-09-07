@@ -501,6 +501,14 @@ def _run_impl(
     console.print(
         f"run dir: {result.run_dir}" + (f" · gif: {result.gif_path}" if result.gif_path else "")
     )
+    if result.trace_dropped:
+        # a console that raised on every event produced a silent trace and no sign of it
+        err_console.print(
+            f"trace: {result.trace_dropped} line(s) could not be shown (the console raised); "
+            "transcript.jsonl has them",
+            style="yellow",
+            markup=False,
+        )
     if result.outcome != "success":
         raise typer.Exit(code=1)
 

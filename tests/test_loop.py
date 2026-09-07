@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -434,6 +435,75 @@ async def test_a_broken_console_never_ends_a_run(hello_duck: DuckFile, tmp_path:
     )
     assert result.outcome == "success"
     assert Transcript.read(result.run_dir / "transcript.jsonl")  # the record is unaffected
+
+
+async def test_the_summary_counts_the_events_a_broken_console_dropped(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """A console that raises on every event produced a silent trace, an unchanged exit code
+    and no line anywhere saying events had been dropped."""
+
+    def broken(_event: Any) -> None:
+        raise RuntimeError("the terminal went away")
+
+    result = await run_duck(
+        RunConfig(
+            duck=hello_duck,
+            provider=FakeProvider.for_duck("hello-world"),
+            transport=MockTransport(),
+            runs_dir=tmp_path,
+            trace=broken,
+        )
+    )
+    assert result.trace_dropped > 0
+    summary = json.loads((result.run_dir / "summary.json").read_text(encoding="utf-8"))
+    end = next(
+        e for e in Transcript.read(result.run_dir / "transcript.jsonl") if e["kind"] == "run_end"
+    )
+    # the record's own count is one short of the run's, and can only ever be: it is taken
+    # while the summary is built, and emitting `run_end` with it is one more event to drop.
+    # The CLI prints the result's, which is complete.
+    assert summary["trace_dropped"] == end["trace_dropped"] == result.trace_dropped - 1
+
+
+async def test_thinking_on_the_reprompt_turn_is_recorded(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """The re-prompt is a second call to the model in the same step, and nothing asserted
+    that the request was marked as one or that its answer's reasoning was kept."""
+
+    class Dithering:
+        name, model, supports_vision = "dithering", "test", False
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def step(self, system: str, history: Any, tools: Any) -> ProviderTurn:
+            self.calls += 1
+            if self.calls == 1:
+                return ProviderTurn(tool_calls=[], text="hmm", thinking="turn 1: still deciding")
+            return ProviderTurn(
+                tool_calls=[ToolCall(name="declare_success", arguments={"reason": "done"})],
+                thinking="turn 2: it wants exactly one tool",
+            )
+
+    result = await run_duck(
+        RunConfig(
+            duck=hello_duck,
+            provider=Dithering(),
+            transport=MockTransport(),
+            runs_dir=tmp_path,
+        )
+    )
+    assert result.outcome == "success"
+    events = Transcript.read(result.run_dir / "transcript.jsonl")
+    requests = [e for e in events if e["kind"] == "llm_request"]
+    assert [r["reprompt"] for r in requests] == [False, True]
+    assert [e["thinking"] for e in events if e["kind"] == "llm"][1] == (
+        "turn 2: it wants exactly one tool"
+    )
+    enforce = next(e for e in events if e["kind"] == "enforce")
+    assert enforce["text"] == "You must call exactly one tool. Choose now."
 
 
 async def test_the_log_callback_still_gets_the_lines_that_only_it_had(

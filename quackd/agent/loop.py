@@ -111,6 +111,8 @@ class RunResult:
     run_dir: Path
     final_state: dict[str, Any] = field(default_factory=dict)
     gif_path: Path | None = None
+    trace_dropped: int = 0
+    """Events a view raised on and never showed. The transcript has them all."""
 
     @property
     def ok(self) -> bool:
@@ -530,6 +532,9 @@ class AgentLoop:
                 "robot": manifest.id if manifest is not None else None,
                 "dry_run": cfg.dry_run,
                 "final_state": final_state,
+                # what a view could not show. The record has every one of them; a console
+                # that swallowed a hundred events used to leave no sign anywhere.
+                "trace_dropped": self.tracer.dropped,
             }
             # the only unguarded statements in this teardown used to be these three, so a
             # disk that filled at `run_end` skipped summary.json, leaked the file handle,
@@ -559,6 +564,7 @@ class AgentLoop:
             usage=self.usage,
             run_dir=self.run_dir,
             final_state=final_state,
+            trace_dropped=self.tracer.dropped,
         )
 
 
