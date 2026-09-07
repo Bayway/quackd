@@ -20,6 +20,7 @@ from quackd.trace import (
     capturing,
     counting,
     flock_caption,
+    fmt_value,
     parse_thinking_limit,
     prompt_shown_default,
     render_call,
@@ -129,6 +130,25 @@ async def test_a_transport_that_raises_is_traced_and_still_raises() -> None:
     with pytest.raises(ConnectionError):
         await TracedTransport(Broken(), tracer).send_intent(Intent.stop())
     assert seen[0].data["accepted"] is False and "ConnectionError" in seen[0].data["reason"]
+
+
+async def test_a_stop_that_raises_is_traced_and_still_raises() -> None:
+    """A stop that failed is the single most important line in a trace: it is the moment the
+    brake did not answer. `TracedTransport.stop` emits before it re-raises, so the caller
+    still gets the exception it has to act on and the record still has the line."""
+
+    class Broken(MockTransport):
+        async def stop(self) -> None:
+            raise ConnectionError("the socket is gone")
+
+    tracer = Tracer()
+    seen = events(tracer)
+    with pytest.raises(ConnectionError, match="the socket is gone"):
+        await TracedTransport(Broken(), tracer).stop()
+    assert [e.kind for e in seen] == ["intent"], "the emitted event must not be lost to the raise"
+    assert seen[0].data["intent"] == "stop"
+    assert seen[0].data["accepted"] is False
+    assert seen[0].data["reason"] == "ConnectionError: the socket is gone"
 
 
 def test_everything_else_is_delegated() -> None:
@@ -260,6 +280,32 @@ def test_an_intent_line_still_drops_null_parameters() -> None:
     event = TraceEvent("intent", 0.0, {"intent": "move", "params": {"vx": 0.1, "vy": None}})
     ((text, _),) = render_lines(event)
     assert "vx=0.1" in text and "vy" not in text
+
+
+def test_a_note_with_several_lines_is_indented_under_its_label() -> None:
+    """A planner's multi-line log ran into the label column and was unreadable: every line
+    after the first started at column zero, exactly where a reader looks for the next
+    event's label, so a three-line note read as three separate events."""
+    text = "planner: it can see the ball\nbearing +12 deg, 0.8 m away\nnext: go_to, then kick"
+    ((rendered, style),) = render_lines(TraceEvent("note", 0.0, {"text": text}))
+    first, *rest = rendered.splitlines()
+    assert first.startswith("note") and first.endswith("planner: it can see the ball")
+    pad = len(first) - len("planner: it can see the ball")
+    assert pad == 8, "the label column"
+    assert rest == [" " * pad + "bearing +12 deg, 0.8 m away", " " * pad + "next: go_to, then kick"]
+    assert style == "dim"
+
+
+def test_fmt_value_truncates_long_strings_and_long_reprs() -> None:
+    """One `note` carrying a model's whole answer, or a params dict with a frame in it,
+    would otherwise be the trace. Both are bounded, and both say where they were cut."""
+    assert fmt_value("x" * 500) == repr("x" * 57 + "...")
+    assert len(fmt_value("x" * 500)) == 62  # 60 characters, and the quotes repr adds
+    assert fmt_value("x" * 60) == repr("x" * 60)  # exactly at the limit, untouched
+
+    big = {f"k{i}": list(range(10)) for i in range(20)}
+    assert fmt_value(big) == repr(big)[:117] + "..."
+    assert len(fmt_value(big)) == 120
 
 
 def test_a_burst_with_many_distinct_labels_shows_three_and_an_ellipsis() -> None:

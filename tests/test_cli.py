@@ -16,31 +16,57 @@ runner = CliRunner()
 # ── the trace ───────────────────────────────────────────────────────────────────────────
 
 
-def _trace_run(tmp_path: Path, monkeypatch, *flags: str, env: str | None = "") -> str:
-    """A run whose stderr the CliRunner folds into `output`, with the label column's padding
-    squeezed out so an assertion can name a line as a reader would say it. `env` is what
-    QUACKD_TRACE says: "" is on (an empty value must never read as off), None removes it."""
+def _traced(tmp_path: Path, monkeypatch, *args: str, env: str | None = "") -> str:
+    """Any command whose stderr the CliRunner folds into `output`, with the label column's
+    padding squeezed out so an assertion can name a line as a reader would say it. `env` is
+    what QUACKD_TRACE says: "" is on (an empty value must never read as off), None removes
+    it — the suite turns the trace off for everyone else (conftest)."""
     if env is None:
         monkeypatch.delenv("QUACKD_TRACE", raising=False)
     else:
         monkeypatch.setenv("QUACKD_TRACE", env)
-    result = runner.invoke(
-        app,
-        [
-            "run",
-            "hello-world",
-            "--provider",
-            "fake",
-            "--robot",
-            "microduck:mock",
-            "--runs-dir",
-            str(tmp_path),
-            "--no-gif",
-            *flags,
-        ],
-    )
+    result = runner.invoke(app, [*args, "--runs-dir", str(tmp_path)])
     assert result.exit_code == 0, result.output
     return " ".join(result.output.split())
+
+
+def _trace_run(tmp_path: Path, monkeypatch, *flags: str, env: str | None = "") -> str:
+    """One `run` on the mock, which sends no frames and writes no GIF: the trace itself is
+    what these tests read."""
+    return _traced(
+        tmp_path,
+        monkeypatch,
+        "run",
+        "hello-world",
+        "--provider",
+        "fake",
+        "--robot",
+        "microduck:mock",
+        "--no-gif",
+        *flags,
+        env=env,
+    )
+
+
+def _trace_record(tmp_path: Path, monkeypatch, *flags: str, env: str | None = "") -> str:
+    """The same run through `record`, which pins the simulator and always writes a GIF."""
+    return _traced(
+        tmp_path,
+        monkeypatch,
+        "record",
+        "hello-world",
+        "--provider",
+        "fake",
+        *flags,
+        env=env,
+    )
+
+
+def _kinds(tmp_path: Path) -> list[str]:
+    """Every `kind` the run's transcript recorded, in order."""
+    from quackd.agent.transcript import Transcript
+
+    return [e["kind"] for e in Transcript.read(next(tmp_path.rglob("transcript.jsonl")))]
 
 
 def test_the_trace_is_on_by_default(tmp_path: Path, monkeypatch) -> None:
@@ -93,6 +119,63 @@ def test_verbose_is_the_compact_view_and_does_not_double_the_trace(
     assert "→ quack" not in traced, "the old compact line must not double the trace"
     compact = _trace_run(tmp_path, monkeypatch, "--verbose", "--no-trace")
     assert "→ quack" in compact and "-> sound" not in compact
+
+
+def test_record_writes_a_gif_and_a_transcript(tmp_path: Path, monkeypatch) -> None:
+    """Every GIF in the README and every launch post comes out of `record`, and no test
+    ever ran the command: it pins its own robot, always renders, and could have been broken
+    for a whole release without a single failure to say so."""
+    out = _trace_record(tmp_path, monkeypatch)
+    assert "SUCCESS" in out
+    gif = next(tmp_path.rglob("run.gif"))
+    assert gif.stat().st_size > 0, "an empty GIF is a README with a broken image in it"
+    assert {"run_start", "llm", "verb_end", "run_end"} <= set(_kinds(tmp_path))
+
+
+def test_record_no_trace_still_writes_every_event(tmp_path: Path, monkeypatch) -> None:
+    """The switch is about the console and nothing else (ADR-0029). The transcript is the
+    record, and a run recorded quietly must be as complete as a noisy one."""
+    out = _trace_record(tmp_path, monkeypatch, "--no-trace")
+    assert "-> sound" not in out and "SUCCESS" in out
+    kinds = _kinds(tmp_path)
+    assert "intent" in kinds and "verb_end" in kinds
+
+
+def test_no_trace_verbose_prints_the_dry_run_line_intact(tmp_path: Path, monkeypatch) -> None:
+    """`--verbose` predates the trace and people's scripts still pass it, so with the trace
+    off it is still the only thing that says what a dry run would have done — and the line
+    opens with `[dry-run]`, which Rich would eat as a style tag if it were printed as
+    markup."""
+    out = _trace_run(tmp_path, monkeypatch, "--no-trace", "--dry-run", "--verbose")
+    assert "[dry-run] would run quack(" in out
+    assert "Traceback" not in out
+
+
+def test_serve_mcp_forwards_no_trace(monkeypatch) -> None:
+    """`--no-trace` is what silences an MCP server that logs to the same stderr its client
+    reads. The flag is parsed by one module and honoured by another, so nothing but a call
+    recorder proves it survives the hand-off."""
+    from quackd import mcp_server
+    from quackd.trace import trace_enabled_default
+
+    captured: dict[str, object] = {}
+
+    def recorder(**kwargs: object) -> None:  # `serve` blocks on mcp.run(); this returns
+        captured.update(kwargs)
+
+    monkeypatch.setattr(mcp_server, "serve", recorder)
+    monkeypatch.setenv("QUACKD_TRACE", "")  # an empty value is on
+
+    off = runner.invoke(app, ["serve-mcp", "--no-trace", "--robot", "microduck:mock"])
+    assert off.exit_code == 0, off.output
+    assert captured["trace"] is False
+
+    captured.clear()
+    on = runner.invoke(app, ["serve-mcp", "--robot", "microduck:mock"])
+    assert on.exit_code == 0, on.output
+    # without the flag the CLI forwards None — "ask the environment" — because a server a
+    # desktop spawned has no shell to read QUACKD_TRACE in. `serve` resolves it, and on.
+    assert captured["trace"] is None and trace_enabled_default() is True
 
 
 def test_the_outcome_line_prints_the_models_reason_verbatim(tmp_path: Path, monkeypatch) -> None:

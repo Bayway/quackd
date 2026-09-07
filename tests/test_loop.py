@@ -506,6 +506,57 @@ async def test_thinking_on_the_reprompt_turn_is_recorded(
     assert enforce["text"] == "You must call exactly one tool. Choose now."
 
 
+async def test_a_composite_is_traced_as_nested_pairs_with_the_parents_tally(
+    kick_duck: DuckFile, tmp_path: Path
+) -> None:
+    """A composite sends nothing itself: every intent `approach_and` reports came from the
+    `go_to` and the `kick` it ran. The tally is a chain of `ContextVar` frames, so a
+    regression there is silent — the parent would keep reporting a number, just a smaller
+    one, and a reader would believe it."""
+    from quackd.perception.color_blob import ColorBlobDetector
+    from quackd.transport.sim2d import Sim2DTransport
+
+    kick_duck.frontmatter.verbs.allow = [*kick_duck.frontmatter.verbs.allow, "approach_and"]
+    seen: list[Any] = []
+    result = await run_duck(
+        RunConfig(
+            duck=kick_duck,
+            provider=FakeProvider(
+                script=[
+                    ToolCall(name="search_scan", arguments={"target": "ball"}),
+                    ToolCall(
+                        name="approach_and",
+                        arguments={"target": "ball", "stop_distance": 0.22, "then": "kick"},
+                    ),
+                    ToolCall(name="declare_success", arguments={"reason": "kicked"}),
+                ]
+            ),
+            transport=Sim2DTransport(seed=6),
+            detector=ColorBlobDetector(),
+            runs_dir=tmp_path,
+            trace=seen.append,
+        )
+    )
+    assert result.outcome == "success", result.reason
+
+    opened = next(
+        i for i, e in enumerate(seen) if e.kind == "verb_start" and e.data["name"] == "approach_and"
+    )
+    closed = next(
+        i for i, e in enumerate(seen) if e.kind == "verb_end" and e.data["name"] == "approach_and"
+    )
+    assert seen[opened].data["nested"] is False and seen[closed].data["nested"] is False
+
+    inside = seen[opened + 1 : closed]
+    assert all(e.data["nested"] is True for e in inside if e.kind in ("verb_start", "verb_end"))
+    children = [e for e in inside if e.kind == "verb_end"]
+    assert [e.data["name"] for e in children] == ["go_to", "kick"]
+
+    sent = sum(sum(e.data["intents"].values()) for e in children)
+    assert sent > 0, "the children really did drive the robot"
+    assert sum(seen[closed].data["intents"].values()) >= sent
+
+
 async def test_the_log_callback_still_gets_the_lines_that_only_it_had(
     hello_duck: DuckFile, tmp_path: Path
 ) -> None:
