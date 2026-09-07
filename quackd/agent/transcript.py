@@ -56,7 +56,13 @@ class Transcript:
             return
         record = {"t": round(time.monotonic() - self._t0, 3), "kind": kind, **payload}
         self._fh.write(json.dumps(record, default=str, ensure_ascii=False) + "\n")
-        self._fh.flush()
+        if kind != "intent":
+            # An intent is written from inside `send_intent`, on the event loop, between two
+            # deadman resends: a stalled filesystem there delays the next command past the
+            # deadman and zeroes the velocity mid-stride. Every burst ends in a `verb_end`,
+            # which flushes it, and the text layer's own buffer bounds what a hard kill could
+            # lose to well under one verb's worth of lines.
+            self._fh.flush()
         self.events += 1
 
     def sink(self, event: TraceEvent) -> None:

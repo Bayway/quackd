@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import ValidationError
 
+from quackd.adapters.base import backend_name
 from quackd.duckfile.schema import Budgets, DuckFrontmatter
 from quackd.perception.base import Detector
 from quackd.trace import TracedTransport, Tracer, counting
@@ -142,6 +143,19 @@ class Executor:
         self.log(text)
         self._emit("note", text=text)
 
+    def _robot_now(self) -> float | None:
+        """The robot's own clock, or None when it has none to give (a transport that raises,
+        or a simulator not connected yet). Never a reason to lose the verb."""
+        with contextlib.suppress(Exception):
+            return float(self.transport.now())
+        return None
+
+    def _clock(self) -> str | None:
+        """What to call the robot's clock when it is not the wall clock. A free-running
+        simulator's seconds are the ones that mean something to a reader; on hardware `now()`
+        is monotonic, so there is nothing to distinguish and the key is absent."""
+        return "sim" if backend_name(self.transport) in ("sim2d", "mujoco") else None
+
     def traced_transport(self) -> Any:
         """The transport as verbs see it: the real one, or a wrapper that narrates every
         intent. Also what the executor itself sends its safety stops through."""
@@ -181,7 +195,9 @@ class Executor:
             transport=self.traced_transport(),
             detector=self.detector,
             dry_run=self.dry_run,
-            log=self.log,
+            # a verb's own log line is a `note` as well, so it is not the one thing the trace
+            # cannot see. Not the executor's own arrows: those would double `verb_start`.
+            log=self._note,
             on_frame=self.on_frame,
             run_verb=lambda name, params: self.run_verb(name, params, source=source, nested=True),
             # an adapter carries its manifest after connect; a bare transport has none
@@ -207,6 +223,7 @@ class Executor:
         params = params or {}
         canonical = self.registry.canonical(name)
         started = time.perf_counter()
+        robot_started = self._robot_now()
         outcome, summary, ok = "error", "verb exited unexpectedly", False
         data_keys: list[str] = []
         with counting() as counter:
@@ -250,6 +267,12 @@ class Executor:
                 )
                 return result
             finally:
+                clocks: dict[str, Any] = {}
+                robot_now = self._robot_now()
+                if robot_started is not None and robot_now is not None:
+                    clocks["transport_s"] = round(robot_now - robot_started, 3)
+                    if (label := self._clock()) is not None:
+                        clocks["clock"] = label
                 self._emit(
                     "verb_end",
                     name=name,
@@ -262,6 +285,7 @@ class Executor:
                     intents=dict(counter),
                     source=source,
                     nested=nested,
+                    **clocks,
                 )
 
     async def _run_verb(

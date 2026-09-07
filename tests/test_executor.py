@@ -493,6 +493,40 @@ async def test_the_heartbeats_stop_is_traced_too() -> None:
     assert any(e.kind == "intent" and e.data["intent"] == "stop" for e in seen)
 
 
+async def test_verb_end_carries_the_robots_clock_beside_the_wall_clock(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """The mock's clock advances only on `sleep`, so a one second walk is one robot second
+    and almost no wall time: exactly the shape a free-running simulator has."""
+    ex, seen = traced(registry, mock_transport, allow="walk")
+    await ex.run_verb("walk", {"vx": 0.1, "duration_s": 1.0})
+    end = ends(seen)[0]
+    assert end["transport_s"] == pytest.approx(1.0)
+    assert end["elapsed_s"] < 0.5
+    assert "clock" not in end, "the mock is not a simulator, so there is no label to give"
+
+
+async def test_a_verb_that_logs_is_a_note_in_the_trace_and_still_reaches_log(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """`ctx.log` was wired straight to `log`, so a verb that logged was the one thing the
+    trace could not see. `log` is a contract other callers read, so the note is additional."""
+    lines: list[str] = []
+
+    async def looks(ctx: VerbContext, _p: NoParams) -> VerbResult:
+        ctx.log("looking left")
+        return VerbResult.success("looked")
+
+    registry.register(Verb("looks", "looks around", looks))
+    ex, seen = traced(registry, mock_transport, allow="looks")
+    ex.log = lines.append
+    assert (await ex.run_verb("looks")).ok
+    assert "looking left" in lines
+    notes = [e for e in seen if e.kind == "note"]
+    assert [n.data["text"] for n in notes] == ["looking left"]
+    assert seen.index(notes[0]) > 0 and seen[-1].kind == "verb_end"
+
+
 async def test_a_confirm_prompt_that_raises_is_a_denial_that_names_the_exception(
     registry: VerbRegistry, mock_transport: MockTransport
 ) -> None:

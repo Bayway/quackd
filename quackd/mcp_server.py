@@ -188,9 +188,16 @@ class RobotSession:
             return await fn()
         with capturing() as events:
             started = time.perf_counter()
+            robot_started = self.executor._robot_now()
             self.tracer.emit("tool_call", tool=tool, robot=self.name, **args)
             payload = await fn()
             budget = self.executor.budget
+            clocks: dict[str, Any] = {}
+            robot_now = self.executor._robot_now()
+            if robot_started is not None and robot_now is not None:
+                clocks["transport_s"] = round(robot_now - robot_started, 3)
+                if (label := self.executor._clock()) is not None:
+                    clocks["clock"] = label
             self.tracer.emit(
                 "tool_result",
                 tool=tool,
@@ -198,6 +205,7 @@ class RobotSession:
                 summary=payload.get("summary"),
                 elapsed_s=round(time.perf_counter() - started, 3),
                 budget=budget.status() if budget is not None else None,
+                **clocks,
             )
         lines = call_lines(events)
         for line in lines:

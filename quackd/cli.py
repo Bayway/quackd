@@ -306,7 +306,7 @@ def _run_impl(
     from quackd.duckfile.validate import validate_duck
     from quackd.perception import detector_for
     from quackd.safety import KillSwitch, allow_all
-    from quackd.trace import ConsoleTrace, trace_enabled_default
+    from quackd.trace import ConsoleTrace, thinking_limit_default, trace_enabled_default
     from quackd.transport.base import TransportError
 
     if (duckfile is None) == (goal is None):
@@ -400,7 +400,9 @@ def _run_impl(
     # The flag wins; else QUACKD_TRACE, read here rather than at import so a `.env` line
     # counts (the root callback loads it after the option defaults exist).
     trace_on = trace if trace is not None else trace_enabled_default()
-    console_trace = ConsoleTrace(err_console) if trace_on else None
+    console_trace = (
+        ConsoleTrace(err_console, thinking_chars=thinking_limit_default()) if trace_on else None
+    )
 
     def log(msg: str) -> None:
         # the compact view: one line per verb and the executor's notes. The trace shows all

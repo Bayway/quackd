@@ -100,6 +100,7 @@ async def test_every_intent_and_stop_is_an_event() -> None:
         "params": {"vx": 0.2, "vy": 0.0, "wz": 0.1},
         "accepted": True,
         "reason": None,
+        "robot_t": 0.0,  # the mock's clock only moves on `sleep`
     }
     assert seen[1].data["intent"] == "stop"
     # and the real transport really got them
@@ -336,6 +337,32 @@ def test_the_verb_end_line_counts_the_intents_and_the_seconds() -> None:
     )
     ((text, style),) = render_lines(event)
     assert "go_to ok: reached the ball (12.5 s, 121 intents)" in text and style == "green"
+
+
+def test_the_verb_end_line_shows_both_clocks_only_when_they_disagree() -> None:
+    """A free-running simulator crosses twenty of the robot's seconds in one of ours. One
+    line saying `1.4 s` for that walk is wrong, and two numbers on every sub-second verb is
+    noise, so both a half second and a fifth have to separate them."""
+
+    def line(**extra: Any) -> str:
+        data = {"name": "go_to", "ok": True, "outcome": "ok", "summary": "there", **extra}
+        ((text, _),) = render_lines(TraceEvent("verb_end", 0.0, data))
+        return text
+
+    assert "20.0 s sim, 1.4 s wall" in line(elapsed_s=1.4, transport_s=20.0, clock="sim")
+    assert "(1.0 s," in line(elapsed_s=1.0, transport_s=1.1, clock="sim")  # too close to say
+    assert "(1.4 s," in line(elapsed_s=1.4, transport_s=20.0)  # no clock: hardware, one number
+
+
+def test_a_burst_spans_the_robots_clock_when_it_has_one() -> None:
+    """`move x200 over 1.4 s` implies 140 Hz to a reader when the commanded rate was 10."""
+    tracer = Tracer()
+    seen = events(tracer)
+    for wall, robot in ((0.0, 0.0), (1.4, 20.0)):
+        tracer.emit("intent", intent="move", params={"vx": 0.2}, accepted=True, robot_t=robot)
+        object.__setattr__(seen[-1], "t", wall)
+    (out,) = lines(seen)
+    assert "over 20.0 s" in out
 
 
 def test_the_loops_own_verb_record_renders_nothing() -> None:

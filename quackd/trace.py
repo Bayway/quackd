@@ -181,6 +181,13 @@ class TracedTransport:
         for tally in _tallies.get():
             tally[kind] += 1
 
+    def _robot_t(self) -> dict[str, float]:
+        """The robot's own clock, so a burst's span is in the seconds the robot lived rather
+        than the wall seconds a free-running simulator crosses in a fraction of the time."""
+        with contextlib.suppress(Exception):
+            return {"robot_t": float(self._inner.now())}
+        return {}
+
     async def send_intent(self, intent: Intent) -> Ack:
         try:
             ack = await self._inner.send_intent(intent)
@@ -192,6 +199,7 @@ class TracedTransport:
                 params=intent.params,
                 accepted=False,
                 reason=f"{type(e).__name__}: {e}",
+                **self._robot_t(),
             )
             raise
         self._count(intent.kind)
@@ -201,6 +209,7 @@ class TracedTransport:
             params=intent.params,
             accepted=ack.accepted,
             reason=ack.reason,
+            **self._robot_t(),
         )
         return ack
 
@@ -215,10 +224,13 @@ class TracedTransport:
                 params={},
                 accepted=False,
                 reason=f"{type(e).__name__}: {e}",
+                **self._robot_t(),
             )
             raise
         self._count("stop")
-        self._tracer.emit("intent", intent="stop", params={}, accepted=True, reason=None)
+        self._tracer.emit(
+            "intent", intent="stop", params={}, accepted=True, reason=None, **self._robot_t()
+        )
 
 
 # ── rendering ───────────────────────────────────────────────────────────────────────────
@@ -260,6 +272,23 @@ def fmt_params(params: Mapping[str, Any] | None, *, drop_none: bool = False) -> 
     return ", ".join(
         f"{k}={fmt_value(v)}" for k, v in params.items() if not (drop_none and v is None)
     )
+
+
+_CLOCK_GAP_S, _CLOCK_GAP_FRAC = 0.5, 0.2
+
+
+def _seconds(d: Mapping[str, Any]) -> str:
+    """`1.4 s`, or `20.0 s sim, 1.4 s wall` when a free-running simulator's clock and the
+    wall clock disagree. Both thresholds have to be crossed, or every sub-second sim verb
+    would print two numbers to say the same thing."""
+    wall = float(d.get("elapsed_s", 0) or 0)
+    robot, label = d.get("transport_s"), d.get("clock")
+    if robot is None or not label:
+        return f"{wall:.1f} s"
+    gap = abs(float(robot) - wall)
+    if gap <= _CLOCK_GAP_S or gap <= _CLOCK_GAP_FRAC * max(float(robot), wall):
+        return f"{wall:.1f} s"
+    return f"{float(robot):.1f} s {label}, {wall:.1f} s wall"
 
 
 def _ok(outcome: str) -> bool:
@@ -389,7 +418,7 @@ def render_lines(
         outcome = str(d.get("outcome", "ok" if d.get("ok") else "fail"))
         verdict = "ok" if _ok(outcome) else ("FAIL" if outcome == "fail" else outcome.upper())
         n = sum((d.get("intents") or {}).values())
-        tail = f" ({d.get('elapsed_s', 0):.1f} s, {n} intent{'s' if n != 1 else ''})"
+        tail = f" ({_seconds(d)}, {n} intent{'s' if n != 1 else ''})"
         text = f"{_label('<-')}{d.get('name')} {verdict}: {d.get('summary')}{tail}"
         if d.get("nested"):
             text = f"{_label('<-')}  {d.get('name')} {verdict}: {d.get('summary')}{tail}"
@@ -409,7 +438,7 @@ def render_lines(
         args = {key: value for key, value in d.items() if key not in ("tool", "robot")}
         return [(f"{_label('tool')}{d.get('tool')} {fmt_params(args)} on {d.get('robot')}", "bold")]
     if k == "tool_result":
-        text = f"{_label('done')}{'ok' if d.get('ok') else 'FAIL'} in {d.get('elapsed_s', 0):.1f} s"
+        text = f"{_label('done')}{'ok' if d.get('ok') else 'FAIL'} in {_seconds(d)}"
         if d.get("budget"):
             text += f" budget: {d['budget']}"
         return [(text, "dim")]
@@ -455,7 +484,12 @@ def intent_line(events: list[TraceEvent]) -> Line:
         if not first.data.get("accepted", True):
             return (f"{text} REFUSED: {first.data.get('reason') or 'no reason given'}", "red")
         return (text, "dim")
-    span = events[-1].t - first.t
+    if (first_t := first.data.get("robot_t")) is not None and (
+        last_t := events[-1].data.get("robot_t")
+    ) is not None:
+        span = float(last_t) - float(first_t)  # the seconds the robot lived, not the wall's
+    else:
+        span = events[-1].t - first.t
     ranges = _ranges(events)
     text = f"{_label('->')}{kind} x{len(events)} over {span:.1f} s"
     if ranges:
@@ -506,13 +540,12 @@ class ConsoleTrace(LineTrace):
     """The CLI view: every line to a Rich console, as plain text with a style, never markup."""
 
     def __init__(
-        self, console: Any, *, thinking_chars: int | None = None, prompt: bool = True
+        self, console: Any, *, thinking_chars: int | None = 2000, prompt: bool = True
     ) -> None:
-        super().__init__(
-            self._print,
-            thinking_chars=thinking_limit_default() if thinking_chars is None else thinking_chars,
-            prompt=prompt,
-        )
+        # `None` means unlimited here exactly as it does in `render_lines`: one sentinel, one
+        # meaning. The environment is read by the caller, where `QUACKD_TRACE` already is,
+        # because that has to happen after `.env` is loaded rather than at import.
+        super().__init__(self._print, thinking_chars=thinking_chars, prompt=prompt)
         self.console = console
 
     def _print(self, text: str, style: str) -> None:
