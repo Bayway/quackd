@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import glob
 import sys
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -81,6 +82,36 @@ def _verbose_line(msg: str) -> None:
     the executor's own `[dry-run] would run ...`, and the flock planner logging a model's raw
     tool arguments. Rich deletes `[bold]` silently and raises on an unpaired `[/think]`."""
     err_console.print(msg, style="dim", markup=False, highlight=False, soft_wrap=True)
+
+
+def _print_outcome(
+    outcome: str,
+    reason: str,
+    *,
+    steps: int,
+    llm_calls: int,
+    tokens: str,
+    run_dir: Path | str,
+    gif_path: Path | str | None = None,
+    trace_dropped: int = 0,
+) -> None:
+    """The three closing lines of a run. `quackd trace` prints them from the transcript, so
+    a replay of a run ends exactly the way the run itself did rather than in a second dialect
+    somebody has to keep in step."""
+    colour = {"success": "green", "failure": "red", "budget": "yellow", "aborted": "red"}.get(
+        outcome, "red"
+    )
+    console.print(f"[{colour}]{outcome.upper()}[/{colour}] — {escape(reason)}")
+    console.print(f"steps={steps} llm_calls={llm_calls} tokens={tokens}")
+    console.print(f"run dir: {run_dir}" + (f" · gif: {gif_path}" if gif_path else ""))
+    if trace_dropped:
+        # a console that raised on every event produced a silent trace and no sign of it
+        err_console.print(
+            f"trace: {trace_dropped} line(s) could not be shown (the console raised); "
+            "transcript.jsonl has them",
+            style="yellow",
+            markup=False,
+        )
 
 
 def _fail(msg: str, code: int = 1) -> None:
@@ -485,30 +516,16 @@ def _run_impl(
     if recorder is not None:
         gif_path = recorder.save_gif(result.run_dir / "run.gif")
         result.gif_path = gif_path
-    colour = {
-        "success": "green",
-        "failure": "red",
-        "budget": "yellow",
-        "aborted": "red",
-        "error": "red",
-    }[result.outcome]
-    console.print(f"[{colour}]{result.outcome.upper()}[/{colour}] — {escape(result.reason)}")
-    usage = result.usage
-    console.print(
-        f"steps={result.steps} llm_calls={result.llm_calls} "
-        f"tokens={usage.input_tokens}+{usage.output_tokens}"
+    _print_outcome(
+        result.outcome,
+        result.reason,
+        steps=result.steps,
+        llm_calls=result.llm_calls,
+        tokens=f"{result.usage.input_tokens}+{result.usage.output_tokens}",
+        run_dir=result.run_dir,
+        gif_path=result.gif_path,
+        trace_dropped=result.trace_dropped,
     )
-    console.print(
-        f"run dir: {result.run_dir}" + (f" · gif: {result.gif_path}" if result.gif_path else "")
-    )
-    if result.trace_dropped:
-        # a console that raised on every event produced a silent trace and no sign of it
-        err_console.print(
-            f"trace: {result.trace_dropped} line(s) could not be shown (the console raised); "
-            "transcript.jsonl has them",
-            style="yellow",
-            markup=False,
-        )
     if result.outcome != "success":
         raise typer.Exit(code=1)
 
@@ -878,6 +895,161 @@ def record(
         robot="microduck:sim2d",
         trace=trace,
         trace_prompt=trace_prompt,
+    )
+
+
+# ── trace: replay a finished run ────────────────────────────────────────────────────────
+
+
+def _resolve_run(run: str | None, runs_dir: str) -> Path:
+    """A run directory from what the user typed. In order: a transcript file, a directory, an
+    exact name under --runs-dir, a timestamp prefix, the newest whose name contains the text.
+    Nothing at all means the newest run, which is what you want after `quackd run` ends."""
+    root = Path(runs_dir)
+    runs = sorted((d for d in root.glob("*") if d.is_dir()), key=lambda d: d.name)
+    if run:
+        typed = Path(run)
+        if typed.is_file():
+            return typed
+        if typed.is_dir():
+            return typed
+        exact = root / run
+        if exact.is_dir():
+            return exact
+        for d in reversed(runs):
+            if d.name.startswith(run):
+                return d
+        for d in reversed(runs):
+            if run in d.name:
+                return d
+        newest = ", ".join(d.name for d in runs[-5:]) or "none yet"
+        _fail(f"no run matching {run!r} under {root} (newest: {newest})")
+    if not runs:
+        _fail(f"no runs under {root}: pass a path, or run `quackd run` first")
+    return runs[-1]
+
+
+def _replay(
+    records: list[dict[str, Any]],
+    view: Any,
+    *,
+    from_step: int | None,
+    frames: bool,
+) -> dict[str, Any] | None:
+    """Records back through the same renderer that printed them live, and the `run_end`.
+
+    A transcript written before the trace existed has `verb` records and no `verb_end`; they
+    carry the same fields, so they are shown under the name the renderer knows. `frame` is
+    skipped unless asked: one line per camera frame buries everything else."""
+    from quackd.trace import TraceEvent
+
+    end: dict[str, Any] | None = None
+    # `verb` and `verb_end` both name the verb that ended; a live run has both and the
+    # renderer draws only the second, so promote `verb` only when there is no `verb_end`
+    legacy = not any(r.get("kind") == "verb_end" for r in records)
+    skipping = from_step is not None
+    for rec in records:
+        kind = str(rec.get("kind", ""))
+        data = {k: v for k, v in rec.items() if k not in ("t", "kind")}
+        if kind == "run_end":
+            end = data
+        if skipping:
+            if kind == "observation" and data.get("step") == from_step:
+                skipping = False
+            elif kind != "run_start":
+                continue
+        if kind == "frame":
+            if frames:
+                console.print(f"        frame {data.get('path', '')}", style="dim", markup=False)
+            continue
+        if kind == "verb" and legacy:
+            kind = "verb_end"
+        view(TraceEvent(kind, float(rec.get("t") or 0.0), data))
+    view.flush()
+    return end
+
+
+_TRACE_RUN = typer.Argument(
+    None, help="A run directory, a transcript file, a name or a prefix. Default: the newest."
+)
+
+
+@app.command("trace")
+def trace_cmd(
+    run: str | None = _TRACE_RUN,
+    runs_dir: str = _RUNS,
+    prompt: bool | None = typer.Option(
+        None, "--prompt/--no-prompt", help="Show the system prompt the run was given."
+    ),
+    thinking: str | None = typer.Option(
+        None, "--thinking", help="Characters of thinking per turn: a number, or `all`."
+    ),
+    from_step: int | None = typer.Option(
+        None, "--from-step", help="Start at this step, skipping the turns before it."
+    ),
+    frames: bool = typer.Option(False, "--frames", help="Also print one line per camera frame."),
+) -> None:
+    """Replay a finished run's transcript as the trace it printed while it ran.
+
+    On stdout, because a replay is what you pipe to a pager or a file, and unaffected by
+    QUACKD_TRACE: that switch is about narrating live, and asking for a replay is asking."""
+    import json
+
+    from quackd.agent.transcript import Transcript
+    from quackd.trace import ConsoleTrace, parse_thinking_limit
+    from quackd.trace import prompt_shown_default as _prompt_default
+    from quackd.trace import thinking_limit_default as _thinking_default
+
+    target = _resolve_run(run, runs_dir)
+    run_dir = target.parent if target.is_file() else target
+    transcripts = (
+        [target]
+        if target.is_file()
+        else sorted((run_dir / "ducks").glob("*/transcript.jsonl"))
+        or [run_dir / "transcript.jsonl"]
+    )
+    if not transcripts[0].exists():
+        _fail(f"{transcripts[0]} does not exist: that is not a run directory")
+
+    width = max((len(p.parent.name) for p in transcripts), default=0) if len(transcripts) > 1 else 0
+    end: dict[str, Any] | None = None
+    cut = 0
+    for path in transcripts:
+        records = Transcript.read(path, lenient=True)
+        cut += int(records[-1].get("_skipped", 0)) if records else 0
+        view = ConsoleTrace(
+            console,
+            thinking_chars=(
+                parse_thinking_limit(thinking) if thinking is not None else _thinking_default()
+            ),
+            prompt=prompt if prompt is not None else _prompt_default(),
+            progress_s=None,  # a replay is not live: one line per burst, as the record has it
+            prefix=f"{path.parent.name:<{width}}  " if width else "",
+        )
+        end = _replay(records, view, from_step=from_step, frames=frames) or end
+
+    if cut:
+        err_console.print(
+            f"trace: {cut} unreadable line(s) skipped, the run was cut while it was writing",
+            style="yellow",
+            markup=False,
+        )
+    summary = run_dir / "summary.json"
+    if end is None and summary.exists():
+        end = json.loads(summary.read_text(encoding="utf-8"))
+    if end is None:
+        _fail("no run_end: the run did not finish, or is still running")
+        return
+    usage = end.get("usage") or {}
+    _print_outcome(
+        str(end.get("outcome", "error")),
+        str(end.get("reason", "")),
+        steps=int(end.get("steps") or 0),
+        llm_calls=int(end.get("llm_calls") or 0),
+        tokens=f"{usage.get('input_tokens', 0)}+{usage.get('output_tokens', 0)}",
+        run_dir=run_dir,
+        gif_path=gif if (gif := run_dir / "run.gif").exists() else None,
+        trace_dropped=int(end.get("trace_dropped") or 0),
     )
 
 

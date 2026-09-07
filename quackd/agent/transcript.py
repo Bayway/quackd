@@ -88,6 +88,22 @@ class Transcript:
         self._fh.close()
 
     @staticmethod
-    def read(path: Path) -> list[dict[str, Any]]:
+    def read(path: Path, *, lenient: bool = False) -> list[dict[str, Any]]:
+        """Every record in the file. `lenient` skips the unparsable ones and counts them under
+        the key `_skipped` on the last record: a run killed mid-write leaves a half line, and
+        `quackd trace` should show the run that happened rather than a JSON error."""
+        records: list[dict[str, Any]] = []
+        skipped = 0
         with path.open(encoding="utf-8") as fh:
-            return [json.loads(line) for line in fh if line.strip()]
+            for line in fh:
+                if not line.strip():
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except ValueError:
+                    if not lenient:
+                        raise
+                    skipped += 1
+        if skipped and records:
+            records[-1]["_skipped"] = skipped
+        return records
