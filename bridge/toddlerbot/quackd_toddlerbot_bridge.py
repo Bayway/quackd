@@ -96,6 +96,16 @@ not stop the robot, because stopping is not a thing this body can do: it slews t
 and holds it."""
 RESET_VEL = 0.3
 """Radians per second, upstream's own rate for moving to a rest pose."""
+SETTLE_OVERHEAD = 20.0
+"""How much longer a slew takes than its arithmetic says.
+
+It is handed out one `CONTROL_DT` tick at a time, and every one of those ticks costs a bus
+round trip on top of its sleep: about 1.8x on an idle machine, and over 6x on a loaded CI
+runner. `settle()` is a deadline for a body that is stuck, so it is sized well past both."""
+SETTLE_FLOOR_S = 8.0
+"""The shortest settle deadline, for a body already at the safe pose."""
+SETTLE_MAX_S = 120.0
+"""The longest, so a jammed joint is not waited on forever."""
 WAIST_THRESHOLD = 0.5
 """Untwist the waist first if it is further than this from zero, as upstream's reset does."""
 MAX_STEP_RAD = RESET_VEL * CONTROL_DT * 4.0
@@ -309,6 +319,14 @@ class Command:
 
 
 # ── the loop ────────────────────────────────────────────────────────────────────────────
+
+
+def settle_budget(travel: float) -> float:
+    """How long to let a slew of `travel` radians run before calling it stuck.
+
+    The slew cannot finish sooner than `travel / RESET_VEL`, so a deadline under that gives up
+    on a robot that is still moving."""
+    return min(SETTLE_MAX_S, SETTLE_FLOOR_S + SETTLE_OVERHEAD * travel / RESET_VEL)
 
 
 class Daemon:
@@ -644,17 +662,27 @@ class Daemon:
 
     # -- shutdown, which is the dangerous part --------------------------------------
 
-    def settle(self, timeout_s: float = 8.0) -> bool:
+    def settle(self, timeout_s: float | None = None) -> bool:
         """Reach the safe pose before anything is allowed to exit.
 
         Nothing upstream does this: its own shutdown disables torque with no lowering and no
-        ramp, which on a standing humanoid is a fall."""
+        ramp, which on a standing humanoid is a fall.
+
+        Left to itself this gives the slew a deadline sized to the distance it has to cover.
+        A fixed 8s used to be less than a full-scale slew needs -- 1.5 rad at RESET_VEL is 5s
+        of slew and closer to 9s of wall time -- so a shutdown from a wide pose gave up partway
+        and torqued off a robot that was still moving, which is the fall this method exists to
+        get in front of. The deadline is a ceiling for a body that is stuck, not a schedule:
+        this returns the moment the pose arrives."""
         log.info("settling to the safe pose before shutdown")
         # The overlays are goals quackd asked for, and the safe pose is the whole body.
         self.release_grip()
         with self.lock:
             self.neck_goal = None
+            travel = float(np.max(np.abs(self.command.default_pose - self.target)))
             self.command.trip(self.command.default_pose)
+        if timeout_s is None:
+            timeout_s = settle_budget(travel)
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             try:

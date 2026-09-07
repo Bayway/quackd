@@ -202,8 +202,23 @@ def test_settling_reaches_the_safe_pose_before_shutdown() -> None:
     d.command.hold(np.ones(d.robot.nu, np.float32) * 1.5)
     _ticks(d, 300)
     assert float(np.max(d.target)) > 0.5
-    assert d.settle(timeout_s=30.0) is True
+    # No timeout here on purpose: a shutdown gets whatever `settle()` gives itself, and the
+    # bug this covers was that default being shorter than the slew it had to wait for.
+    assert d.settle() is True
     assert float(np.max(np.abs(d.target))) < 0.05, "it ended at the default pose"
+
+
+def test_the_settle_deadline_outlasts_the_slew_it_waits_for() -> None:
+    """The cheap half of the test above, which the slow one cannot check for every pose.
+
+    A deadline shorter than the slew means `shutdown()` gives up partway and torques off a
+    robot that is still moving. The wall time is at least `travel / RESET_VEL`, because the
+    slew is handed out one `CONTROL_DT` at a time, and a real bus makes every one of those
+    ticks cost more than its sleep."""
+    for travel in (0.0, 0.1, 0.5, 1.5, 3.0):
+        assert D.settle_budget(travel) > travel / D.RESET_VEL
+    assert D.settle_budget(0.0) == D.SETTLE_FLOOR_S, "a body already there still gets a floor"
+    assert D.settle_budget(1e6) == D.SETTLE_MAX_S, "and a stuck one is not waited on forever"
 
 
 def test_shutdown_settles_and_then_closes() -> None:

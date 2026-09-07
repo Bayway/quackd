@@ -163,6 +163,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `asarray(...).copy()` stored into the same attribute, so it is annotated shape-free now. The
   release gate ran under 3.11 and never saw it, which is why the `v0.7.0` tag's own CI run is
   red on three jobs while the published files are unaffected.
+- **The ToddlerBot's shutdown could torque off a robot that was still moving.** `settle()` gave
+  the slew to the safe pose a fixed 8 seconds, but the slew is handed out one control tick at a
+  time, so a joint 1.5 rad away needs 5 seconds of slew and closer to 9 of wall time. It ran
+  out, logged `did not settle`, and `shutdown()` went on to disable torque on a standing
+  humanoid, which is the fall the method exists to get in front of. The deadline is now sized
+  to the distance the body actually has to cover, with a floor for one already there and a cap
+  so a jammed joint is not waited on forever. Found because the test that covers this settles a
+  full-scale slew inside a wall-clock budget, and a loaded macOS runner is slow enough to miss
+  it; that test now uses the real default and a second one checks the rule arithmetically.
 
 ## [0.7.0] — 2026-09-07
 
