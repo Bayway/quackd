@@ -62,6 +62,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm_request`, `verb_start`, `gate`, `intent`, `verb_end` and `note` alongside the kinds it
   always had ([ADR-0029](docs/adr/0029-tracing.md),
   [docs/architecture.md](docs/architecture.md#trace)).
+- **A flock narrates itself too, one robot per column.** `docs/flock.md` promised a per robot
+  transcript and the file held nothing but frames: a member built its executor with no tracer,
+  so `--trace` on a flock did nothing at all. Each member now records into its own
+  `ducks/<name>/transcript.jsonl` exactly as a solo run records into its own, and the terminal
+  gives each one a view with its name on every line, so three robots moving at once are three
+  readable columns rather than one interleaving. The coordinator's decisions and the planner's
+  one model call print under `flock`, in the same words the GIF captions use. `flock.jsonl` is
+  unchanged, and so is `--verbose` ([ADR-0029](docs/adr/0029-tracing.md) amended,
+  [docs/flock.md](docs/flock.md)).
+- **`quackd trace` replays a finished run.** The transcript held every line the console
+  printed and there was no way to read it back except with `jq`. With no argument it replays
+  the newest run under `runs/`, and it takes a run name, a timestamp prefix, a duck name or a
+  transcript file. `--from-step N` starts part way in, `--no-prompt` drops the system prompt,
+  `--thinking all|N` sets how much reasoning to show, and `--frames` adds a line per camera
+  frame. It prints on stdout, because a replay is what you pipe. A flock run replays every
+  member under its own name.
+- **A switch for the system prompt.** It is forty to sixty lines, worth reading once and
+  tiresome on the fiftieth run of an afternoon. `--no-trace-prompt` or `QUACKD_TRACE_PROMPT=0`
+  drops it and keeps everything else; the transcript has it either way.
+- **A long burst is shown as it happens.** A twenty second `go_to` used to print nothing until
+  it ended, because a burst of intents is coalesced into one line and the line was only written
+  when something else happened. A burst still going after two seconds is now flushed as it
+  stands and the next line continues it.
+- **The robot's own clock, beside the wall clock.** On a simulator a verb that took 4.3
+  seconds of robot time and 0.1 seconds of yours now says both, and intents carry the robot's
+  clock too. On hardware there is one clock and one number, as before.
+- **The scripted pilot says which rule it followed.** `--provider fake` returns no reasoning,
+  because there is no model, but it now reports what it saw, how the last verb ended and the
+  verb that fell out of that, marked `[scripted]` so it can never be mistaken for a model's own
+  words. A run with no API key shows the shape of a real one.
+- **A count of what a broken console dropped.** An observer that raises never ends a run, which
+  meant a console that raised on every event produced a silent trace and no sign of it.
+  `trace_dropped` is in `summary.json`, in the `run_end` record and on the last line of the
+  run when it is not zero.
 - **The providers return what the model thought.** `ProviderTurn.thinking`, filled from
   Anthropic's thinking blocks, from `reasoning_content` or `reasoning` on an OpenAI-compatible
   server, from Gemini's thought parts, and from an inline `<think>` block a local server did
@@ -79,6 +113,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Gemini's thought parts no longer land in the answer.** They were appended to `text`
   regardless, so with thoughts on they would have been replayed to the model next turn as
   things it had said.
+- **The transcript flushes on events, not on every intent.** The flush was a syscall on the
+  event loop between two deadman resends of a steering verb. Loss on a hard kill is now bounded
+  by the text buffer and ends at every `verb_end`.
+- **A verb ended by another layer keeps its own word.** A flock role change preempts an
+  in-flight composite verb, and the executor had no branch for that, so every handover in a
+  three robot run printed a red `ERROR`, which the docs define as a bug in quackd. It reads
+  `PREEMPTED` now, in yellow.
 - **`--verbose` is the compact view, not a second one.** With the trace on, the executor's own
   one-line-per-verb log would say every verb twice, so it stands down: `--verbose` is what you
   get with `--no-trace`, and on the MCP server the executor's log drops to DEBUG. Nothing lost
@@ -139,6 +180,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two calls at once no longer report each other's work.** The per verb intent tally was one
+  stack on the executor, so an MCP `quack` that overlapped a `move` reported the move's intents
+  as its own and the move reported neither its resends nor its stop. Each verb now counts in a
+  context variable, which asyncio copies into a task at creation, so a nested verb still rolls
+  up into its parent and two concurrent calls never cross.
+- **A cancelled call cancels its verb and sends a stop.** An MCP client that cancelled, or a
+  second Ctrl-C, returned at once and left the legs moving with nothing to stop them. The verb
+  is cancelled, a stop goes out, and the trace says `gate cancelled` so the record shows why.
+- **A Ctrl-C at a y/N prompt is a denial, not a traceback.** The confirm gate recorded `asked`
+  and never the answer, and a prompt that raised ended the run with an empty reason and no
+  gate. It now records `allowed` or `denied`, and names the exception when the prompt itself
+  failed.
+- **A state read that fails still sends a stop**, and a record sink that raises can no longer
+  stop the heartbeat from aborting the run.
+- **An interrupted run ends as `aborted`.** A `KeyboardInterrupt` or a cancellation was
+  recorded as "loop exited unexpectedly". The summary is written and the transcript closed
+  whatever happens on the way out, and writing to a closed transcript is a no-op rather than an
+  exception inside a task nobody awaits.
+- **A local model no longer runs a verb it only contemplated.** An inline `<think>` block is
+  split out before the JSON fallback reads the answer, so a tool call the model was reasoning
+  about inside its thinking is not executed. An unterminated `<think>` is thinking to the end
+  rather than the answer.
+- **A model's own words cannot break the terminal.** Rich read `[/think]` in a reason or a verb
+  description as markup and raised. Everything the model wrote prints as text.
+- **A malformed provider response is a `ProviderError`.** An empty `choices` or a usage field
+  that is a string reached the user as a traceback from inside the SDK.
+- **The three thinking fallbacks match the errors they were written for.** A 400 about a
+  replayed thinking block disabled thinking and retried the same request, and Gemini retried
+  any error whose text happened to contain the word.
+- **The MCP server logs each call as one block when it ends**, so two calls at once are two
+  readable blocks rather than an interleaving, and the heartbeat's own note and stop reach
+  stderr the moment they happen instead of being attributed to whichever call was open. A
+  session refusing calls because the link died now says so.
+- **A renderer bug never turns a tool result into an internal error**, a failed write keeps the
+  burst for the next flush, and a gate shows a parameter the model left unset, which on a dry
+  run is exactly what you are checking.
 - **A run that failed outside the safety layer said `loop exited unexpectedly`.** A bad key, a
   429, a dropped connection or a dead camera is not a `SafetyStop`, so nothing caught it, the
   summary recorded a default string, and the CLI printed a traceback. The call that failed is
