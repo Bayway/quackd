@@ -1,23 +1,28 @@
 # LAUNCH.md — how quackd goes public
 
 Internal. Write it, don't publish it. 0.3's story was one duck kicking one ball. 0.4's was
-that the duck is no longer the point. **0.5's is that one of the robots is one you can
-build**, which is the first time any of this has been reachable by a stranger with a 3D
-printer rather than a stranger with a preorder.
+that the duck is no longer the point. 0.5's was that one of the robots is one you can build.
+**0.8's is that you can watch it happen without installing anything, and the duck is really
+walking.**
 
 **The one sentence:** every robot hands quackd a manifest saying what it is and what it can
 do, and the verbs the model is offered are built from that and nothing else.
 
-**The 0.5 sentence:** the Open Duck Mini v2 costs about EUR 350 in parts, and quackd now
-ships the daemon that runs on it, so the only untested thing left is the duck.
+**The 0.8 sentence:** open a link, type a sentence, and a Microduck walks on Pollen's own
+trained policy in real MuJoCo physics, with a switch that turns quackd off and hands you the
+keyboard so you can see what the layer is worth.
+
+> **Blocked:** GitHub Pages is not enabled, so every link to the demo 404s. Settings → Pages →
+> Source: GitHub Actions, and `.github/workflows/pages.yml` does the rest. Nothing below ships
+> until that is on.
 
 ## Positioning per channel
 
 | Channel | One line |
 |---|---|
-| GitHub | Pilot a small robot with any LLM through `.duck` skill files and MCP. Eight robots supported, three of them open hardware you can build, a built-in simulator, no hardware needed. |
+| GitHub | Pilot a small robot with any LLM through `.duck` skill files and MCP. Eight robots supported, three of them open hardware you can build, a physics simulator, a browser demo and no hardware needed. |
 | Hacker News | A `.duck` file is a SKILL.md for a robot: the frontmatter is enforced, the body is the prompt, the executor never trusts the model. Point it at the wrong robot and it refuses before anything moves. |
-| X / Twitter | Give your Microduck a brain. Or one of seven other small robots, from a Reachy Mini head to a ToddlerBot humanoid. Any LLM, one `.duck` file. 🦆🧠 |
+| X / Twitter | Give your Microduck a brain. Type *walk in a square* and watch it happen in your browser, on the robot's own trained gait. Or one of seven other small robots, from a Reachy Mini head to a ToddlerBot humanoid. Any LLM, one `.duck` file. 🦆🧠 |
 | Pollen Discord | We built the brain daemon that was missing from `robotd / mediad / padd / tofd`, and it now drives the Reachy Mini too. We'd like you to tell us what we got wrong about both SDKs. |
 | Open Duck Mini builders (the apirrone Discord, the BDX droid crowd) | You printed a duck that walks. quackd is the layer that decides where it walks, from a plain-language goal. It ships the daemon for your Pi, it knows your duck cannot kick and cannot get up, and nobody has run it on real hardware yet, so the first person who does gets a row in the table. |
 | Reachy Mini owners (Pollen + HF communities) | Your head already knows how to look and emote. quackd is the layer that decides *when*, from a plain-language goal, and it will never offer it `kick` because its manifest does not have one. |
@@ -79,10 +84,17 @@ please correct it" framing.
 
 ## GIF shot list
 
-1. **hetero (sim).** ✅ Recorded: `docs/assets/hetero.gif`, from
-   `quackd run reachy-spots-duck-kicks --provider fake --seed 3 --gif-size 320`. This is the
-   lead asset now. The head is the slate square on the wall; the duck does the walking.
-2. **find-and-kick (sim).** ✅ `docs/assets/hero.gif`, scripted pilot, still the identity shot.
+1. **quackd on and off, side by side.** ✅ Recorded: `docs/assets/quackd-on-off.gif`, from
+   `docs/assets/hero3d.py`. The lead asset. One arena, the same sentence, and the duck on the
+   right standing still because nothing in it reads English. This is the whole pitch in one
+   loop, and it is the README hero.
+2. **A browser session**, which the demo's own Record button produces. Type the goal, let it
+   walk, flip the quackd switch mid-clip as the second beat, then Share on X, which the page
+   writes the post for. Not recorded: nobody has opened the page yet.
+3. **hetero (sim).** ✅ `docs/assets/hetero.gif`, from
+   `quackd run reachy-spots-duck-kicks --provider fake --seed 3 --gif-size 320`. The head is
+   the slate square on the wall; the duck does the walking.
+4. **find-and-kick (sim).** ✅ `docs/assets/hero.gif`, scripted pilot, still the cartoon shot.
    Re-record with `--provider anthropic` once a key is available and drop the "scripted" label.
 3. **Claude Desktop piloting a fleet via MCP.** Screen capture: connector listed → "list my
    robots" (`robot_list` shows a duck and a head) → "make the duck find the ball" → the run's

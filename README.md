@@ -43,18 +43,20 @@
 </details>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rokbenko/quackd/main/docs/assets/hero.gif" alt="A simulated duck robot searches for a ball, walks to it and kicks it. Left: the world from above. Right: what the duck's camera sees." width="760">
+  <img src="https://raw.githubusercontent.com/rokbenko/quackd/main/docs/assets/quackd-on-off.gif" alt="Two Microduck robots side by side in a MuJoCo physics simulator, running the same world. On the left, with quackd, the duck walks a square and a top-down inset traces its path. On the right, without quackd, the duck stands still and its inset shows a single unmoving dot." width="760">
   <br>
-  <sub>"Find the ball and kick it", in the bundled simulator, driven by the <em>scripted</em> pilot (no API key). Same verbs, same safety layer, same perception as a real model run. See <a href="docs/assets/README.md">docs/assets</a>.</sub>
+  <sub><strong>The same sentence, the same duck, with and without quackd.</strong> <b>Left:</b> you type <em>walk in a square</em>, a pilot picks the robot's own verbs one at a time, and the contract decides which it may use. Nobody wrote a square. It walks a leg, reads the pose it actually reached and corrects, because a real gait delivers about half of what you ask for. <b>Right:</b> the identical world, robot and walking policy, minus quackd. A Microduck takes a twist, which is three numbers, so an English sentence has nowhere to go and it stands there. Physics is MuJoCo, the gait is the policy Pollen trained, the pilot is <em>scripted</em> so this needs no API key, and each inset is the path walked so far. See <a href="docs/assets/README.md">docs/assets</a>.</sub>
 </p>
 
 **quackd** connects a small robot to a large language model and turns a request like *"find the ball and kick it"* into the right sequence of the robot's own skills. The model picks one skill at a time from the list the robot's manifest declares, quackd runs it, looks at the camera, and asks again until the job is done or clearly impossible. Claude, OpenAI, Gemini and Grok work over their APIs. Open source models work on your own machine through Ollama, vLLM, llama.cpp or LM Studio, with no key.
 
 The first robot is the [Microduck](https://pollen-robotics.com/microduck/) from Pollen Robotics, a biped that already knows how to walk, turn, kick, scoop something off the floor, look around and quack. Seven more bodies follow it through adapters that declare what each can do: an [Open Duck Mini v2](https://github.com/apirrone/Open_Duck_Mini) you can print and build yourself, a Reachy Mini head, an SO-101 class arm through LeRobot, any wheeled base over rosbridge, an XLeRobot dual-arm cart, an AlohaMini with two arms on a lift, and a ToddlerBot humanoid.
 
-You do not need a robot to try it. A bundled simulator runs on any laptop in seconds, and these goals succeed there on 10 of 10 seeds with the scripted pilot and a ground truth check:
+You do not need a robot to try it. Two simulators ship with quackd. The **physics** one puts the real Microduck in [MuJoCo](https://github.com/google-deepmind/mujoco) and runs the walking policy Pollen trained for it, so the duck walks instead of sliding and a command below its gait floor produces nothing at all. The **cartoon** starts in a second, downloads nothing, and is what the other seven bodies and every seeded sweep in CI use. These goals succeed on 10 of 10 seeds with the scripted pilot and a ground truth check:
 
 > **"Find the ball and kick it."** · **"Find the ball, walk up to it and say where it is."** *(an Open Duck Mini v2, which cannot kick)* · **"Find the ball with your gaze and say where it is."** *(a Reachy Mini head, no legs)* · **"Split the search, the closest duck kicks."** *(a flock)* · **"The head spots, the duck kicks, the head judges."** *(two bodies, one contract)*
+
+The first of those also passes 10 of 10 on the physics simulator, with the duck on its own gait rather than a sprite on rails. The rest are cartoon only, because the other seven bodies have no physics model here.
 
 **Nothing here has run on a real robot yet, on any of the eight adapters.** Every hardware backend speaks names read from upstream source at a pinned commit and has only ever talked to fakes. For the Open Duck Mini and the ToddlerBot those fakes are the daemons quackd itself ships for the robot, exercised over loopback, so there only the body is untested. Goals like *"find my keys"* are where this is going, not what it does yet. The honest label for today is *LLM driven, goal directed control of simulated robots*, and [Which robots work](#which-robots-work) says exactly how far each one has got.
 
@@ -92,20 +94,22 @@ You do not need a robot to try it. A bundled simulator runs on any laptop in sec
 ## Try it in 60 seconds
 
 ```bash
-uvx quackd run find-and-kick --provider fake                                        # no key: the scripted pilot
+uvx --from "quackd[mujoco]" quackd run --goal "walk in a square" --robot microduck:mujoco --provider fake   # the duck above: real physics, its own trained gait (first run fetches about 10 MB)
+uvx quackd run find-and-kick --provider fake                                        # the cartoon: no download, done in a second
 claude mcp add quackd -- uvx quackd serve-mcp --robot microduck:sim2d               # or just chat with it: "find the ball and kick it"
 uvx quackd run open-duck-scout --provider fake                                     # a duck you can build: it finds the ball and walks up, no kick
 uvx quackd run reachy-spotter --provider fake                                       # another body: a Reachy Mini head, no legs, same loop
-uvx --from "quackd[anthropic]" quackd run find-and-kick --provider anthropic --robot microduck:sim2d   # needs ANTHROPIC_API_KEY
+uvx --from "quackd[anthropic]" quackd run find-and-kick --provider anthropic --robot microduck:mujoco   # a real model on the real gait, needs ANTHROPIC_API_KEY
 uvx --from "quackd[openai]" quackd run find-and-kick --provider ollama --model qwen3:8b          # local model, no key
-uvx --from "quackd[mujoco]" quackd run --goal "walk in a circle" --robot microduck:mujoco --provider fake   # real physics, real gait
-open runs/*/run.gif                                                                 # a GIF on the simulator, a transcript every time
+open runs/*/run.gif                                                                 # a GIF in either simulator, a transcript every time
 ```
 
-**Or open [the browser demo](https://rokbenko.github.io/quackd/) and install nothing.** Same
-physics, same walking policy, same contract, in a page. Type a sentence, paste your own API
-key or point it at Ollama, and watch what the model chose. There is a switch that turns
-quackd off, which leaves you the robot, its policy and a keyboard: see [`web/`](web/).
+**Or run the browser demo and install nothing but a static server** ([`web/`](web/), then
+`python -m http.server 8000 --directory web`). Same physics, same walking policy, same
+contract, in a page. Type a sentence, paste your own API key or point it at Ollama, and watch
+what the model chose. There is a switch that turns quackd off, which leaves you the robot, its
+policy and a keyboard. It goes live at `rokbenko.github.io/quackd` once Pages is enabled on the
+repository.
 
 Put keys in the environment or in a `.env` file (copy [`.env.example`](.env.example)). `quackd doctor` tells you what is missing. Needs Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/), nothing else.
 
@@ -136,7 +140,7 @@ Low level skills and high level goals are different layers. The robot knows the 
 - runs that skill on the robot (or the simulator), looks at the camera, and asks again,
 - enforces a contract the model cannot talk its way out of: which skills are allowed, how many steps, when a human must say yes, when to abort.
 
-It ships with a cartoon simulator so all of this can be developed and demoed before the hardware exists, and with an [MCP](https://modelcontextprotocol.io) server so Claude Code or Claude Desktop can drive one robot or a fleet interactively.
+It ships with two simulators, a cartoon that starts in a second and a MuJoCo one where the Microduck walks on the policy Pollen trained for it, so all of this can be developed and demoed before the hardware exists, and with an [MCP](https://modelcontextprotocol.io) server so Claude Code or Claude Desktop can drive one robot or a fleet interactively.
 
 <br>
 
@@ -175,7 +179,7 @@ The verbs the model can pick from are the robot's real, existing capabilities an
 
 ## Example
 
-The hero run above, from its transcript (`runs/<timestamp>-find-and-kick/transcript.jsonl`). This one is the scripted pilot, so `model` says so and `usage` is an estimate from character counts (no tokenizer). A real provider records the API's own counts.
+A `find-and-kick` run in the cartoon simulator, from its transcript (`runs/<timestamp>-find-and-kick/transcript.jsonl`). This one is the scripted pilot, so `model` says so and `usage` is an estimate from character counts (no tokenizer). A real provider records the API's own counts.
 
 ```jsonc
 {"kind": "llm",  "step": 0, "tool_calls": [{"name": "search_scan", "arguments": {"target": "ball"}}], "usage": {"input_tokens": 689, "output_tokens": 16}}
@@ -202,8 +206,8 @@ Version 0.7, simulator and mocks. What has been built, and how far each piece ha
 | Piece | Status |
 |---|---|
 | `sim2d` bundled simulator (default) | ✅ 10 of 10 seeds on `find-and-kick`, GIF and transcript per run |
-| `mujoco` physics simulator (`quackd[mujoco]`) | ✅ 10 of 10 seeds on `find-and-kick` with the duck walking on **upstream's own trained policy**, ground truth checked. The model and the policy are fetched from upstream at a pinned commit and hash checked, never shipped |
-| Browser demo ([`web/`](web/)) | ✅ the same physics, policy, verbs and contract in a static page. Bring your own key, or point it at Ollama. The rendering and the recording have not been run in a browser yet |
+| `mujoco` physics simulator (`quackd[mujoco]`) | ✅ 10 of 10 seeds on `find-and-kick` with the duck walking on **upstream's own trained policy**, ground truth checked, measured here on one machine because CI installs no physics extra. The model and the policy are fetched from upstream at a pinned commit and hash checked, never shipped |
+| Browser demo ([`web/`](web/)) | 🧪 the same physics, policy, verbs and contract in a static page, with the sim and the pilot exercised under Node against the real model and the real policy. Bring your own key, or point it at Ollama. The rendering, the DOM and the recording have never been run in a browser, and GitHub Pages is not enabled yet, so there is no live site |
 | Manifests and core verbs (`quackd list-adapters`, `quackd list-verbs --robot`) | ✅ eight adapters, eight core verbs that appear only where the manifest meets their requirements, speed limits from the manifest, `manifest.schema.json` generated and drift tested |
 | MCP server (`quackd serve-mcp`) | ✅ Claude Code and Claude Desktop, fleets with `--robots` (eight `robot_*` tools, tested in process against the simulator and the mocks), no Claude Desktop session on record |
 | Memory between runs (`quackd memory`, `remember`) | ✅ one JSONL file per `adapter:backend`, notes and run outcomes into the next prompt, tested end to end offline, 🧪 the `remember` tool itself exercised by one local model on one machine and by no cloud model ([docs/memory.md](docs/memory.md)) |
@@ -226,6 +230,7 @@ Eight robots, and one table for how far each one has actually got. The distincti
 | How far it has got | What that means |
 |---|---|
 | ✅ **simulator** | Runs a whole task in the bundled 2D simulator, with a seeded acceptance sweep in CI that checks the simulator's ground truth, not the model's claim |
+| ✅ **physics** | Runs a whole task in MuJoCo on the robot's own trained gait, checked against the physics world's ground truth rather than the model's claim. Needs `quackd[mujoco]`, which CI does not install, so this rung is one machine's word |
 | ✅ **mock** | Every verb runs offline against a scripted double, in the test suite |
 | 🧪 **daemon** | The wire protocol runs end to end against the real on-robot daemon over loopback in CI. Everything except the robot is exercised |
 | 🧪 **names** | Every upstream name read from upstream source at a pinned commit, exercised against fakes. Never connected to anything real |
@@ -234,7 +239,7 @@ Eight robots, and one table for how far each one has actually got. The distincti
 | Robot | `--robot` | The body | How far it has got |
 |---|---|---|---|
 | **Microduck** | `microduck:sim2d`, `mock` | a 25 cm biped from Pollen Robotics | ✅ simulator, ✅ mock |
-| | `microduck:mujoco` | the same robot in MuJoCo, on its own walking policy | ✅ physics. `find-and-kick` 10 of 10 seeds while it really walks ([ADR-0030](docs/adr/0030-mujoco-physics-backend.md)) |
+| | `microduck:mujoco` | the same robot in MuJoCo, on its own walking policy | ✅ physics. `find-and-kick` 10 of 10 seeds while it really walks, on one machine rather than in CI ([ADR-0030](docs/adr/0030-mujoco-physics-backend.md)) |
 | | `microduck:jsonrpc` | the real one, over `robotd` | 🧪 names. Early pre-orders arrive around Christmas 2026, later orders in four to six months ([checklist](docs/microduck-hardware-checklist.md)) |
 | | `microduck:websocket` | upstream's planned agent gateway | ⏳ stub |
 | **Open Duck Mini v2** | `open_duck:sim2d`, `mock` | a 42 cm 3D printed biped you can build yourself | ✅ simulator, ✅ mock |
@@ -280,7 +285,7 @@ flowchart LR
         ADAPTER["robot adapter<br/>microduck · reachy_mini · lerobot · rosbridge · open_duck · xlerobot · alohamini · toddlerbot<br/>returns a manifest (embodiment, intents, sensors, verbs, limits, safety authority)<br/>sends intents, never motor writes<br/>backends: sim2d ✅ · mujoco ✅ · mock ✅ · jsonrpc, sdk, real, ws, zmq, bridge 🧪 never run on a robot · websocket ⏳"]
     end
     ROBOT["Robot<br/>its own controllers: robotd at 50 Hz on a Microduck, the daemon on a Reachy Mini, the position controller and pick policy on an arm, the driver on a base"]
-    SIM["sim2d and mocks<br/>cartoon world, duck cam and head cam, offline doubles for every adapter"]
+    SIM["simulators and mocks<br/>the cartoon world and the MuJoCo one, duck cam and head cam, offline doubles for every adapter"]
     HUMAN --> LLM
     LLM -- "exactly one tool call per turn" --> LOOP
     LOOP --> EXEC --> VERBS --> ADAPTER
@@ -288,33 +293,6 @@ flowchart LR
     ADAPTER --> SIM
     ADAPTER -- "frame and state" --> PERC --> LOOP
     LOOP -- "observation: text and image" --> LLM
-```
-
-**One turn, concretely.**
-
-```mermaid
-sequenceDiagram
-    participant L as LLM
-    participant A as agent loop
-    participant E as safety executor
-    participant V as verb
-    participant T as robot adapter
-    participant P as perception
-    Note over A,T: before the first turn, connect() returns the manifest<br/>and the verb registry is built from it
-    A->>T: get_state, get_frame
-    T-->>P: frame
-    P-->>A: detections ("ball at bearing 12° left, ~0.8 m")
-    A->>L: observation (text and image) plus the tool list
-    L-->>A: exactly one tool call, e.g. go_to (alias walk_to)
-    A->>E: run_verb("go_to", params)
-    E->>E: allowlist, confirm, budget, abort rules, the manifest's preconditions, dry run
-    E->>V: execute(ctx, params) with a timeout
-    loop 10 Hz steering
-        V->>T: get_frame, detect, send_intent(move)
-    end
-    V-->>E: VerbResult(ok, summary, data)
-    E-->>A: result (written to the transcript)
-    A->>L: next observation
 ```
 
 **Why predefined skills matter.** The LLM never generates motor commands. Every verb is an *intent* the robot already understands: a velocity, a named skill (`kick_left` or `ground_pick` on the Microduck, a recorded expression on the Reachy Mini, `pick` as a LeRobot policy on the arm), a gaze target, a sound, a joint goal, a gripper command. The robot's own controllers do the physical part, on the Microduck policies trained in [microduck_rl](https://github.com/pollen-robotics/microduck_rl) and exported to ONNX at 50 Hz, so a slow or confused model degrades the *task*, never the *balance*. Where a body has a deadman it stops itself when commands stall. The Microduck's `robotd` has one, on the Open Duck and the ToddlerBot the daemon quackd ships is the deadman, the XLeRobot's and the AlohaMini's hosts stop the wheels but not the arms, and on the Reachy Mini, the arm and a rosbridge base quackd's heartbeat and `stop` are the only stop authority. The LLM names the skill, the body performs it.
@@ -491,17 +469,11 @@ uvx quackd run flock-kick --provider fake --seed 3
 
 The interesting part is not the kick, it is the talking. The ducks coordinate over an in process bus with eight message kinds (TASK, BID, CLAIM, ROLE, HINT, VERDICT, HB and RESULT), every one logged in `flock.jsonl`, and a deterministic Contract Net auction decides which duck acts, from each duck's own camera distance estimate. Every action goes through verbs the duck already has, so the machinery is task agnostic and what a flock can do is bounded by its skills, not by the ball. The LLM contributes **at most one** planning call per run, and each duck still enforces the `.duck` contract on itself. The outcome is judged from sim ground truth, not from a model's claim. Add a `flock:` block to any `.duck` or pass `--flock N` (2 to 4 ducks), and give each named member its robot with `robots:` in a `duck: 1` file or `--robots <member>=<adapter>:<backend>,...`. Simulator only for now (every member must be a `sim2d` backend), and the per duck pilots are deterministic rules, on purpose. Details: [docs/flock.md](docs/flock.md).
 
-**The other headline demo, two robots under one contract.** A flock can mix bodies. In `reachy-spots-duck-kicks` a Reachy Mini head that can look but not walk and a Microduck that can walk and kick share one contract: bids carry a capability term, so each robot bids only for a role its manifest can fill, the head takes the spotter role and the duck the kicker role, the duck kicks and reports that it kicked, and the head judges from its own fresh frames whether the ball moved. Success needs the spotter's verdict and the simulator's ground truth to agree. Ten of ten seeds with the scripted pilots.
+**A flock can also mix bodies.** In `reachy-spots-duck-kicks` a Reachy Mini head that cannot walk and a Microduck that cannot judge its own kick share one contract. Bids carry a capability term, so each robot bids only for a role its manifest can fill, and success needs the spotter's verdict and the simulator's ground truth to agree. Ten of ten seeds with the scripted pilots.
 
 ```bash
 uvx quackd run reachy-spots-duck-kicks --provider fake --seed 3
 ```
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/rokbenko/quackd/main/docs/assets/hetero.gif" alt="A Reachy Mini head on the wall spots the ball and judges the kick while a Microduck walks in and kicks it." width="600">
-  <br>
-  <sub>Two bodies, one contract. The head cannot walk and the duck cannot judge its own kick, so each does the half it can. Scripted pilots, deterministic coordinator, and the simulator's ground truth vetoes the verdict.</sub>
-</p>
 
 <br>
 
@@ -514,6 +486,7 @@ uvx quackd run reachy-spots-duck-kicks --provider fake --seed 3
 | Claude reasoning effort | `QUACKD_EFFORT` (`low` to `max`, default `medium`). `QUACKD_ANTHROPIC_FALLBACKS=0` disables server side refusal fallbacks. `QUACKD_THINKING_DISPLAY=omitted` stops Claude returning a summary of its reasoning, and `QUACKD_GEMINI_THOUGHTS=0` does the same for Gemini |
 | Local models | `--provider ollama`, `vllm`, `llamacpp`, `lmstudio` or `local --base-url http://host:port/v1`. No key. `--model` or the first served model. `--vision` sends frames. `QUACKD_TOOL_CHOICE=auto`, `required` or `none` for picky servers. See [docs/local-llms.md](docs/local-llms.md) |
 | Robot | `--robot <adapter>:<backend>`, or a `robots:` line in the `.duck`, the flag wins. Default `microduck:sim2d`. `quackd list-adapters` lists the eight that ship, `quackd list-verbs --robot X` what each can do |
+| Physics simulator | `--robot microduck:mujoco`, with `quackd[mujoco]`. The model and the policies are fetched once into `~/.quackd/cache`, where `QUACKD_CACHE_DIR` moves them and `QUACKD_MICRODUCK_ASSETS` points at your own `microduck_rl` checkout instead. `QUACKD_MUJOCO_BODY=puppet` runs the kinematic stand-in, which downloads nothing and is what the tests use. `--live` opens MuJoCo's own viewer |
 | Determinism | `--seed N` makes a simulator run repeatable |
 | Budgets | in the `.duck`. `--max-steps` overrides for one run |
 | Human in the loop | `verbs.confirm` in the `.duck` prompts y/N. `--yes` auto accepts. MCP refuses gated verbs unless started with `--yes` |
@@ -540,11 +513,14 @@ uvx quackd run reachy-spots-duck-kicks --provider fake --seed 3
 
 On the simulator with the scripted pilot, `find-and-kick` takes 3 to 8 verb steps, one model call each plus one to declare success, and under a second of loop wall clock per run on a laptop. Interpreter start and GIF rendering add a few seconds to the whole command, and simulated time runs as fast as the CPU allows. With a real model each decision is one API call: the system prompt and the tool schemas are about 7 k characters (roughly 2 k tokens) with memory on, each observation a few hundred characters plus a 256 px PNG for vision models, and the transcript records each provider's own usage per turn. Model latency never affects control, because the steering loop runs at 10 Hz and the robot's own controllers run regardless of how long the model thinks. That holds for local models too. The default install is about 250 MB, needs no GPU, and the simulator renders at 256 px (`--gif-size` for prettier GIFs).
 
+The physics simulator costs what physics costs. Measured here on one Windows laptop with an integrated GPU, `walk in a circle` on `microduck:mujoco` took about 8 seconds of wall clock without a GIF and 15 with one, against under a second of loop time in the cartoon, and the first run downloads about 10 MB of model and policy into `~/.quackd/cache` and leaves 23 MB on disk. Rendering is the cost rather than physics, which steps at roughly 24 times real time, so shadows are off and the recorder samples half as often as the cartoon's.
+
 <br>
 
 ## Limitations
 
-- The simulator is a cartoon on purpose. It tests the agent loop, not physics, and will not tell you whether a gait works.
+- The default simulator is a cartoon on purpose. It tests the agent loop, not physics, and will not tell you whether a gait works. `microduck:mujoco` is the one that can, and only for the Microduck.
+- The physics simulator runs upstream's walking and standing policies and nothing else of theirs. `kick` and `grab` use the cartoon's contact rules, `sit` is refused, and a fall is recovered by standing the model up, because upstream's episodic policies did nothing from a standing pose when they were tried. The gait floor, no step below about 0.22 m/s or 1.0 rad/s and roughly 0.42 of what is asked above it, was measured here on one machine with the model's own actuators and is tagged UNVERIFIED, because upstream deploys a different actuator model. All six are listed in `state.extras.assumptions`, so a transcript never implies more than happened.
 - Nothing has run on a real robot of any kind. What each body cannot report or detect on hardware (posture inferred from a policy name on the Microduck, no battery on a Reachy Mini, `holding` commanded rather than sensed on the arm, no verified deadman on a rosbridge base, no fall detection and no battery on an Open Duck) is spelled out in [docs/adapter-status.md](docs/adapter-status.md) and the adapter pages.
 - The hero GIF is the scripted pilot, not an LLM, because this repository was built without an API key. The real model code paths are tested against stubbed SDK clients.
 - Success is the model's own claim (`declare_success`) on a solo run. In the simulator, tests also check ground truth, and a flock's success needs a member's kick report (or the spotter's verdict) and sim ground truth to agree. On hardware, the `.duck` bodies insist on verifying with a fresh frame.
@@ -559,7 +535,7 @@ On the simulator with the scripted pilot, `find-and-kick` takes 3 to 8 verb step
 
 Why a task can refuse a body, whether two robots can share a task, and more: [docs/faq.md](docs/faq.md).
 
-**Non goals for now, on purpose:** no RL training or reward generation (that is v2, and only the registry hook exists), no features that require hardware, and no copying of Pollen Robotics assets, ever (no logos, no 3D meshes, no videos).
+**Non goals for now, on purpose:** no RL training or reward generation (that is v2, and only the registry hook exists), no features that require hardware, and no vendoring of Pollen Robotics assets. No logo, mesh, policy or sound of theirs is committed here. The physics simulator and the browser demo fetch the model and the policies from upstream at run time, and the one exception in this repository is the hero recording, which renders that model and carries its CC BY-NC-SA terms ([docs/licenses.md](docs/licenses.md)).
 
 <br>
 
@@ -572,7 +548,7 @@ Why a task can refuse a body, whether two robots can share a task, and more: [do
 - **v1:** a starter task on a real duck, on video. An Open Duck Mini can get there first, and a Microduck once it ships.
 - **v2, learned verbs.** LLM written rewards ([Eureka](https://eureka-research.github.io/) and [DrEureka](https://eureka-research.github.io/dr-eureka/) style) train new policies in `microduck_rl` that register as one more verb. The registry hook exists today. The training loop does not.
 
-**Help wanted:** a real model `find-and-kick` recording (one command, needs a key, see [docs/assets](docs/assets/README.md)), a transcript from a local model run on any server, a run against any real hardware (an Open Duck Mini is the most reachable, see its [checklist](docs/open-duck-hardware-checklist.md)), verified default model IDs, and new `.duck` files.
+**Help wanted:** a browser session with [`web/`](web/), because its rendering, DOM and recording have only been read and the first person to open the page is the test, a real model recording in either simulator (see [docs/assets](docs/assets/README.md)), a transcript from a local model run on any server, a run against any real hardware (an Open Duck Mini is the most reachable, see its [checklist](docs/open-duck-hardware-checklist.md)), verified default model IDs, and new `.duck` files.
 
 <br>
 
@@ -600,7 +576,7 @@ On a Microduck the gamepad preempts remote control and `robotd` is the safety au
 
 They built the duck. quackd is the brain. Thanks to Pollen Robotics for [microduck](https://github.com/pollen-robotics/microduck) (the onboard daemon stack and its JSON RPC contract) and [microduck_rl](https://github.com/pollen-robotics/microduck_rl) (the training stack behind the policies the robot runs), to the [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk), and to the authors of [DrEureka](https://eureka-research.github.io/dr-eureka/) for the idea behind learned verbs. Thanks to Antoine Pirrone and the [Open Duck Mini](https://github.com/apirrone/Open_Duck_Mini) project for designing a biped anyone can print and build, and for publishing the runtime that makes it walk. Community: the Pollen Robotics Discord linked from the [upstream README](https://github.com/pollen-robotics/microduck#readme).
 
-quackd is an independent community project, not affiliated with or endorsed by Pollen Robotics, Hugging Face or the Open Duck Mini project. "Microduck" is used nominatively to describe compatibility. No Pollen Robotics or Open Duck Mini assets are distributed here: no logos, no meshes, no ONNX policies and no sounds ([docs/licenses.md](docs/licenses.md)).
+quackd is an independent community project, not affiliated with or endorsed by Pollen Robotics, Hugging Face or the Open Duck Mini project. "Microduck" is used nominatively to describe compatibility. No Pollen Robotics or Open Duck Mini logo, mesh, ONNX policy or sound is distributed here. The physics simulator and the browser demo fetch the Microduck's model and its policies from upstream at run time and check them against a recorded hash, and the README hero renders that model, so it carries the model's own CC BY-NC-SA terms ([docs/licenses.md](docs/licenses.md)).
 
 <br>
 

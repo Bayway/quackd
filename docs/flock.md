@@ -48,8 +48,10 @@ lease (6 s), a fixed fuse from the moment it is granted. A miss or an expired le
 releases the claim and the failed duck sits out a cooldown, during which it may keep
 searching but cannot bid. A lost heartbeat also releases the claim, but that duck is
 presumed dead and excluded for good. Either way everyone re-scans the full circle (the
-ball has moved) and the auction runs again. Ducks cannot fall in the 2D simulator, so
-fall handling waits for hardware.
+ball has moved) and the auction runs again. Ducks cannot fall in the 2D
+simulator, which is the only place a flock runs, so fall handling is untested. It no
+longer waits for hardware: a duck can fall in `microduck:mujoco`, so the first thing to
+exercise it need not be a robot.
 
 ## Roles
 

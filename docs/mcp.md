@@ -7,6 +7,19 @@ robot (allowlist, budgets, confirm gates, heartbeat), one executor per robot.
 
 Works with the built-in simulator out of the box — no hardware, no extra install.
 
+For a duck that really walks, add the physics extra and name the physics backend:
+
+```bash
+claude mcp add quackd -- uvx --from "quackd[mujoco]" quackd serve-mcp --robot microduck:mujoco
+```
+
+That is upstream's own MuJoCo model on upstream's own walking policy, fetched at a pinned commit
+into `~/.quackd/cache` on the first connect and checked against a recorded sha256. The frames
+`robot_observe` returns come from the head of a robot that is walking, and the gait undershoots
+what it is asked, which `report_state` says ([ADR-0030](adr/0030-mujoco-physics-backend.md)). The
+first connect downloads the extra and about 10 MB of model with nothing on screen, so `sim2d`
+stays the fast way in and is what the configs below use.
+
 ## Tools
 
 Eight `robot_*` tools. `robot` is the name from `--robots name=<adapter>:<backend>`; omit

@@ -40,6 +40,29 @@ Also in scope:
 - An adapter sending a body's "go limp" call (`robot.relax`, `disable_motors`,
   `disable_torque`, an XLeRobot `disconnect()`, a ToddlerBot torque-off) as if it were
   `stop`. Stop means stop, never collapse.
+- **The browser demo** (`web/`). It asks a visitor to paste an API key into a web page. The key
+  is read from an input, sent from the browser straight to the vendor, and never stored, never
+  logged and never proxied: there is no server here to proxy it through, and nothing in
+  `web/src` writes to browser storage. What that leaves is the page itself. It loads three
+  payloads from `cdn.jsdelivr.net` at pinned versions with no subresource integrity and no
+  content security policy, and any script running in the page can read that input. So the risk
+  is not quackd holding your key, it is a third party executing in the same document as it: a
+  bad CDN response, an injected script, or a copy of the page served from somewhere you do not
+  control. Anthropic's `anthropic-dangerous-direct-browser-access` header, which the page sends,
+  is opting out of the vendor's own guard against exactly this. Use a key with a spend cap, or
+  pick Local and nothing leaves the machine. What the demo cannot do: it is a simulation with no
+  transport to any robot, so nothing in it moves hardware.
+- **The model and the policies the physics backend fetches** (`quackd/sim3d/assets.py`).
+  `--robot microduck:mujoco` downloads upstream's MJCF and 38 meshes from codeload.github.com
+  and two ONNX policies from huggingface.co, both pinned, and then runs the policy. The defences
+  are worth naming because they are the answer: only paths in a fixed allowlist are extracted
+  from the tarball, so a crafted archive cannot write outside the cache, and every file is
+  checked against a recorded sha256 before MuJoCo or onnxruntime sees it, so a substituted mesh
+  or policy fails the run instead of loading. An ONNX file is data that onnxruntime parses, not
+  Python that quackd executes, so the exposure is that parser and not arbitrary code. The one
+  path around the hashes is deliberate: `QUACKD_MICRODUCK_ASSETS` warns rather than refuses,
+  because a newer export from your own checkout is the point of it. Point it at a checkout you
+  built, never at one you were sent.
 - The LAN surfaces behind `quackd[lan]`: zeroconf TXT records advertise a robot's identity
   to anything on the network, and the MQTT flock bus carries messages that command robots
   with no authentication of its own. Both are off by default and neither has a threat model

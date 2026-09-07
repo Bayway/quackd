@@ -1,10 +1,12 @@
 # Reading someone else's robot
 
-quackd drives eight bodies and has never run on any of them. Everything it does was worked
-out by reading upstream code closely enough to be safe without executing it, and the same
+quackd drives eight bodies and has never run on any of them. Almost everything it does was
+worked out by reading upstream code closely enough to be safe without executing it, and the same
 handful of traps came up on robot after robot. They are collected here by pattern, because
 that is how they recur: the next robot will not have the AlohaMini's bug, it will have a bug
-of the AlohaMini's *shape*.
+of the AlohaMini's *shape*. The one exception is the Microduck's own model and walking policy,
+which `microduck:mujoco` runs on a desktop ([ADR-0030](adr/0030-mujoco-physics-backend.md)), and
+executing them taught the last pattern below.
 
 Every claim below is cited at a pinned commit in the relevant adapter's `upstream_api.py`.
 This page is the pattern; that file is the evidence.

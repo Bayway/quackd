@@ -17,9 +17,22 @@ README = (REPO / "README.md").read_text(encoding="utf-8")
 
 
 def test_adapter_status_lists_every_microduck_upstream_ref() -> None:
+    """The Microduck has two upstreams and adapter-status.md carries both: `robotd`'s API,
+    and `microduck_rl`'s model and policies, which the physics backend fetches and runs.
+
+    Every other upstream in the project has a doc-completeness guard, the seven adapter pages
+    through `test_adapter_doc_lists_every_upstream_ref` and `robotd` through this one. Without
+    the second loop the newest table is the only one that can go stale in silence.
+    """
+    from quackd.sim3d import upstream_api as microduck_rl
+
     doc = (REPO / "docs" / "adapter-status.md").read_text(encoding="utf-8")
     missing = [ref.name for ref in up.all_refs() if ref.name not in doc]
     assert not missing, f"docs/adapter-status.md is missing: {missing}"
+    unverified = [
+        ref.name for ref in microduck_rl.refs_by_status("UNVERIFIED") if ref.name not in doc
+    ]
+    assert not unverified, f"adapter-status.md is missing microduck_rl assumptions: {unverified}"
     from quackd.adapters.factory import BACKENDS
 
     for adapter, backends in BACKENDS.items():

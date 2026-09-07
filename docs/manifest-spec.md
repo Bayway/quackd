@@ -63,7 +63,7 @@ quackd has used since 0.1. One table maps them (`INTENT_KIND_FOR`): `twist → m
 ## The digest
 
 `digest()` is sha256 of the canonical sorted-key JSON **excluding `id` and `backend`**,
-first 16 hex characters: a capability fingerprint. The same robot over `sim2d` and `mock`
+first 16 hex characters: a capability fingerprint. The same robot over `sim2d`, `mujoco` and `mock`
 hashes the same; a robot with one more verb hashes differently. Discovery advertises it in
 TXT (`sha`) so a manifest fetched out of band can be checked against what was announced,
 and MCP `robot_list` returns it.

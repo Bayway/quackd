@@ -24,6 +24,7 @@ never share notes (a note about the cartoon arena is wrong for your living room)
 
 ```
 ~/.quackd/memory/microduck-sim2d.jsonl
+~/.quackd/memory/microduck-mujoco.jsonl
 ~/.quackd/memory/microduck-jsonrpc.jsonl
 ~/.quackd/memory/reachy-mini-mock.jsonl
 ```
@@ -31,6 +32,11 @@ never share notes (a note about the cartoon arena is wrong for your living room)
 The key is the body, not the name you gave it, so two members of one fleet that are the
 same `adapter:backend` share a file. That is the same rule that keeps `microduck:sim2d` and
 `microduck:jsonrpc` apart, read the other way round.
+
+`microduck:sim2d` and `microduck:mujoco` are the pair that catches people out. They share an
+arena, a seed and a `.duck` file by design, and they still keep separate files, because what a
+pilot learns about how far to walk before kicking comes from the body, and only one of the two
+has a gait.
 
 Override the directory with `--memory-dir` or `QUACKD_MEMORY_DIR`. Turn it off for one run
 with `--no-memory`. The file is plain text, one JSON object per line, meant to be read and

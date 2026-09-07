@@ -1,6 +1,6 @@
 # ADR-0029: The run narrates itself: one event stream, three views, on by default
 
-**Status:** accepted · **Date:** 2026-09-07 · Extends [ADR-0003](0003-three-loops.md) (the three loops are what the trace shows) and [ADR-0012](0012-safety-executor.md) (every gate the executor closes now says so) · Documented in [architecture.md](../architecture.md#trace)
+**Status:** accepted · **Date:** 2026-09-07 · Extends [ADR-0003](0003-three-loops.md) (the three loops are what the trace shows) and [ADR-0012](0012-safety-executor.md) (every gate the executor closes now says so) · Amends [ADR-0010](0010-providers.md) (the Anthropic request now carries a `thinking` parameter, so its reasoning has text to show) · Documented in [architecture.md](../architecture.md#trace)
 
 ## Context
 

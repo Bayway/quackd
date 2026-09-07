@@ -4,13 +4,13 @@ quackd never silently invents an upstream API. Every method name, socket path, t
 message type, enum or convention it relies on lives in one file per upstream, tagged
 **VERIFIED** (read from upstream source on the date given, link given) or **UNVERIFIED**
 (designed upstream but not shipped, or an assumption of ours, with what quackd does about
-it). A test proves UNVERIFIED names are only reachable from the experimental backends.
+it). A test proves UNVERIFIED names stay inside the backend that needs them.
 `quackd doctor` prints every UNVERIFIED list on your machine.
 
 | Adapter | `--robot` | Status | Upstream file | Page |
 |---|---|---|---|---|
 | Microduck | `microduck:sim2d` | ✅ default | | this page |
-| | `microduck:mujoco` | ✅ physics simulator (MuJoCo, `quackd[mujoco]`): `find-and-kick` 10 of 10 seeds on the stand-in body | | |
+| | `microduck:mujoco` | ✅ physics simulator (MuJoCo, `quackd[mujoco]`): `find-and-kick` 10 of 10 seeds, on one machine rather than in CI | [`quackd/sim3d/upstream_api.py`](../quackd/sim3d/upstream_api.py) | |
 | | `microduck:mock` | ✅ | | |
 | | `microduck:jsonrpc` | 🧪 experimental: every method VERIFIED, never run on a duck | [`quackd/transport/upstream_api.py`](../quackd/transport/upstream_api.py) | |
 | | `microduck:websocket` | ⏳ stub: raises with a link until upstream ships it | | |
@@ -137,10 +137,18 @@ is the order to try it in, and there is an issue template waiting for the result
 
 `microduck:mujoco` runs the robot Pollen trains, on the policy Pollen trained. Two upstreams,
 both pinned, both fetched at run time into `~/.quackd/cache` and checked against a recorded
-sha256, and neither shipped: the 3D model files are CC BY-SA-NC
+sha256, and neither shipped: the 3D model files are CC BY-NC-SA
 ([licenses.md](licenses.md)). Every name quackd relies on lives in
 [`quackd/sim3d/upstream_api.py`](../quackd/sim3d/upstream_api.py), and
 [ADR-0030](adr/0030-mujoco-physics-backend.md) is the reasoning.
+
+**What that ✅ rests on.** The seeded `find-and-kick` sweep runs on the stand-in body, which is
+where ten of ten comes from. The real duck's own tests, that it walks, turns, stays upright,
+refuses to sit and stands itself up, run only where somebody has already filled the cache,
+because a test must not reach the network, and the rendering tests need an OpenGL context. None
+of it runs in CI: `quackd[mujoco]` is not in the `dev` extra CI installs, so `tests/test_sim3d.py`
+and `tests/test_acceptance_mujoco.py` skip on every runner. This row is one machine's word, the
+same standing as the gait numbers below.
 
 Read: 2026-09-07, pinned at
 [`2b25a48`](https://github.com/pollen-robotics/microduck_rl/tree/2b25a48b08f1f17bc38c90bb03144c81fbd9ed07)
@@ -153,8 +161,8 @@ Read: 2026-09-07, pinned at
 | `alpha_walking.onnx`, `alpha_stand.onnx` | **VERIFIED** | `obs[1,61] → actions[1,14]`, the normaliser baked in, Apache-2.0 on the Hub |
 | observation layout, 13-value command, `ctrl = default_pose + action`, 50 Hz | **VERIFIED** | read from `scripts/infer_policy.py`; the same layout appears in the daemon and in Pollen's own browser simulator |
 | projected gravity is the world's `-z` in the trunk frame | **VERIFIED** | get its sign wrong and the duck braces and stands still for every command, silently |
-| the gait floor: no step below ~0.22 m/s or ~1.0 rad/s, and about half of what is asked | **UNVERIFIED** | measured here on one machine with the XML's own actuators. Upstream trains and deploys with a different actuator model, so a real duck may track commands directly |
-| `kick`, `grab`, `sit`, fall recovery | **UNVERIFIED** | upstream's episodic policies did nothing from a standing pose when tried and the sit-stand one toppled the model, so these four are quackd's stand-ins and say so in `extras.assumptions` |
+| the gait floor: `no gait below vx 0.22 m/s or wz 1.0 rad/s; above it about 0.42x the commanded speed` | **UNVERIFIED** | measured here on one machine with the XML's own actuators. Upstream trains and deploys with a different actuator model, so a real duck may track commands directly |
+| the four stand-ins, in place of `ball_kick_left.onnx, ball_kick_right.onnx, alpha_ground_pick.onnx, alpha_sitstand.onnx` | **UNVERIFIED** | upstream's episodic policies did nothing from a standing pose when tried and the sit-stand one toppled the model, so these four are quackd's stand-ins and say so in `extras.assumptions` |
 
 The head camera is the one place quackd deliberately does not do what the file says: upstream's
 `<camera>` quaternion is not MuJoCo's viewing convention, so rendering through it looks

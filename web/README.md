@@ -3,8 +3,8 @@
 A static page that puts a Microduck in front of you with no install: type a sentence, and a
 model you bring the key for turns it into the robot's own skills while quackd decides what
 it is allowed to do. It is the same idea as `quackd run --goal "..." --robot microduck:mujoco`,
-with the same physics and the same walking policy, in about 900 lines of JavaScript instead
-of Python.
+with the same physics and the same walking policy, in six modules of plain JavaScript with no
+build step instead of Python.
 
 Live at **https://rokbenko.github.io/quackd/** once Pages is enabled on the repository
 (Settings → Pages → Source: GitHub Actions; `.github/workflows/pages.yml` does the rest).
@@ -23,7 +23,7 @@ python -m http.server 8000 --directory web
 
 Nothing in this directory is a robot. Everything heavy is fetched by the visitor's browser
 from whoever owns it, which is also how the licences stay clean — the Microduck's 3D model
-files are CC BY-SA-NC and quackd redistributes none of them.
+files are CC BY-NC-SA and quackd redistributes none of them.
 
 | What | From | Size |
 |---|---|---|
@@ -67,8 +67,11 @@ model, because before quackd there was nowhere to put one.
 `web/src/microduck.js` and `web/src/pilot.js` are exercised under Node against the real
 model and the real policy: the duck walks, the gait floor maps a twist the way the Python
 backend does, a scripted pilot walks a square and closes it to 10 cm, and an unallowed verb
-is refused while the run continues. The rendering, the DOM and the recording have only been
-read, not run — they need a browser, and the first person to open the page is the test.
+is refused while the run continues. That harness is a scratch script and is not in this
+repository, so those four results are one measurement on one machine rather than something you
+or CI can re-run, and nothing in CI reads `web/` at all. The rendering, the DOM and the
+recording have only been read, not run: they need a browser, and the first person to open the
+page is the test.
 
 ## Layout
 

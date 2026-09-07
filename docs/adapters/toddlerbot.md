@@ -87,6 +87,17 @@ file, so none of it was ever machine-verified by anyone.
 - **Report a position.** The observation carries motor positions and an orientation. There is
   no odometry, so `go_to` closes the loop on the camera alone.
 
+## The verbs this robot brings
+
+The core verbs come from the registry. These four are the robot's own.
+
+| Verb | What it does here |
+|---|---|
+| `stand` | slews an upright robot to the safe pose at upstream's own 0.3 rad/s, waist first, and holds it. Not a way up from the floor, and it refuses once the robot has fallen |
+| `perform(motion)` | replays one keyframe motion open loop: hold, kneel, cuddle, push_up, crawl, and only the ones the daemon actually loaded |
+| `look` | the two joint neck. Which motor is yaw is inferred from the motor names (`NECK_AXES` below) |
+| `move`, `go_to`, `approach_and` | present only when the daemon reports a walk checkpoint staged, which a fresh install has not got |
+
 ## The motions, and which ones quackd offers
 
 Nine motions ship as keyframes, and they are the only motion that works with no downloads.

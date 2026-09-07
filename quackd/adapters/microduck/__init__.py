@@ -1,4 +1,4 @@
-"""The Microduck adapter: the four 0.3 transports, wrapped, plus the manifest.
+"""The Microduck adapter: every Microduck transport, wrapped, plus the manifest.
 
 `quackd/transport/*` is untouched and becomes the Microduck backend layer. This adapter
 delegates every call to one of those transports and adds what 0.4 needs: a manifest, the
@@ -94,7 +94,7 @@ def microduck_manifest(
 
 
 class MicroduckAdapter:
-    """A `RobotAdapter` over one of the four Microduck transports."""
+    """A `RobotAdapter` over any of the Microduck transports."""
 
     name = "microduck"
 

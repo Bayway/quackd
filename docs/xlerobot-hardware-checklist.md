@@ -37,6 +37,13 @@ e-stop, and nothing reports a battery, so no run will ever abort on a flat one. 
 
 ## Talking to it, still on blocks
 
+There is no command that runs one verb. Either drive the daemon from an MCP client
+(`quackd serve-mcp --robot xlerobot:zmq --address tcp://<host>:5555`, then `robot_run_verb`, which is
+what these steps assume) or give a model a goal narrow enough to reach one verb
+(`quackd run --goal "..." --robot xlerobot:zmq --address tcp://<host>:5555 --provider anthropic
+--max-steps 3`). `--provider fake` will not do: it answers a free-form goal with a fixed
+script that ignores it.
+
 7. **Check the signs before you trust anything.** `move` with `wz` only, on blocks, and watch
    which way the wheels turn. Upstream's wire takes **degrees per second** and quackd's `wz`
    is radians per second, so quackd converts: if that conversion were ever wrong the error

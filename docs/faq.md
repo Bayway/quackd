@@ -1,9 +1,45 @@
 # FAQ
 
-**Why is the simulator a cartoon?** Because the demo tests the *agent loop* — search,
-approach, act, verify — not contact dynamics. Upstream's real simulator needs a GPU and
-CC BY-NC-SA meshes we will not vendor. `sim2d` runs anywhere in seconds and the same
-detector works on its duck-cam and on a real camera. ([ADR-0007](adr/0007-sim2d-cartoon.md))
+**Which simulator should I use?** Both ship, and the cartoon is still the default. `sim2d`
+starts in a second, needs no network, runs anywhere, and is what the other seven bodies and
+every CI sweep use. It tests the *agent loop* — search, approach, act, verify — and it will
+never tell you whether a gait works, because it has no joints
+([ADR-0007](adr/0007-sim2d-cartoon.md)). `--robot microduck:mujoco` is upstream's own Microduck
+model in MuJoCo, walking on `alpha_walking.onnx`, the policy Pollen trained, at 50 Hz on the
+CPU. The ball rolls, the duck undershoots what you asked for, and a pilot that works there has
+met a robot that does not do what it is told. Same arena, same seeded layout, same verbs, so a
+`.duck` written for one runs on the other ([ADR-0030](adr/0030-mujoco-physics-backend.md)).
+Neither one installed? [`web/`](../web/README.md) is the same physics and the same policy in a
+page.
+
+**How do I run the physics simulator, and what does it download?**
+`uvx --from "quackd[mujoco]" quackd run find-and-kick --robot microduck:mujoco --provider fake`.
+The first run fetches upstream's model, `robot_walk.xml` and 38 STL meshes, from `microduck_rl`
+at a pinned commit, and `alpha_walking.onnx`, `alpha_stand.onnx` and their manifest from the
+Hugging Face Hub at a pinned revision, into `~/.quackd/cache`. About 10 MB over the wire and 23
+on disk. Every file is checked against a sha256 recorded when it was read, a run that gets a
+different file fails rather than continues, and the licence notice is written beside them,
+because the model files are CC BY-NC-SA and quackd ships none of them ([licenses.md](licenses.md)).
+`QUACKD_MICRODUCK_ASSETS` points at a `microduck_rl` checkout of your own instead,
+`QUACKD_CACHE_DIR` moves the cache, and `QUACKD_MUJOCO_BODY=puppet` runs a kinematic stand-in
+that downloads nothing and is what the tests use.
+
+**Why does the duck in the physics simulator not go the speed I asked for?** Because the walking
+policy has a floor and quackd will not hide it. Under the model's own actuators the gait does
+not start below about 0.22 m/s or 1.0 rad/s, and above that it achieves roughly 0.42 of what it
+is asked. Both were measured here on one machine and are tagged UNVERIFIED in
+`quackd/sim3d/upstream_api.py`. `move` defaults to 0.15 m/s, so a non-zero twist below the floor
+is scaled up bodily, keeping the ratio between its axes so an arc stays an arc, and a twist
+below a third of the floor is dropped to zero rather than turned into a lurch nobody asked for.
+What was asked and what was sent are both in the state (`twist_commanded`, `twist_sent`,
+`gait_floor`) and in the prompt. Upstream trains and deploys with a different actuator model, so
+a real Microduck may track commands directly.
+
+**Do I need a GPU for the physics simulator?** No. MuJoCo steps on the CPU and the policy runs
+under onnxruntime's CPU provider. Upstream needs CUDA to *train* that policy, never to run it.
+What the head camera needs is an OpenGL context to render into: a laptop has one, a bare server
+may not, and the frames are what fails first there, which is why the acceptance sweep skips
+itself when it cannot make a renderer. Rendering is this backend's real cost, not physics.
 
 **Does `uvx quackd run … --provider anthropic` work with no extras?** The default install
 is light on purpose (no vendor SDKs). Use `uvx --from "quackd[anthropic]" quackd run …`, or
@@ -84,7 +120,7 @@ scripted pilot has no `remember` in its script, so `--provider fake` accumulates
 outcomes and never a note. [memory.md](memory.md), [ADR-0025](adr/0025-memory-between-runs.md)
 
 **Who decides the run succeeded?** The LLM, via `declare_success(reason)` — that is the
-honest state of the art. In `sim2d` the run summary also records ground truth
+honest state of the art. In either simulator the run summary also records ground truth
 (`ball_displacement_m`) and the tests check the claim against it.
 
 **Why can't the duck say words?** Upstream has seven duck sounds and no TTS. `quack(text)`
@@ -117,13 +153,11 @@ though: cloud providers also read the camera frame as an image each turn, and wh
 the model decides is always one of a fixed set of verbs (`walk_to`, `kick`, `quack`, …),
 never a freeform command sent to the motors.
 
-**Do I need to be near the robot to control it?** No — proximity isn't the constraint,
-network reachability is. `robotd`'s socket only ever accepts connections from processes
-on the robot's own computer, so reaching it from anywhere else always goes through a
-network hop first (the same Wi-Fi, a VPN, or an SSH forward, as in the `Windows?` answer
-above), and that works the same from across the room or across the world. Latency is what
-actually matters: the deadman expects `robot.move` roughly every 100 ms, so a slow or
-flaky link can stop the robot outright, regardless of physical distance.
+**Do I need to be near the robot to control it?** No, proximity is not the constraint.
+`robotd`'s socket only accepts connections from the robot's own computer, so control always
+goes through a network hop (see `Windows?` above), and that hop works the same across the room
+or across the world. What matters is latency: the deadman expects `robot.move` roughly every
+100 ms, so a slow or flaky link stops the robot outright, however close you are standing.
 
 **Is quackd production-ready?** No — it's a research prototype built around one trusted
 local operator, not a hardened multi-user product. There's almost no authentication anywhere;
