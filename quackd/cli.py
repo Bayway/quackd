@@ -779,6 +779,14 @@ _TRACE = typer.Option(
     "model thought and answered, every executor decision, every intent sent to the robot, "
     "every result, tokens and timings. On by default; QUACKD_TRACE=0 turns it off too.",
 )
+_TRACE_MCP = typer.Option(
+    None,
+    "--trace/--no-trace",
+    help="Carry a trace of what happened on every tool result, and the uncapped version on "
+    "stderr: the verb, every gate that fired, every intent sent to the robot, every result "
+    "and the budget. Over MCP the pilot is the client, so its own reasoning is not quackd's "
+    "to show. On by default; QUACKD_TRACE=0 turns it off too.",
+)
 _TRACE_PROMPT = typer.Option(
     None,
     "--trace-prompt/--no-trace-prompt",
@@ -1104,7 +1112,7 @@ def serve_mcp(
     ),
     memory: bool = _MEMORY,
     memory_dir: str | None = _MEMORY_DIR,
-    trace: bool | None = _TRACE,
+    trace: bool | None = _TRACE_MCP,
 ) -> None:
     """Expose the robot as MCP tools over stdio (Claude Code / Claude Desktop)."""
     from quackd.adapters.base import AdapterError

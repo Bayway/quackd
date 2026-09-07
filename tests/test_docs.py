@@ -143,37 +143,92 @@ def test_readme_verbs_match_registry() -> None:
         assert f"`{name}`" in README, f"README does not mention verb {name}"
 
 
-def test_the_docs_describe_every_trace_event_the_code_emits() -> None:
-    """A kind nobody documented is a kind nobody knows to look for. architecture.md is the
-    one place that enumerates the transcript, so it is the one place this can go stale."""
+def _emitted_kinds(*modules: str) -> set[str]:
+    """Every literal event kind those modules emit, read out of the source. A kind nobody
+    documented is a kind nobody knows to look for, and only the code knows them all."""
     import ast
 
-    # the three modules that write a *run* transcript. The flock keeps its own `flock.jsonl`
-    # (docs/flock.md) and the MCP server's two envelope kinds are documented in docs/mcp.md.
-    emitted: set[str] = set()
-    for name in ("agent/loop.py", "safety.py", "trace.py"):
-        path = REPO / "quackd" / name
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    kinds: set[str] = set()
+    for name in modules:
+        tree = ast.parse((REPO / "quackd" / name).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not node.args:
                 continue
             fn = node.func
             called = fn.attr if isinstance(fn, ast.Attribute) else None
-            if called in ("emit", "write", "_emit") and isinstance(node.args[0], ast.Constant):
+            if called in ("emit", "write", "_emit", "_event") and isinstance(
+                node.args[0], ast.Constant
+            ):
                 value = node.args[0].value
                 if isinstance(value, str) and value.islower():
-                    emitted.add(value)
+                    kinds.add(value)
+    return kinds
+
+
+def test_the_docs_describe_every_trace_event_the_code_emits() -> None:
+    """architecture.md is the one place that enumerates the transcript, so it is the one
+    place this can go stale."""
+    # the three modules that write a *run* transcript. The flock keeps its own `flock.jsonl`
+    # (docs/flock.md) and the MCP server's two envelope kinds are documented in docs/mcp.md.
+    emitted = _emitted_kinds("agent/loop.py", "safety.py", "trace.py")
     doc = (REPO / "docs" / "architecture.md").read_text(encoding="utf-8")
     missing = [kind for kind in sorted(emitted) if f"`{kind}`" not in doc]
     assert not missing, f"docs/architecture.md does not describe: {missing}"
 
 
+def test_the_mcp_doc_describes_the_envelope_the_server_puts_round_a_call() -> None:
+    """A model reading a tool result sees the server's own kinds first and last. They belong
+    in the page the model's operator reads, not only in the one about the run loop."""
+    emitted = _emitted_kinds("mcp_server.py")
+    doc = (REPO / "docs" / "mcp.md").read_text(encoding="utf-8")
+    architecture = (REPO / "docs" / "architecture.md").read_text(encoding="utf-8")
+    missing = [k for k in sorted(emitted) if f"`{k}`" not in doc and f"`{k}`" not in architecture]
+    assert not missing, f"neither docs/mcp.md nor architecture.md describes: {missing}"
+
+
+def test_the_docs_name_every_gate_the_code_can_fire() -> None:
+    """A gate is the difference between a refusal you can act on and an `ok: false` you
+    cannot, so every one of them has to be findable by name in the docs."""
+    import ast
+
+    gates: set[str] = set()
+    for name in ("safety.py", "mcp_server.py"):
+        tree = ast.parse((REPO / "quackd" / name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if (fn.attr if isinstance(fn, ast.Attribute) else None) not in ("emit", "_emit"):
+                continue
+            if not node.args or getattr(node.args[0], "value", None) != "gate":
+                continue
+            for kw in node.keywords:
+                if kw.arg == "gate" and isinstance(kw.value, ast.Constant):
+                    gates.add(str(kw.value.value))
+    assert gates, "no gate names found: the reader stopped seeing what the code emits"
+    docs = "".join(
+        (REPO / "docs" / name).read_text(encoding="utf-8") for name in ("architecture.md", "mcp.md")
+    )
+    missing = sorted(g for g in gates if f"`{g}`" not in docs)
+    assert not missing, f"architecture.md and mcp.md name no gate called: {missing}"
+
+
 def test_the_trace_is_documented_where_it_is_configured() -> None:
     for path, needles in (
-        ("docs/architecture.md", ("## Trace", "--no-trace", "QUACKD_TRACE")),
+        (
+            "docs/architecture.md",
+            (
+                "## Trace",
+                "--no-trace",
+                "QUACKD_TRACE",
+                "QUACKD_TRACE_PROMPT",
+                "QUACKD_TRACE_THINKING",
+            ),
+        ),
         ("docs/mcp.md", ("trace", "--no-trace", "QUACKD_TRACE")),
         ("docs/safety.md", ("--dry-run", "dry_run")),
-        (".env.example", ("QUACKD_TRACE", "QUACKD_TRACE_THINKING")),
+        (".env.example", ("QUACKD_TRACE", "QUACKD_TRACE_THINKING", "QUACKD_TRACE_PROMPT")),
+        ("docs/flock.md", ("trace", "--no-trace")),
     ):
         text = (REPO / path).read_text(encoding="utf-8")
         for needle in needles:

@@ -93,9 +93,31 @@ nothing in your `allow` list. Skip it for a smoke test, the way `hello-world` do
    one.
 6. Mention it in `docs/architecture.md`, the README verb table (a test checks every
    registry name is backticked there) and `CHANGELOG.md` (Unreleased).
+7. Nothing extra is needed for the trace: every intent your verb sends is already an event,
+   and `ctx.log(...)` is already a `note`. If you emit a new event *kind*, add a row for it
+   to the table in `docs/architecture.md`, because a test reads the kinds out of the code
+   and fails when the docs do not name one.
 
 Renaming a verb is not a rename: add the new name and keep the old one in
 `quackd/verbs/aliases.py`, the only file that may spell an alias.
+
+## Add a provider
+
+A provider is one file under `quackd/agent/providers/` and one line in `factory.py`. Four
+things the tracing depends on, none of them optional:
+
+1. Fill `ProviderTurn.thinking` with the model's own reasoning when the API returns it, and
+   `Usage.reasoning_tokens` with what it charged for. The trace shows the first and the
+   transcript keeps all of it; a provider that drops them makes the run unarguable.
+2. Degrade with exactly one retry. If the API refuses a request because it does not support
+   thinking, turn thinking off, remember that, and retry once. Match the specific complaint,
+   not the word: a 400 about a *replayed* thinking block is a different bug and retrying it
+   loops.
+3. Wrap every SDK exception in `ProviderError`. The loop treats one as a turn it can report
+   and the run ends cleanly; anything else is a traceback in somebody's terminal.
+4. Never let response parsing raise outside that wrapper. An empty `choices`, a usage field
+   that is a string, a tool call with no name: all of it is `ProviderError`, and the test
+   for it belongs in `tests/test_providers.py`.
 
 ## Add an adapter
 
