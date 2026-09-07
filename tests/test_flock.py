@@ -454,3 +454,36 @@ def test_a_flock_view_that_raises_never_ends_the_run_and_is_counted() -> None:
     assert coord.trace.dropped == 1
     # and the recorder behind it still got its event: one blind view blinds nobody else
     assert seen == [("auction", {"first_bid": "duck-0", "dist": 0.5})]
+
+
+def test_the_coordinators_transcript_only_kinds_reach_the_view_with_the_records_keys() -> None:
+    """Six decisions used to reach `flock.jsonl` and nothing else, so a watcher saw a duck
+    stop bidding and never learned it had been declared dead. The view carries the record's
+    own keys, because two spellings of one fact is how a log starts lying."""
+    from quackd.trace import Tracer
+
+    seen: list[Any] = []
+    coord = _mini_coordinator()
+    coord.trace = Tracer(observers=[seen.append])
+
+    coord._event("member_dead", duck="duck-2", last_hb=3.0)
+    coord._event("member_excluded", duck="duck-1", why="repeated misses")
+    coord._event("auction_void", auctions=2)
+    coord._event("auction_waiting", missing_roles=["kicker"])
+    coord._event("wedges_rotated", round=1, by_deg=45)
+    coord._event("bid_rejected", src="duck-0", role="spotter", missing=["gaze"])
+
+    assert [e.kind for e in seen] == [
+        "member_dead",
+        "member_excluded",
+        "auction_void",
+        "auction_waiting",
+        "wedges_rotated",
+        "bid_rejected",
+    ]
+    assert seen[0].data == {"duck": "duck-2", "last_hb": 3.0}
+    assert seen[5].data == {"src": "duck-0", "role": "spotter", "missing": ["gaze"]}
+    # and every one of them has words in the renderer, or the view would show nothing
+    from quackd.trace import flock_caption
+
+    assert all(flock_caption(e.kind, e.data) is not None for e in seen)

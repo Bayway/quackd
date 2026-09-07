@@ -582,3 +582,18 @@ async def test_the_log_callback_still_gets_the_lines_that_only_it_had(
     assert any("does not have fly" in line for line in lines)
     notes = [e.data["text"] for e in seen if e.kind == "note"]
     assert any("does not have fly" in note for note in notes)
+
+
+def test_intents_are_buffered_until_the_next_event_flushes_them(tmp_path: Path) -> None:
+    """The flush was a syscall on the event loop between two deadman resends of a steering
+    verb. Intents ride the buffer; anything else, `verb_end` included, puts them on disk."""
+    transcript = Transcript(tmp_path)
+    path = transcript.path
+    try:
+        for _ in range(20):
+            transcript.write("intent", intent="move", accepted=True)
+        assert path.read_text(encoding="utf-8") == "", "an intent must not reach the disk alone"
+        transcript.write("verb_end", name="walk", outcome="ok")
+        assert len(Transcript.read(path)) == 21, "the verb ending must flush every intent"
+    finally:
+        transcript.close()

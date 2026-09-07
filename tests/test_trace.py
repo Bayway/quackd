@@ -704,3 +704,43 @@ def test_a_verb_ended_by_another_layer_is_yellow_and_keeps_its_own_word() -> Non
     assert style == "yellow", "a routine handover must not read as the red that means a bug"
     ((_, style),) = render_lines(TraceEvent("verb_end", 0.0, {**data, "outcome": "error"}))
     assert style == "red"
+
+
+def test_a_human_denial_renders_red() -> None:
+    """A denial is a person saying no, and the line has to look like the refusal it is."""
+    denied = TraceEvent("gate", 0.0, {"gate": "confirm", "outcome": "denied", "verb": "kick"})
+    ((text, style),) = render_lines(denied)
+    assert style == "red" and "denied" in text
+    allowed = TraceEvent("gate", 0.0, {"gate": "confirm", "outcome": "allowed", "verb": "kick"})
+    ((_, style),) = render_lines(allowed)
+    assert style != "red", "a person saying yes is not a refusal"
+
+
+def test_the_reprompt_line_quotes_what_the_model_was_told() -> None:
+    """A model that answered with no tool call gets told so and asked again. Reading the trace
+    afterwards, what it was told is the whole reason the next turn looks the way it does."""
+    event = TraceEvent(
+        "enforce",
+        0.0,
+        {
+            "issue": "no tool call",
+            "action": "re-prompting once",
+            "text": "You must call exactly one tool.",
+        },
+    )
+    ((text, _),) = render_lines(event)
+    assert "no tool call: re-prompting once" in text
+    assert "(You must call exactly one tool.)" in text
+
+
+def test_the_done_line_says_sim_seconds_on_a_simulator() -> None:
+    """An MCP client reading `done ok in 0.2 s` after a twenty second approach would think
+    the robot teleported. On a simulator the two clocks are different numbers, and both."""
+    sim = TraceEvent(
+        "tool_result", 0.0, {"ok": True, "elapsed_s": 0.2, "transport_s": 20.0, "clock": "sim"}
+    )
+    ((text, _),) = render_lines(sim)
+    assert "20.0 s sim, 0.2 s wall" in text
+    hardware = TraceEvent("tool_result", 0.0, {"ok": True, "elapsed_s": 0.2, "transport_s": 0.2})
+    ((text, _),) = render_lines(hardware)
+    assert "in 0.2 s" in text and "sim" not in text

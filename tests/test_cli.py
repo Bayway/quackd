@@ -564,3 +564,19 @@ def test_a_camera_robot_that_is_not_the_simulator_still_gets_a_detector(tmp_path
     )
     assert result.exit_code == 0, result.output
     assert "SUCCESS" in result.output
+
+
+def test_a_console_that_raises_is_reported_once_at_the_end(tmp_path: Path, monkeypatch) -> None:
+    """An observer that raises never ends a run, which is right. It also meant a console that
+    raised on every event produced a silent trace and no sign at all that it had."""
+    import quackd.trace as trace_module
+
+    class Broken(trace_module.ConsoleTrace):  # type: ignore[misc]
+        def __call__(self, event: object) -> None:
+            raise RuntimeError("the terminal went away")
+
+    monkeypatch.setattr(trace_module, "ConsoleTrace", Broken)
+    out = _trace_run(tmp_path, monkeypatch)
+    assert "could not be shown" in out
+    assert "transcript.jsonl has them" in out
+    assert "SUCCESS" in out, "a broken console must not change the outcome"
