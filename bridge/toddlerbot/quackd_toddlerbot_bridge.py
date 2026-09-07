@@ -75,6 +75,7 @@ from typing import Any
 
 try:  # numpy is upstream's own dependency and is always present beside it
     import numpy as np
+    from numpy.typing import NDArray
 except ImportError:  # pragma: no cover - the daemon cannot run without it
     np = None  # type: ignore[assignment]
 
@@ -946,7 +947,9 @@ class FakeSim:
         # Not exactly zeros. All-zeros is the sentinel a dropped packet returns on this bus,
         # so the detector refuses it, and a fake that starts there is a fake the daemon can
         # never seed itself from. A real robot is never at exactly zero either.
-        self.pos = np.full(robot.nu, 0.01, dtype=np.float32)
+        # Annotated shape-free on purpose: numpy 2.2's stubs infer a fixed 1-D shape from
+        # `np.full` and then refuse the `asarray(...).copy()` that set_motor_target stores.
+        self.pos: NDArray[np.float32] = np.full(robot.nu, 0.01, dtype=np.float32)
         self.writes = 0
         self.closed = False
         self.drop_next = False
