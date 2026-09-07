@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -314,6 +315,91 @@ async def test_a_provider_that_fails_says_so_instead_of_exiting_unexpectedly(
     assert "rate limited" in failed["error"] and failed["latency_s"] >= 0
     end = next(e for e in events if e["kind"] == "run_end")
     assert end["outcome"] == "error" and "rate limited" in end["reason"]
+
+
+async def test_a_cancelled_run_ends_as_an_abort_that_still_stops_and_records(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """`KeyboardInterrupt` and `CancelledError` are not `Exception`, so neither reached the
+    error branch and `run_end` kept its default, `loop exited unexpectedly` — the very string
+    the trace work claimed to have removed. The CLI's second Ctrl-C is this path."""
+
+    class Stalling:
+        name, model, supports_vision = "stalling", "test", False
+
+        async def step(self, system: str, history: Any, tools: Any) -> ProviderTurn:
+            await asyncio.sleep(10)
+            raise AssertionError("never reached")
+
+    run_dir = tmp_path / "cancelled"
+    run_dir.mkdir()
+    transport = MockTransport()
+    task = asyncio.create_task(
+        run_duck(
+            RunConfig(
+                duck=hello_duck,
+                provider=Stalling(),
+                transport=transport,
+                run_dir=run_dir,
+                runs_dir=tmp_path,
+            )
+        )
+    )
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    events = Transcript.read(run_dir / "transcript.jsonl")
+    end = next(e for e in events if e["kind"] == "run_end")
+    assert end["outcome"] == "aborted" and "CancelledError" in end["reason"]
+    assert any(e["kind"] == "note" and "interrupted" in e["text"] for e in events)
+    assert transport.intents[-1].kind == "stop" and not transport.connected
+    assert (run_dir / "summary.json").exists()
+
+
+async def test_a_record_that_fails_at_run_end_still_gets_its_summary_and_is_closed(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """A disk that fills at the last line used to skip summary.json, leak the handle and
+    replace the run's own outcome with an OSError."""
+    from quackd.agent.loop import AgentLoop
+
+    run_dir = tmp_path / "full"
+    run_dir.mkdir()
+    loop = AgentLoop(
+        RunConfig(
+            duck=hello_duck,
+            provider=FakeProvider.for_duck("hello-world"),
+            transport=MockTransport(),
+            run_dir=run_dir,
+            runs_dir=tmp_path,
+        )
+    )
+    good = loop.transcript.sink
+
+    def record(event: Any) -> None:
+        if event.kind == "run_end":
+            raise OSError("disk full")
+        good(event)
+
+    loop.tracer.record = record
+    with pytest.raises(OSError, match="disk full"):
+        await loop.run()
+    assert (run_dir / "summary.json").exists()
+    assert loop.transcript._fh.closed
+
+
+def test_writing_to_a_closed_transcript_is_a_no_op(tmp_path: Path) -> None:
+    """A verb task cancelled during teardown narrates its last intent after the record has
+    closed; that must not raise inside a task nobody awaits."""
+    from quackd.trace import TraceEvent
+
+    t = Transcript(tmp_path)
+    t.close()
+    t.write("intent", intent="stop")
+    t.sink(TraceEvent("intent", 0.0, {"intent": "stop"}))
+    assert t.events == 0
 
 
 async def test_a_console_sees_the_run_as_it_happens(hello_duck: DuckFile, tmp_path: Path) -> None:

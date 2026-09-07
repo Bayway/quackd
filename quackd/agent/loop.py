@@ -498,6 +498,14 @@ class AgentLoop:
             outcome, reason = "error", f"{type(e).__name__}: {e}"
             self._emit("note", text=f"run ended with an error: {reason}")
             raise
+        except BaseException as e:
+            # A `KeyboardInterrupt` and a `CancelledError` are not `Exception`, so the branch
+            # above missed both and `run_end` recorded its default, `loop exited
+            # unexpectedly`. The CLI's second Ctrl-C is *designed* to raise a plain
+            # KeyboardInterrupt, which makes this the normal way a person ends a run.
+            outcome, reason = "aborted", f"interrupted: {type(e).__name__}"
+            self._emit("note", text=f"run interrupted: {type(e).__name__}")
+            raise
         finally:
             await self.heartbeat.stop()
             with contextlib.suppress(Exception):
@@ -523,9 +531,16 @@ class AgentLoop:
                 "dry_run": cfg.dry_run,
                 "final_state": final_state,
             }
-            self._emit("run_end", **summary)
-            self.transcript.write_summary(summary)
-            self.transcript.close()
+            # the only unguarded statements in this teardown used to be these three, so a
+            # disk that filled at `run_end` skipped summary.json, leaked the file handle,
+            # skipped the episode, and replaced the run's real exception with an OSError
+            try:
+                self._emit("run_end", **summary)
+            finally:
+                try:
+                    self.transcript.write_summary(summary)
+                finally:
+                    self.transcript.close()
             if cfg.memory is not None and not cfg.dry_run:
                 with contextlib.suppress(Exception):  # memory must never turn a run into a crash
                     cfg.memory.record_episode(

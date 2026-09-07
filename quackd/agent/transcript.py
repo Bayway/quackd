@@ -49,6 +49,11 @@ class Transcript:
         self.frame_count = 0
 
     def write(self, kind: str, **payload: Any) -> None:
+        if self._fh.closed:
+            # A verb task cancelled during teardown can narrate its last intent after the
+            # record has closed. Dropping that line beats a `ValueError: I/O operation on
+            # closed file` raised inside a task nobody is awaiting.
+            return
         record = {"t": round(time.monotonic() - self._t0, 3), "kind": kind, **payload}
         self._fh.write(json.dumps(record, default=str, ensure_ascii=False) + "\n")
         self._fh.flush()
