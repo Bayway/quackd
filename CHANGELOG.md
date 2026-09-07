@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **CI ends a hung test run in minutes, with every thread's stack.** A 20 minute job timeout,
+  pytest's own `faulthandler_timeout` at 300 s, and an exit watchdog in `tests/conftest.py`
+  that dumps every thread and forces the exit if the interpreter has not gone two minutes after
+  pytest is done, flushing first so the failure report survives. The first hang it caught had
+  run for six hours three times and named nothing; with it, the same hang failed in five
+  minutes with the frame in the log.
+
+### Fixed
+
+- **A failed ZeroMQ test could hold the interpreter's exit forever.** pyzmq's `Context.__del__`
+  closes each surviving socket with its own linger, which defaults to forever, and a test that
+  fails never reaches its `close()`, so one flaky assertion held three macOS CI jobs for six
+  hours with the last line of dots still unflushed. Both ZeroMQ clients and both fakes set
+  `LINGER` to 0 when a socket is created now, not only on the close path, so a context torn
+  down by anything but the happy path never waits on a peer that is gone. The flaky test
+  itself, `test_a_stale_reading_is_a_heartbeat_failure_not_a_reading`, used a 50 ms stale limit
+  a loaded runner cannot keep and could read the fake's last observation as fresh; it uses the
+  host's own window now and drains the socket once after the host stops, so the silence it
+  asserts is silence.
+- **mypy on Python 3.12 rejected the ToddlerBot daemon's fake body.** The lock resolves numpy
+  2.2 there, whose stubs infer a fixed one-dimensional shape from `np.full` and refuse the
+  `asarray(...).copy()` stored into the same attribute, so it is annotated shape-free now. The
+  release gate ran under 3.11 and never saw it, which is why the `v0.7.0` tag's own CI run is
+  red on three jobs while the published files are unaffected.
+
 ## [0.7.0] — 2026-09-07
 
 A sixth, a seventh and an eighth robot, two hardware paths audited against upstream rather
