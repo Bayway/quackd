@@ -308,6 +308,59 @@ def _ok(outcome: str) -> bool:
     return outcome == "ok"
 
 
+_FLOCK_STYLE = {
+    "auction": "cyan",
+    "claim": "bold",
+    "miss": "red",
+    "kick_done": "bold",
+    "verdict": "bold",
+    "separation": "yellow",
+    "auction_void": "yellow",
+    "auction_waiting": "yellow",
+    "member_dead": "red",
+    "member_excluded": "red",
+    "wedges_rotated": "cyan",
+    "bid_rejected": "yellow",
+}
+
+
+def flock_caption(kind: str, d: Mapping[str, Any]) -> tuple[str, str] | None:
+    """A coordinator's decision as (WORD, detail), or None for anything that is not one.
+
+    One vocabulary for two surfaces: the GIF caption is `WORD detail` and the terminal line
+    is the word, lower-cased, in the label column. They were separate strings in the CLI and
+    would have drifted the first time either was touched."""
+    if kind == "auction":
+        return "AUCTION", f"first bid {d.get('first_bid')} {float(d.get('dist') or 0):.2f} m"
+    if kind == "claim":
+        spotter = f", spotter {d['spotter']}" if d.get("spotter") else ""
+        return "CLAIM", f"{d.get('kicker')} ({float(d.get('dist') or 0):.2f} m){spotter}"
+    if kind == "miss":
+        detail = f": {d['detail']}" if d.get("detail") else ""
+        return "MISS", f"{d.get('duck')}{detail}, re-searching"
+    if kind == "kick_done":
+        return "KICKED", f"by {d.get('kicker')}, the spotter judges"
+    if kind == "verdict":
+        moved = f" {float(d['moved_m']):.2f} m" if d.get("moved_m") is not None else ""
+        return "VERDICT", f"{d.get('verdict')}{moved} by {d.get('spotter')}"
+    if kind == "separation":
+        return "HOLD", f"{d.get('duck')} {float(d.get('dist') or 0):.2f} m away, ordered back"
+    if kind == "auction_void":
+        return "AUCTION", f"{d.get('auctions')} void: nobody eligible"
+    if kind == "auction_waiting":
+        return "AUCTION", f"waiting for a bid: {', '.join(d.get('missing_roles') or [])}"
+    if kind == "member_dead":
+        return "DEAD", f"{d.get('duck')}, last heartbeat at {float(d.get('last_hb') or 0):.1f} s"
+    if kind == "member_excluded":
+        return "OUT", f"{d.get('duck')} ({d.get('why')})"
+    if kind == "wedges_rotated":
+        return "SEARCH", f"round {d.get('round')}, wedges rotated {d.get('by_deg')} deg"
+    if kind == "bid_rejected":
+        why = d.get("why") or f"missing {', '.join(d.get('missing') or [])}"
+        return "BID", f"{d.get('src')} for {d.get('role')} rejected: {why}"
+    return None
+
+
 def render_lines(
     event: TraceEvent, *, thinking_chars: int | None = 2000, prompt: bool = True
 ) -> list[Line]:
@@ -450,6 +503,11 @@ def render_lines(
         return [(f"{_label('memory')}{d.get('summary')}", "cyan")]
     if k == "note":
         return [(_label("note") + _indent(str(d.get("text", ""))), "dim")]
+    if (caption := flock_caption(k, d)) is not None:
+        word, detail = caption
+        return [(f"{_label(word.lower())}{detail}", _FLOCK_STYLE.get(k, "cyan"))]
+    if k == "member_end":
+        return [(f"{_label('end')}{d.get('status')} after {d.get('steps')} steps", "bold")]
     if k == "tool_call":
         args = {key: value for key, value in d.items() if key not in ("tool", "robot")}
         return [(f"{_label('tool')}{d.get('tool')} {fmt_params(args)} on {d.get('robot')}", "bold")]
@@ -544,13 +602,22 @@ class LineTrace:
         prompt: bool = True,
         progress_s: float | None = PROGRESS_S,
         max_burst: int = MAX_BURST,
+        prefix: str = "",
     ) -> None:
         self._write = write
         self.thinking_chars = thinking_chars
         self.prompt = prompt
         self.progress_s = progress_s
         self.max_burst = max_burst
+        self.prefix = prefix
+        """Put before every line, continuation lines included: a flock's terminal interleaves
+        its members, and each line has to say whose it is."""
         self._pending: list[TraceEvent] = []
+
+    def _out(self, text: str, style: str) -> None:
+        if self.prefix:
+            text = self.prefix + text.replace("\n", "\n" + self.prefix)
+        self._write(text, style)
 
     def __call__(self, event: TraceEvent) -> None:
         if event.kind == "intent" and event.data.get("accepted", True):
@@ -566,14 +633,14 @@ class LineTrace:
         for text, style in render_lines(
             event, thinking_chars=self.thinking_chars, prompt=self.prompt
         ):
-            self._write(text, style)
+            self._out(text, style)
 
     def flush(self) -> None:
         if not self._pending:
             return
         # write first, clear after: a write that fails (the Tracer swallows and counts it)
         # should leave the burst for the next flush rather than losing it
-        self._write(*intent_line(self._pending))
+        self._out(*intent_line(self._pending))
         self._pending = []
 
 
@@ -588,6 +655,7 @@ class ConsoleTrace(LineTrace):
         prompt: bool = True,
         progress_s: float | None = PROGRESS_S,
         max_burst: int = MAX_BURST,
+        prefix: str = "",
     ) -> None:
         # `None` means unlimited here exactly as it does in `render_lines`: one sentinel, one
         # meaning. The environment is read by the caller, where `QUACKD_TRACE` already is,
@@ -598,6 +666,7 @@ class ConsoleTrace(LineTrace):
             prompt=prompt,
             progress_s=progress_s,
             max_burst=max_burst,
+            prefix=prefix,
         )
         self.console = console
 
@@ -664,6 +733,7 @@ __all__ = [
     "capture_sink",
     "capturing",
     "counting",
+    "flock_caption",
     "fmt_params",
     "intent_line",
     "parse_thinking_limit",

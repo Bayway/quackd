@@ -19,6 +19,7 @@ from quackd.trace import (
     capture_sink,
     capturing,
     counting,
+    flock_caption,
     parse_thinking_limit,
     prompt_shown_default,
     render_call,
@@ -604,3 +605,47 @@ def test_none_means_unlimited_thinking_on_the_console_too(
     console = Console(file=buffer, width=400, force_terminal=False, no_color=True)
     ConsoleTrace(console, thinking_chars=thinking_limit_default())(event)
     assert "+4900 chars in transcript.jsonl" in buffer.getvalue()
+
+
+def test_a_prefixed_view_names_its_robot_on_every_line_including_continuations() -> None:
+    out: list[str] = []
+    view = LineTrace(lambda text, _style: out.append(text), prefix="duck-1  ")
+    view(TraceEvent("note", 0.0, {"text": "first line\nsecond line"}))
+    view(TraceEvent("intent", 0.1, {"kind": "move", "params": {}, "ok": True}))
+    view.flush()
+    assert out
+    printed = "\n".join(out).splitlines()
+    assert printed, "the view printed nothing at all"
+    assert all(line.startswith("duck-1  ") for line in printed), printed
+    assert any("second line" in line for line in printed)
+
+
+def test_the_coordinators_events_render_as_flock_lines_in_the_recorders_words() -> None:
+    cases = [
+        (
+            TraceEvent("auction", 0.0, {"first_bid": "duck-1", "dist": 0.42}),
+            "auction first bid duck-1 0.42 m",
+        ),
+        (
+            TraceEvent("claim", 0.0, {"kicker": "duck-1", "dist": 0.62, "spotter": "reachy-01"}),
+            "claim   duck-1 (0.62 m), spotter reachy-01",
+        ),
+        (TraceEvent("miss", 0.0, {"duck": "duck-0"}), "miss    duck-0, re-searching"),
+        (TraceEvent("kick_done", 0.0, {"kicker": "duck-2"}), "kicked  by duck-2, the spotter"),
+        (
+            TraceEvent("verdict", 0.0, {"verdict": "moved", "moved_m": 0.51, "spotter": "r-1"}),
+            "verdict moved 0.51 m by r-1",
+        ),
+        (TraceEvent("member_dead", 0.0, {"duck": "duck-2", "last_hb": 3.0}), "dead    duck-2"),
+        (
+            TraceEvent("member_end", 0.0, {"status": "stopped", "steps": 7}),
+            "end     stopped after 7",
+        ),
+    ]
+    for event, needle in cases:
+        ((text, _),) = render_lines(event)
+        assert text.startswith(needle), (event.kind, text)
+    # the GIF's caption and the console line are the same words, one upper and one lower
+    word, detail = flock_caption("claim", {"kicker": "duck-1", "dist": 0.62}) or ("", "")
+    assert word == "CLAIM" and detail.startswith("duck-1 (0.62 m)")
+    assert flock_caption("verb_end", {}) is None
