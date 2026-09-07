@@ -209,3 +209,12 @@ Legend: ✅ done · 🔨 in progress · ⬜ todo · ⏸ blocked (with reason)
   upstream actually ships, with video over WebRTC. Across every body, an abort now cancels
   the running verb and `stop` is exempt from the gate that made it necessary. 58 commits,
   121 files, still nothing on a robot
+- ✅ Tagged `v0.7.0` (annotated) and pushed `main`, GitHub Release `v0.7.0 "three more bodies"`
+  created on `main` with the wheel and sdist attached (2026-09-07). The release note was
+  drafted twice with different emphases and one reader checked every claim against the
+  0.7.0 section and the code, sixteen corrections, seventeen links
+- ✅ Published `quackd 0.7.0` to PyPI (2026-09-07), the same two files attached to the
+  release (SHA256 checked identical in both places); `uvx --from quackd==0.7.0 quackd run
+  find-and-kick --provider fake` verified from a clean install, twice, so the second run
+  reads the first one's episode, and the four commands in the release note's bash block
+  each ran to SUCCESS from the published package
