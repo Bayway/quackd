@@ -492,6 +492,63 @@ async def test_the_heartbeats_stop_is_traced_too() -> None:
     assert any(e.kind == "intent" and e.data["intent"] == "stop" for e in seen)
 
 
+async def test_cancelling_the_call_cancels_the_verb_and_sends_a_stop(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """An MCP client that drops a call, or the second Ctrl-C this CLI documents, cancels the
+    caller. `asyncio.wait` cancels nothing when it is itself cancelled, so the verb used to
+    keep running: the trace said the verb had ended and then went on recording the intents it
+    kept sending, with no stop anywhere."""
+
+    async def long_walk(ctx: VerbContext, _p: NoParams) -> VerbResult:
+        for _ in range(500):
+            await ctx.transport.send_intent(Intent.move(0.1, 0.0, 0.0))
+            await asyncio.sleep(0.01)
+        return VerbResult.success("finished on its own")
+
+    registry.register(Verb("long_walk", "walks a long way", long_walk, timeout_s=30))
+    ex, seen = traced(registry, mock_transport, allow="long_walk")
+    running = asyncio.create_task(ex.run_verb("long_walk"))
+    await asyncio.sleep(0.1)
+    assert len(mock_transport.intents_of("move")) >= 1
+
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert mock_transport.intents[-1].kind == "stop", "a cancelled call must leave a stop"
+    assert ("cancelled", "fired") in gates(seen)
+    assert ends(seen)[0]["outcome"] == "aborted"
+    assert seen[-1].kind == "verb_end", "no intent may arrive after the verb ended"
+    settled = len(mock_transport.intents_of("move"))
+    await asyncio.sleep(0.2)
+    assert len(mock_transport.intents_of("move")) == settled, "the verb must really be gone"
+
+
+async def test_the_mid_verb_abort_gate_names_the_verb_as_it_was_called(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """`verb_start` says `walk`, so the gate that ends it must not say `move`."""
+
+    async def long_move(ctx: VerbContext, _p: NoParams) -> VerbResult:
+        for _ in range(500):
+            await ctx.transport.send_intent(Intent.move(0.1, 0.0, 0.0))
+            await asyncio.sleep(0.01)
+        return VerbResult.success("finished on its own")
+
+    registry.register(Verb("move", "walks", long_move, timeout_s=30), replace=True)
+    ex, seen = traced(registry, mock_transport, allow="walk")
+    running = asyncio.create_task(ex.run_verb("walk"))
+    await asyncio.sleep(0.1)
+    ex.abort.set()
+    with pytest.raises(Aborted):
+        await asyncio.wait_for(running, timeout=2.0)
+
+    fired = next(e for e in seen if e.kind == "gate" and e.data["gate"] == "abort")
+    started = next(e for e in seen if e.kind == "verb_start")
+    assert fired.data["name"] == started.data["name"] == "walk"
+
+
 async def test_two_verbs_running_at_once_on_one_executor_count_only_their_own_intents(
     registry: VerbRegistry, mock_transport: MockTransport
 ) -> None:

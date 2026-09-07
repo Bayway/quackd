@@ -233,6 +233,11 @@ class Executor:
             except Aborted as e:
                 outcome, summary = "aborted", str(e)
                 raise
+            except asyncio.CancelledError:
+                # the caller went away (an MCP client, the CLI's second Ctrl-C). `_execute`
+                # has already cancelled the verb and sent a stop, and said so in a gate.
+                outcome, summary = "aborted", "cancelled from outside"
+                raise
             except BaseException as e:  # a cancelled task ends the verb too, and says so
                 outcome, summary = "error", f"{type(e).__name__}: {e}"
                 raise
@@ -363,7 +368,7 @@ class Executor:
         self.log(f"→ {name}({parsed.model_dump()})")
         try:
             result = await self._execute(
-                verb, parsed, interruptible=canonical != "stop", source=source
+                verb, parsed, interruptible=canonical != "stop", source=source, name=name
             )
         except TimeoutError:
             await self.traced_transport().stop()
@@ -377,7 +382,13 @@ class Executor:
         return self._record(name, params, result)
 
     async def _execute(
-        self, verb: Verb, parsed: Any, *, interruptible: bool, source: Source = "agent"
+        self,
+        verb: Verb,
+        parsed: Any,
+        *,
+        interruptible: bool,
+        source: Source = "agent",
+        name: str | None = None,
     ) -> VerbResult:
         """Run one verb, racing it against the abort event as well as the clock.
 
@@ -387,7 +398,15 @@ class Executor:
         whole timeout — after the human had already reached for the brake, and the verb's own
         10 Hz resend kept feeding the deadman throughout, so nothing else stopped it either.
 
+        The `finally` owns both tasks, because `asyncio.wait` cancels nothing when it is
+        itself cancelled. Without it an outer cancellation — an MCP client dropping the call,
+        the second Ctrl-C this CLI documents — left the verb running with no stop: the trace
+        recorded that the verb had ended and then went on recording the intents it kept
+        sending. `finished` says the block was left normally, so it is exactly the signal for
+        "interrupted from outside" without catching `BaseException`.
+
         `stop` is never interruptible: it is what the abort is trying to achieve."""
+        called = name or verb.name
         verb_task: asyncio.Task[VerbResult] = asyncio.ensure_future(
             verb.execute(self.context(source), parsed)
         )
@@ -396,10 +415,13 @@ class Executor:
         if interruptible:
             abort_task = asyncio.ensure_future(self.abort.wait())
             waiting.add(abort_task)
+        done: set[asyncio.Future[Any]] = set()
+        finished = False
         try:
             done, _ = await asyncio.wait(
                 waiting, return_when=asyncio.FIRST_COMPLETED, timeout=verb.timeout_s
             )
+            finished = True
         finally:
             # the loser is always cancelled: an abort waiter left behind would otherwise
             # accumulate one task per verb for the life of the run
@@ -407,18 +429,27 @@ class Executor:
                 abort_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await abort_task
+            # Nothing the verb does from here can be trusted to end, so take the legs back.
+            if verb_task not in done:
+                verb_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await verb_task
+            if not finished:
+                self._emit(
+                    "gate",
+                    name=called,
+                    gate="cancelled",
+                    outcome="fired",
+                    reason="the call was cancelled; the verb was cancelled and a stop was sent",
+                )
+                with contextlib.suppress(Exception):
+                    await self.traced_transport().stop()
         if verb_task in done:
             return verb_task.result()
-
-        # Nothing the verb does from here can be trusted to end, so take the legs back first
-        # and let the caller decide what to report.
-        verb_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await verb_task
         if abort_task is not None and abort_task in done:
             self._emit(
                 "gate",
-                name=verb.name,
+                name=called,
                 gate="abort",
                 outcome="fired",
                 reason="aborted mid-verb: the verb was cancelled and a stop was sent",
