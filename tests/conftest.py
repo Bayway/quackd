@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import faulthandler
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,18 @@ from quackd.verbs.registry import VerbRegistry, default_registry
 
 REPO = Path(__file__).resolve().parents[1]
 DUCKS = REPO / "ducks"
+
+EXIT_GRACE_S = 120
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """If the interpreter has not exited two minutes after the last test, dump every thread
+    and force the exit. `faulthandler_timeout` watches a test; nothing watches the shutdown
+    after it, where Python joins the `asyncio.to_thread` workers, and a worker stuck in a C
+    call with no timeout held the process alive for six hours on macOS with no trace of what
+    it was doing. This names the frame and makes the hang a red job rather than a cancelled
+    one."""
+    faulthandler.dump_traceback_later(EXIT_GRACE_S, exit=True)
 
 
 @pytest.fixture(autouse=True)
