@@ -48,10 +48,16 @@ with `quackd run reachy-spots-duck-kicks` instead ([flock.md](flock.md)).
 
 ## What the trace shows
 
-Every call that reaches a robot's executor comes back with a `trace`: a short list of plain
-lines saying what happened behind it. `robot_observe` returns the same thing as a final text
-block, because that tool answers with content rather than a dict. The five tools that never
-touch a robot carry none, because there is nothing behind the scenes to show.
+Every call to `robot_run_verb`, `robot_observe` and `robot_say` comes back with a `trace`:
+a short list of plain lines saying what happened behind it, whether or not the call ever
+reached the executor. A call the session refused still says why it was refused.
+`robot_observe` returns the same thing as a final text block, because that tool answers with
+content rather than a dict. The five tools that never touch a robot carry none, because there
+is nothing behind the scenes to show.
+
+Every trace opens with a `tool` line and closes with a `done` line. Those are the call's own
+envelope, recorded as `tool_call` and `tool_result`: what the client asked for, and what it
+cost in seconds and budget.
 
 ```
 tool    robot_run_verb verb='go_to', params={'target': 'ball'} on duck
@@ -59,19 +65,29 @@ verb    go_to(target='ball') from mcp
 ->      look(x=1, y=0, z=0)
 ->      move x24 over 0.1 s (vx 0.1..0.2, vy 0, wz 0..0.88)
 ->      stop
-<-      go_to ok: reached the ball: ~0.25 m away, bearing +0° (0.1 s, 26 intents)
-done    ok in 0.2 s budget: step 2/40, llm calls 0/40, 0.1/5 min
+<-      go_to ok: reached the ball: ~0.25 m away, bearing +0° (2.6 s sim, 0.2 s wall, 26 intents)
+done    ok in 2.6 s sim, 0.2 s wall budget: step 2/40, llm calls 0/40, 0.1/5 min
 ```
 
 A `gate` line appears whenever a rule fires, and says which one: `gate allowlist: refused
 verb 'kick' is not in this duck's allowlist (quack, walk, stop)`. That is the difference
-between a refusal you can act on and an `ok: false` you cannot.
+between a refusal you can act on and an `ok: false` you cannot. The executor's gates are
+listed in [architecture.md](architecture.md). Two more belong to the server itself:
+`session_aborted` when the heartbeat has already given up on the robot and every further call
+is refused, and `no_sound_intent` when `robot_say` reaches a body with nothing to say it
+with.
 
 Over MCP the pilot is the client, so the model's own reasoning and token counts live in
 Claude Code or Claude Desktop, not here. quackd shows what quackd can see.
 
+On a simulator the robot's own clock and the wall clock are different numbers, and the line
+shows both when they disagree. On hardware there is one clock and one number.
+
 The list is capped at thirty lines per call so a long approach does not fill the model's
-context. The uncapped version goes to the server's stderr, which is
+context. The uncapped version goes to the server's stderr, one block per call written when
+that call ends, so two calls at once stay two readable blocks rather than an interleaving.
+Anything belonging to no call, such as the heartbeat noticing the link is gone, is written
+the moment it happens. Stderr is
 `%APPDATA%\Claude\logs\mcp-server-quackd.log` on Windows and `~/Library/Logs/Claude/` on
 macOS. Turn it all off with `--no-trace`, or with `QUACKD_TRACE=0` in the server's
 environment, which is the switch to reach for in a desktop config because it needs no change

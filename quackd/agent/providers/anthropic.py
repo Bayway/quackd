@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 from typing import Any
 
 from quackd.agent.providers.base import (
@@ -133,11 +134,30 @@ def parse_response(response: Any) -> ProviderTurn:
     )
 
 
+def _api_message(e: Exception) -> str:
+    """The API's own sentence. The SDK's `message` is `Error code: 400 - {whole body}`;
+    `body["error"]["message"]` is the part that names the parameter path."""
+    body = getattr(e, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"]
+        if isinstance(body.get("message"), str):
+            return str(body["message"])
+    return str(getattr(e, "message", None) or e)
+
+
 def _rejects_thinking(e: Exception) -> bool:
-    """A 400 about the `thinking` parameter: a model too old for adaptive thinking."""
+    """A 400 about the top-level `thinking` parameter: a model too old for adaptive thinking.
+
+    The match is anchored because a 400 about a *replayed* thinking block names a path
+    (`messages.3.content.0.thinking.signature: Invalid signature`) rather than the parameter.
+    Treating that as "this model has no thinking" would retry the identical request — the
+    messages are what it objected to — fail again, and leave thinking off for the whole run.
+    """
     if type(e).__name__ != "BadRequestError":
         return False
-    return "thinking" in str(getattr(e, "message", e)).lower()
+    return re.match(r"\s*thinking\b", _api_message(e)) is not None
 
 
 class AnthropicProvider:
@@ -199,9 +219,14 @@ class AnthropicProvider:
                 return await self.client.beta.messages.create(
                     **params, betas=[FALLBACK_BETA], fallbacks="default"
                 )
-            except TypeError:
-                # SDK predates server-side fallbacks: use the plain endpoint from now on
-                self.fallbacks = False
+            except TypeError as e:
+                # Only a TypeError naming one of the two keywords means "this SDK predates
+                # server-side fallbacks". Any other one comes from inside the request (a
+                # serialisation bug, a stub) and swallowing it would silently drop fallbacks
+                # for the rest of the run and hide the real failure behind a second request.
+                if "betas" not in str(e) and "fallbacks" not in str(e):
+                    raise
+                self.fallbacks = False  # use the plain endpoint from now on
         return await self.client.messages.create(**params)
 
     async def step(
@@ -209,22 +234,26 @@ class AnthropicProvider:
     ) -> ProviderTurn:
         params = self._params(system, history, tools)
         self.calls += 1
+        # parse_response is inside the classifying try on purpose: a response whose content
+        # blocks or usage fields are not the shape it expects would otherwise escape the
+        # provider as a raw traceback — the CLI only catches TransportError and ProviderError.
         try:
-            response = await self._create(params)
+            try:
+                response = await self._create(params)
+            except Exception as e:
+                if not (self.thinking_display and _rejects_thinking(e)):
+                    raise
+                # a model that predates adaptive thinking: one retry without the parameter,
+                # and every later turn goes without it too. The run loses the thinking text,
+                # not itself.
+                self.thinking_display = None
+                params.pop("thinking", None)
+                response = await self._create(params)
+            return parse_response(response)
         except ProviderError:
             raise
         except Exception as e:
-            if not (self.thinking_display and _rejects_thinking(e)):
-                raise _classify(e) from e
-            # a model that predates adaptive thinking: one retry without the parameter, and
-            # every later turn goes without it too. The run loses the thinking text, not itself.
-            self.thinking_display = None
-            params.pop("thinking", None)
-            try:
-                response = await self._create(params)
-            except Exception as again:
-                raise _classify(again) from again
-        return parse_response(response)
+            raise _classify(e) from e
 
 
 def _classify(e: Exception) -> ProviderError:

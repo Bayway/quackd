@@ -49,9 +49,20 @@ class Transcript:
         self.frame_count = 0
 
     def write(self, kind: str, **payload: Any) -> None:
+        if self._fh.closed:
+            # A verb task cancelled during teardown can narrate its last intent after the
+            # record has closed. Dropping that line beats a `ValueError: I/O operation on
+            # closed file` raised inside a task nobody is awaiting.
+            return
         record = {"t": round(time.monotonic() - self._t0, 3), "kind": kind, **payload}
         self._fh.write(json.dumps(record, default=str, ensure_ascii=False) + "\n")
-        self._fh.flush()
+        if kind != "intent":
+            # An intent is written from inside `send_intent`, on the event loop, between two
+            # deadman resends: a stalled filesystem there delays the next command past the
+            # deadman and zeroes the velocity mid-stride. Every burst ends in a `verb_end`,
+            # which flushes it, and the text layer's own buffer bounds what a hard kill could
+            # lose to well under one verb's worth of lines.
+            self._fh.flush()
         self.events += 1
 
     def sink(self, event: TraceEvent) -> None:
@@ -77,6 +88,22 @@ class Transcript:
         self._fh.close()
 
     @staticmethod
-    def read(path: Path) -> list[dict[str, Any]]:
+    def read(path: Path, *, lenient: bool = False) -> list[dict[str, Any]]:
+        """Every record in the file. `lenient` skips the unparsable ones and counts them under
+        the key `_skipped` on the last record: a run killed mid-write leaves a half line, and
+        `quackd trace` should show the run that happened rather than a JSON error."""
+        records: list[dict[str, Any]] = []
+        skipped = 0
         with path.open(encoding="utf-8") as fh:
-            return [json.loads(line) for line in fh if line.strip()]
+            for line in fh:
+                if not line.strip():
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except ValueError:
+                    if not lenient:
+                        raise
+                    skipped += 1
+        if skipped and records:
+            records[-1]["_skipped"] = skipped
+        return records

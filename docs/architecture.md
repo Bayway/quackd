@@ -129,11 +129,11 @@ One JSON object per line: `{"t": seconds, "kind": ..., ...}`.
 | `llm` | text, `thinking`, tool_calls, usage (this turn and the run's total), stop_reason, latency, or `error` when the call failed |
 | `enforce` | zero tool calls (re-prompt) or several (first only) |
 | `verb_start` | name as called, canonical name, params, source (`agent` · `mcp` · `cli`), whether it is nested inside a composite |
-| `gate` | one per executor rule that fired: `abort` · `allowlist` · `unknown` · `params` · `confirm` · `budget` · `abort_when` · `precondition` · `dry_run`, with the reason and, where it matters, the robot state that caused it |
-| `intent` | every command sent to the robot: kind, params, whether it was accepted |
-| `verb_end` | outcome (`ok` · `fail` · `refused` · `denied` · `budget` · `aborted` · `error`), summary, seconds, and how many intents of each kind it sent |
+| `gate` | one per executor rule that fired: `abort` · `allowlist` · `unknown` · `params` · `confirm` · `budget` · `abort_when` · `precondition` · `dry_run` · `cancelled`, with the reason and, where it matters, the robot state that caused it |
+| `intent` | every command sent to the robot: kind, params, whether it was accepted, and the robot's own clock when it has one |
+| `verb_end` | outcome (`ok` · `fail` · `refused` · `denied` · `budget` · `aborted` · `preempted` · `error`), summary, wall seconds, the robot's own seconds on a simulator, and how many intents of each kind it sent |
 | `verb` | the loop's own record of the call it made (name, params, ok, summary, data) |
-| `declare`, `memory`, `note`, `frame`, `run_end` | the model's verdict, a saved note, a free-text line, a captured frame, the summary |
+| `declare`, `memory`, `note`, `frame`, `run_end` | the model's verdict, a saved note, a free-text line, a captured frame, the summary (with `trace_dropped`: events a view raised on and never showed) |
 
 Example: [`assets/transcript-example.jsonl`](assets/transcript-example.jsonl), recorded
 before the trace kinds existed.
@@ -153,8 +153,22 @@ The transcript is one *sink* of an event stream, not a thing the loop writes dir
   the client, so its reasoning and its token counts are not quackd's to show. What quackd can
   see it says: the verb, the gates, the intents, the result and the budget.
 
+A burst that is still going after two seconds is flushed as it stands and the next line
+continues it, so a twenty second `go_to` narrates itself rather than printing nothing until
+it ends.
+
+A flock is traced the same way, one view per member with its name on every line, and the
+coordinator's decisions under `flock`. Each robot's own transcript is its record.
+
+`quackd trace` replays a finished run from its transcript, through the same renderer, on
+stdout.
+
 `--no-trace` or `QUACKD_TRACE=0` removes the views. The transcript is unaffected, because a
 run that cannot be argued about afterwards is the thing this project cannot give up.
+`--no-trace-prompt` or `QUACKD_TRACE_PROMPT=0` keeps the narration and drops the system
+prompt, which is forty to sixty lines and worth reading once.
+`QUACKD_TRACE_THINKING` is how much of the model's thinking each turn shows: a number of
+characters, `all`, or `0`. The transcript always has all of it.
 
 The trace shows intents as verbs issue them. A keepalive inside an adapter, a daemon's own
 deadman resend and an adapter's stop-on-close are that adapter's business and appear only in

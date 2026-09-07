@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -316,6 +318,91 @@ async def test_a_provider_that_fails_says_so_instead_of_exiting_unexpectedly(
     assert end["outcome"] == "error" and "rate limited" in end["reason"]
 
 
+async def test_a_cancelled_run_ends_as_an_abort_that_still_stops_and_records(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """`KeyboardInterrupt` and `CancelledError` are not `Exception`, so neither reached the
+    error branch and `run_end` kept its default, `loop exited unexpectedly` — the very string
+    the trace work claimed to have removed. The CLI's second Ctrl-C is this path."""
+
+    class Stalling:
+        name, model, supports_vision = "stalling", "test", False
+
+        async def step(self, system: str, history: Any, tools: Any) -> ProviderTurn:
+            await asyncio.sleep(10)
+            raise AssertionError("never reached")
+
+    run_dir = tmp_path / "cancelled"
+    run_dir.mkdir()
+    transport = MockTransport()
+    task = asyncio.create_task(
+        run_duck(
+            RunConfig(
+                duck=hello_duck,
+                provider=Stalling(),
+                transport=transport,
+                run_dir=run_dir,
+                runs_dir=tmp_path,
+            )
+        )
+    )
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    events = Transcript.read(run_dir / "transcript.jsonl")
+    end = next(e for e in events if e["kind"] == "run_end")
+    assert end["outcome"] == "aborted" and "CancelledError" in end["reason"]
+    assert any(e["kind"] == "note" and "interrupted" in e["text"] for e in events)
+    assert transport.intents[-1].kind == "stop" and not transport.connected
+    assert (run_dir / "summary.json").exists()
+
+
+async def test_a_record_that_fails_at_run_end_still_gets_its_summary_and_is_closed(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """A disk that fills at the last line used to skip summary.json, leak the handle and
+    replace the run's own outcome with an OSError."""
+    from quackd.agent.loop import AgentLoop
+
+    run_dir = tmp_path / "full"
+    run_dir.mkdir()
+    loop = AgentLoop(
+        RunConfig(
+            duck=hello_duck,
+            provider=FakeProvider.for_duck("hello-world"),
+            transport=MockTransport(),
+            run_dir=run_dir,
+            runs_dir=tmp_path,
+        )
+    )
+    good = loop.transcript.sink
+
+    def record(event: Any) -> None:
+        if event.kind == "run_end":
+            raise OSError("disk full")
+        good(event)
+
+    loop.tracer.record = record
+    with pytest.raises(OSError, match="disk full"):
+        await loop.run()
+    assert (run_dir / "summary.json").exists()
+    assert loop.transcript._fh.closed
+
+
+def test_writing_to_a_closed_transcript_is_a_no_op(tmp_path: Path) -> None:
+    """A verb task cancelled during teardown narrates its last intent after the record has
+    closed; that must not raise inside a task nobody awaits."""
+    from quackd.trace import TraceEvent
+
+    t = Transcript(tmp_path)
+    t.close()
+    t.write("intent", intent="stop")
+    t.sink(TraceEvent("intent", 0.0, {"intent": "stop"}))
+    assert t.events == 0
+
+
 async def test_a_console_sees_the_run_as_it_happens(hello_duck: DuckFile, tmp_path: Path) -> None:
     seen: list[str] = []
     await run_duck(
@@ -350,6 +437,126 @@ async def test_a_broken_console_never_ends_a_run(hello_duck: DuckFile, tmp_path:
     assert Transcript.read(result.run_dir / "transcript.jsonl")  # the record is unaffected
 
 
+async def test_the_summary_counts_the_events_a_broken_console_dropped(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """A console that raises on every event produced a silent trace, an unchanged exit code
+    and no line anywhere saying events had been dropped."""
+
+    def broken(_event: Any) -> None:
+        raise RuntimeError("the terminal went away")
+
+    result = await run_duck(
+        RunConfig(
+            duck=hello_duck,
+            provider=FakeProvider.for_duck("hello-world"),
+            transport=MockTransport(),
+            runs_dir=tmp_path,
+            trace=broken,
+        )
+    )
+    assert result.trace_dropped > 0
+    summary = json.loads((result.run_dir / "summary.json").read_text(encoding="utf-8"))
+    end = next(
+        e for e in Transcript.read(result.run_dir / "transcript.jsonl") if e["kind"] == "run_end"
+    )
+    # the record's own count is one short of the run's, and can only ever be: it is taken
+    # while the summary is built, and emitting `run_end` with it is one more event to drop.
+    # The CLI prints the result's, which is complete.
+    assert summary["trace_dropped"] == end["trace_dropped"] == result.trace_dropped - 1
+
+
+async def test_thinking_on_the_reprompt_turn_is_recorded(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """The re-prompt is a second call to the model in the same step, and nothing asserted
+    that the request was marked as one or that its answer's reasoning was kept."""
+
+    class Dithering:
+        name, model, supports_vision = "dithering", "test", False
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def step(self, system: str, history: Any, tools: Any) -> ProviderTurn:
+            self.calls += 1
+            if self.calls == 1:
+                return ProviderTurn(tool_calls=[], text="hmm", thinking="turn 1: still deciding")
+            return ProviderTurn(
+                tool_calls=[ToolCall(name="declare_success", arguments={"reason": "done"})],
+                thinking="turn 2: it wants exactly one tool",
+            )
+
+    result = await run_duck(
+        RunConfig(
+            duck=hello_duck,
+            provider=Dithering(),
+            transport=MockTransport(),
+            runs_dir=tmp_path,
+        )
+    )
+    assert result.outcome == "success"
+    events = Transcript.read(result.run_dir / "transcript.jsonl")
+    requests = [e for e in events if e["kind"] == "llm_request"]
+    assert [r["reprompt"] for r in requests] == [False, True]
+    assert [e["thinking"] for e in events if e["kind"] == "llm"][1] == (
+        "turn 2: it wants exactly one tool"
+    )
+    enforce = next(e for e in events if e["kind"] == "enforce")
+    assert enforce["text"] == "You must call exactly one tool. Choose now."
+
+
+async def test_a_composite_is_traced_as_nested_pairs_with_the_parents_tally(
+    kick_duck: DuckFile, tmp_path: Path
+) -> None:
+    """A composite sends nothing itself: every intent `approach_and` reports came from the
+    `go_to` and the `kick` it ran. The tally is a chain of `ContextVar` frames, so a
+    regression there is silent — the parent would keep reporting a number, just a smaller
+    one, and a reader would believe it."""
+    from quackd.perception.color_blob import ColorBlobDetector
+    from quackd.transport.sim2d import Sim2DTransport
+
+    kick_duck.frontmatter.verbs.allow = [*kick_duck.frontmatter.verbs.allow, "approach_and"]
+    seen: list[Any] = []
+    result = await run_duck(
+        RunConfig(
+            duck=kick_duck,
+            provider=FakeProvider(
+                script=[
+                    ToolCall(name="search_scan", arguments={"target": "ball"}),
+                    ToolCall(
+                        name="approach_and",
+                        arguments={"target": "ball", "stop_distance": 0.22, "then": "kick"},
+                    ),
+                    ToolCall(name="declare_success", arguments={"reason": "kicked"}),
+                ]
+            ),
+            transport=Sim2DTransport(seed=6),
+            detector=ColorBlobDetector(),
+            runs_dir=tmp_path,
+            trace=seen.append,
+        )
+    )
+    assert result.outcome == "success", result.reason
+
+    opened = next(
+        i for i, e in enumerate(seen) if e.kind == "verb_start" and e.data["name"] == "approach_and"
+    )
+    closed = next(
+        i for i, e in enumerate(seen) if e.kind == "verb_end" and e.data["name"] == "approach_and"
+    )
+    assert seen[opened].data["nested"] is False and seen[closed].data["nested"] is False
+
+    inside = seen[opened + 1 : closed]
+    assert all(e.data["nested"] is True for e in inside if e.kind in ("verb_start", "verb_end"))
+    children = [e for e in inside if e.kind == "verb_end"]
+    assert [e.data["name"] for e in children] == ["go_to", "kick"]
+
+    sent = sum(sum(e.data["intents"].values()) for e in children)
+    assert sent > 0, "the children really did drive the robot"
+    assert sum(seen[closed].data["intents"].values()) >= sent
+
+
 async def test_the_log_callback_still_gets_the_lines_that_only_it_had(
     hello_duck: DuckFile, tmp_path: Path
 ) -> None:
@@ -375,3 +582,18 @@ async def test_the_log_callback_still_gets_the_lines_that_only_it_had(
     assert any("does not have fly" in line for line in lines)
     notes = [e.data["text"] for e in seen if e.kind == "note"]
     assert any("does not have fly" in note for note in notes)
+
+
+def test_intents_are_buffered_until_the_next_event_flushes_them(tmp_path: Path) -> None:
+    """The flush was a syscall on the event loop between two deadman resends of a steering
+    verb. Intents ride the buffer; anything else, `verb_end` included, puts them on disk."""
+    transcript = Transcript(tmp_path)
+    path = transcript.path
+    try:
+        for _ in range(20):
+            transcript.write("intent", intent="move", accepted=True)
+        assert path.read_text(encoding="utf-8") == "", "an intent must not reach the disk alone"
+        transcript.write("verb_end", name="walk", outcome="ok")
+        assert len(Transcript.read(path)) == 21, "the verb ending must flush every intent"
+    finally:
+        transcript.close()

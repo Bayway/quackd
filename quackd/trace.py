@@ -49,16 +49,29 @@ def trace_enabled_default() -> bool:
     return os.environ.get("QUACKD_TRACE", "1").strip().lower() not in _OFF
 
 
+def parse_thinking_limit(raw: str | None) -> int | None:
+    """`all` for everything, `0` for none, a number of characters otherwise; anything else
+    is the default. Shared with `quackd trace`, so a flag and the environment agree."""
+    text = (raw or "").strip().lower()
+    if text == "all":
+        return None
+    try:
+        return int(text) if text else 2000
+    except ValueError:
+        return 2000
+
+
 def thinking_limit_default() -> int | None:
     """How much of the model's thinking the console shows per turn: `QUACKD_TRACE_THINKING` in
     characters, `all` for everything, `0` for none. The transcript always has all of it."""
-    raw = os.environ.get("QUACKD_TRACE_THINKING", "").strip().lower()
-    if raw == "all":
-        return None
-    try:
-        return int(raw) if raw else 2000
-    except ValueError:
-        return 2000
+    return parse_thinking_limit(os.environ.get("QUACKD_TRACE_THINKING"))
+
+
+def prompt_shown_default() -> bool:
+    """Whether the console prints the system prompt once at the start: `QUACKD_TRACE_PROMPT`.
+    It is forty to sixty lines, worth reading once and tiresome on the fiftieth run of an
+    afternoon, and it is in the transcript either way."""
+    return os.environ.get("QUACKD_TRACE_PROMPT", "1").strip().lower() not in _OFF
 
 
 class Tracer:
@@ -108,6 +121,19 @@ def capture_sink(event: TraceEvent) -> None:
         buffer.append(event)
 
 
+def unless_capturing(sink: Sink) -> Sink:
+    """An observer that steps aside while a `capturing()` block is open in this context.
+
+    The MCP server logs a call's lines in one block when the call ends, so only events that
+    belong to no call — the heartbeat's note and the stop it sends — go straight through."""
+
+    def forward(event: TraceEvent) -> None:
+        if _capture.get() is None:
+            sink(event)
+
+    return forward
+
+
 @contextlib.contextmanager
 def capturing() -> Iterator[list[TraceEvent]]:
     events: list[TraceEvent] = []
@@ -118,6 +144,31 @@ def capturing() -> Iterator[list[TraceEvent]]:
         _capture.reset(token)
 
 
+# ── counting one verb's intents ─────────────────────────────────────────────────────────
+
+_tallies: contextvars.ContextVar[tuple[Counter[str], ...]] = contextvars.ContextVar(
+    "quackd_intent_tallies", default=()
+)
+
+
+@contextlib.contextmanager
+def counting() -> Iterator[Counter[str]]:
+    """One tally for the verb in flight in this context, chained onto its parents' so a nested
+    verb's intents count for the composite too.
+
+    A context variable rather than a list on the executor: asyncio copies the context into
+    each task at creation, so two MCP calls running at once on one executor never see each
+    other's frame, and a verb that is cancelled unwinds its own frame instead of popping
+    somebody else's. With a shared stack, a `quack` that overlapped a `move` reported the
+    move's intents as its own and the move reported neither its resends nor its stop."""
+    tally: Counter[str] = Counter()
+    token = _tallies.set((*_tallies.get(), tally))
+    try:
+        yield tally
+    finally:
+        _tallies.reset(token)
+
+
 # ── the transport as verbs see it ───────────────────────────────────────────────────────
 
 
@@ -125,16 +176,14 @@ class TracedTransport:
     """A transport for verbs: every intent they send becomes an `intent` event.
 
     Everything else is delegated to the real transport, so a verb's
-    `getattr(ctx.transport, "stop_error", None)` still reaches the adapter. `counters` is the
-    executor's stack of per-verb tallies; a nested verb's intents count for its parent too,
-    which is how `approach_and` reports the intents its `go_to` sent."""
+    `getattr(ctx.transport, "stop_error", None)` still reaches the adapter. The tallies are
+    read from the context at send time, not captured here, so an intent counts for whichever
+    verb is in flight in the sending task and for each of its parents: that is how
+    `approach_and` reports the intents its `go_to` sent."""
 
-    def __init__(
-        self, inner: Any, tracer: Tracer, counters: list[Counter[str]] | None = None
-    ) -> None:
+    def __init__(self, inner: Any, tracer: Tracer) -> None:
         self._inner = inner
         self._tracer = tracer
-        self._counters = counters if counters is not None else []
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):  # never delegate our own privates (copy, pickle, half-init)
@@ -142,8 +191,15 @@ class TracedTransport:
         return getattr(self._inner, name)
 
     def _count(self, kind: str) -> None:
-        for counter in self._counters:
-            counter[kind] += 1
+        for tally in _tallies.get():
+            tally[kind] += 1
+
+    def _robot_t(self) -> dict[str, float]:
+        """The robot's own clock, so a burst's span is in the seconds the robot lived rather
+        than the wall seconds a free-running simulator crosses in a fraction of the time."""
+        with contextlib.suppress(Exception):
+            return {"robot_t": float(self._inner.now())}
+        return {}
 
     async def send_intent(self, intent: Intent) -> Ack:
         try:
@@ -156,6 +212,7 @@ class TracedTransport:
                 params=intent.params,
                 accepted=False,
                 reason=f"{type(e).__name__}: {e}",
+                **self._robot_t(),
             )
             raise
         self._count(intent.kind)
@@ -165,6 +222,7 @@ class TracedTransport:
             params=intent.params,
             accepted=ack.accepted,
             reason=ack.reason,
+            **self._robot_t(),
         )
         return ack
 
@@ -179,10 +237,13 @@ class TracedTransport:
                 params={},
                 accepted=False,
                 reason=f"{type(e).__name__}: {e}",
+                **self._robot_t(),
             )
             raise
         self._count("stop")
-        self._tracer.emit("intent", intent="stop", params={}, accepted=True, reason=None)
+        self._tracer.emit(
+            "intent", intent="stop", params={}, accepted=True, reason=None, **self._robot_t()
+        )
 
 
 # ── rendering ───────────────────────────────────────────────────────────────────────────
@@ -203,6 +264,8 @@ def _indent(text: str) -> str:
 
 
 def fmt_value(value: Any) -> str:
+    if value is None:
+        return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, float):
@@ -213,14 +276,94 @@ def fmt_value(value: Any) -> str:
     return text if len(text) <= 120 else text[:117] + "..."
 
 
-def fmt_params(params: Mapping[str, Any] | None) -> str:
+def fmt_params(params: Mapping[str, Any] | None, *, drop_none: bool = False) -> str:
+    """`drop_none` is for intent bursts, where a twist's `vy=null` on every one of two
+    hundred lines is noise. Everywhere else a parameter the model left unset is part of what
+    it chose, and `--dry-run` promises to show every one of them."""
     if not params:
         return ""
-    return ", ".join(f"{k}={fmt_value(v)}" for k, v in params.items() if v is not None)
+    return ", ".join(
+        f"{k}={fmt_value(v)}" for k, v in params.items() if not (drop_none and v is None)
+    )
+
+
+_CLOCK_GAP_S, _CLOCK_GAP_FRAC = 0.5, 0.2
+
+
+def _seconds(d: Mapping[str, Any]) -> str:
+    """`1.4 s`, or `20.0 s sim, 1.4 s wall` when a free-running simulator's clock and the
+    wall clock disagree. Both thresholds have to be crossed, or every sub-second sim verb
+    would print two numbers to say the same thing."""
+    wall = float(d.get("elapsed_s", 0) or 0)
+    robot, label = d.get("transport_s"), d.get("clock")
+    if robot is None or not label:
+        return f"{wall:.1f} s"
+    gap = abs(float(robot) - wall)
+    if gap <= _CLOCK_GAP_S or gap <= _CLOCK_GAP_FRAC * max(float(robot), wall):
+        return f"{wall:.1f} s"
+    return f"{float(robot):.1f} s {label}, {wall:.1f} s wall"
 
 
 def _ok(outcome: str) -> bool:
     return outcome == "ok"
+
+
+_BAD = dict.fromkeys(("fail", "refused", "denied", "budget", "aborted", "error"), "red")
+"""Red is for a run that did not do what was asked. A word from another layer (a flock's
+`preempted`) is yellow: the verb ended early on purpose and nothing is wrong."""
+
+
+_FLOCK_STYLE = {
+    "auction": "cyan",
+    "claim": "bold",
+    "miss": "red",
+    "kick_done": "bold",
+    "verdict": "bold",
+    "separation": "yellow",
+    "auction_void": "yellow",
+    "auction_waiting": "yellow",
+    "member_dead": "red",
+    "member_excluded": "red",
+    "wedges_rotated": "cyan",
+    "bid_rejected": "yellow",
+}
+
+
+def flock_caption(kind: str, d: Mapping[str, Any]) -> tuple[str, str] | None:
+    """A coordinator's decision as (WORD, detail), or None for anything that is not one.
+
+    One vocabulary for two surfaces: the GIF caption is `WORD detail` and the terminal line
+    is the word, lower-cased, in the label column. They were separate strings in the CLI and
+    would have drifted the first time either was touched."""
+    if kind == "auction":
+        return "AUCTION", f"first bid {d.get('first_bid')} {float(d.get('dist') or 0):.2f} m"
+    if kind == "claim":
+        spotter = f", spotter {d['spotter']}" if d.get("spotter") else ""
+        return "CLAIM", f"{d.get('kicker')} ({float(d.get('dist') or 0):.2f} m){spotter}"
+    if kind == "miss":
+        detail = f": {d['detail']}" if d.get("detail") else ""
+        return "MISS", f"{d.get('duck')}{detail}, re-searching"
+    if kind == "kick_done":
+        return "KICKED", f"by {d.get('kicker')}, the spotter judges"
+    if kind == "verdict":
+        moved = f" {float(d['moved_m']):.2f} m" if d.get("moved_m") is not None else ""
+        return "VERDICT", f"{d.get('verdict')}{moved} by {d.get('spotter')}"
+    if kind == "separation":
+        return "HOLD", f"{d.get('duck')} {float(d.get('dist') or 0):.2f} m away, ordered back"
+    if kind == "auction_void":
+        return "AUCTION", f"{d.get('auctions')} void: nobody eligible"
+    if kind == "auction_waiting":
+        return "AUCTION", f"waiting for a bid: {', '.join(d.get('missing_roles') or [])}"
+    if kind == "member_dead":
+        return "DEAD", f"{d.get('duck')}, last heartbeat at {float(d.get('last_hb') or 0):.1f} s"
+    if kind == "member_excluded":
+        return "OUT", f"{d.get('duck')} ({d.get('why')})"
+    if kind == "wedges_rotated":
+        return "SEARCH", f"round {d.get('round')}, wedges rotated {d.get('by_deg')} deg"
+    if kind == "bid_rejected":
+        why = d.get("why") or f"missing {', '.join(d.get('missing') or [])}"
+        return "BID", f"{d.get('src')} for {d.get('role')} rejected: {why}"
+    return None
 
 
 def render_lines(
@@ -320,7 +463,10 @@ def render_lines(
         out.append((tokens, "dim"))
         return out
     if k == "enforce":
-        return [(f"{_label('enforce')}{d.get('issue')}: {d.get('action')}", "yellow")]
+        text = f"{_label('enforce')}{d.get('issue')}: {d.get('action')}"
+        if d.get("text"):  # the re-prompt's own words, which the record already carried
+            text += f" ({d['text']})"
+        return [(text, "yellow")]
     if k == "verb_start":
         text = f"{_label('verb')}{d.get('name')}({fmt_params(d.get('params'))})"
         if d.get("nested"):
@@ -330,8 +476,6 @@ def render_lines(
         return [(text, "bold")]
     if k == "gate":
         text = f"{_label('gate')}{d.get('gate')}: {d.get('outcome')}"
-        if d.get("gate") == "confirm":
-            text += " yes" if d.get("answer") else " no"
         if d.get("reason"):
             text += f" {d['reason']}"
         if d.get("params"):
@@ -348,11 +492,11 @@ def render_lines(
         outcome = str(d.get("outcome", "ok" if d.get("ok") else "fail"))
         verdict = "ok" if _ok(outcome) else ("FAIL" if outcome == "fail" else outcome.upper())
         n = sum((d.get("intents") or {}).values())
-        tail = f" ({d.get('elapsed_s', 0):.1f} s, {n} intent{'s' if n != 1 else ''})"
+        tail = f" ({_seconds(d)}, {n} intent{'s' if n != 1 else ''})"
         text = f"{_label('<-')}{d.get('name')} {verdict}: {d.get('summary')}{tail}"
         if d.get("nested"):
             text = f"{_label('<-')}  {d.get('name')} {verdict}: {d.get('summary')}{tail}"
-        return [(text, "green" if _ok(outcome) else "red")]
+        return [(text, "green" if _ok(outcome) else _BAD.get(outcome, "yellow"))]
     if k == "declare":
         return [
             (
@@ -364,11 +508,16 @@ def render_lines(
         return [(f"{_label('memory')}{d.get('summary')}", "cyan")]
     if k == "note":
         return [(_label("note") + _indent(str(d.get("text", ""))), "dim")]
+    if (caption := flock_caption(k, d)) is not None:
+        word, detail = caption
+        return [(f"{_label(word.lower())}{detail}", _FLOCK_STYLE.get(k, "cyan"))]
+    if k == "member_end":
+        return [(f"{_label('end')}{d.get('status')} after {d.get('steps')} steps", "bold")]
     if k == "tool_call":
         args = {key: value for key, value in d.items() if key not in ("tool", "robot")}
         return [(f"{_label('tool')}{d.get('tool')} {fmt_params(args)} on {d.get('robot')}", "bold")]
     if k == "tool_result":
-        text = f"{_label('done')}{'ok' if d.get('ok') else 'FAIL'} in {d.get('elapsed_s', 0):.1f} s"
+        text = f"{_label('done')}{'ok' if d.get('ok') else 'FAIL'} in {_seconds(d)}"
         if d.get("budget"):
             text += f" budget: {d['budget']}"
         return [(text, "dim")]
@@ -390,10 +539,15 @@ def _ranges(events: list[TraceEvent]) -> str:
                 f"{key} {fmt_value(lo)}" if lo == hi else f"{key} {fmt_value(lo)}..{fmt_value(hi)}"
             )
         else:
+            # only ever three are shown, so stop at four: this runs inside the console
+            # observer, on the event loop, between two deadman resends
             distinct: list[str] = []
             for v in values:
-                if fmt_value(v) not in distinct:
-                    distinct.append(fmt_value(v))
+                shown = fmt_value(v)
+                if shown not in distinct:
+                    distinct.append(shown)
+                if len(distinct) > 3:
+                    break
             parts.append(f"{key} {'/'.join(distinct[:3])}{'...' if len(distinct) > 3 else ''}")
     return ", ".join(parts)
 
@@ -404,12 +558,17 @@ def intent_line(events: list[TraceEvent]) -> Line:
     first = events[0]
     kind = first.data.get("intent")
     if len(events) == 1:
-        params = fmt_params(first.data.get("params"))
+        params = fmt_params(first.data.get("params"), drop_none=True)
         text = f"{_label('->')}{kind}({params})" if params else f"{_label('->')}{kind}"
         if not first.data.get("accepted", True):
             return (f"{text} REFUSED: {first.data.get('reason') or 'no reason given'}", "red")
         return (text, "dim")
-    span = events[-1].t - first.t
+    if (first_t := first.data.get("robot_t")) is not None and (
+        last_t := events[-1].data.get("robot_t")
+    ) is not None:
+        span = float(last_t) - float(first_t)  # the seconds the robot lived, not the wall's
+    else:
+        span = events[-1].t - first.t
     ranges = _ranges(events)
     text = f"{_label('->')}{kind} x{len(events)} over {span:.1f} s"
     if ranges:
@@ -417,11 +576,28 @@ def intent_line(events: list[TraceEvent]) -> Line:
     return (text, "dim")
 
 
+PROGRESS_S = 2.0
+"""How long a burst may build before the console shows it. A twenty second `go_to` on
+hardware becomes one line every two seconds rather than twenty seconds of silence."""
+
+MAX_BURST = 200
+"""And how many intents may build, whatever the clock says. Twenty seconds at 10 Hz, which
+is the bound that matters in a free-running simulator: it crosses that in under two wall
+seconds, so the time rule never fires there."""
+
+
 class LineTrace:
     """A sink that renders events as lines through `write(text, style)`, coalescing a burst of
     one intent kind into one line. A `go_to` sends a different twist every 100 ms, so the
     burst is collapsed by kind, not by identical parameters, and flushed when anything else
-    arrives. Refused intents are never coalesced: each one is worth a line."""
+    arrives, when the kind changes, or when it has been building for `progress_s`. Refused
+    intents are never coalesced: each one is worth a line.
+
+    That periodic flush is what makes the live view live. The only events during a twenty
+    second approach are its own `move` intents, so without it the terminal showed the verb
+    starting and then nothing at all until it ended. The wall clock is the right one to
+    measure it by, even where the burst's own span is the robot's: a person waiting at a
+    terminal waits in wall seconds."""
 
     def __init__(
         self,
@@ -429,41 +605,73 @@ class LineTrace:
         *,
         thinking_chars: int | None = 2000,
         prompt: bool = True,
+        progress_s: float | None = PROGRESS_S,
+        max_burst: int = MAX_BURST,
+        prefix: str = "",
     ) -> None:
         self._write = write
         self.thinking_chars = thinking_chars
         self.prompt = prompt
+        self.progress_s = progress_s
+        self.max_burst = max_burst
+        self.prefix = prefix
+        """Put before every line, continuation lines included: a flock's terminal interleaves
+        its members, and each line has to say whose it is."""
         self._pending: list[TraceEvent] = []
+
+    def _out(self, text: str, style: str) -> None:
+        if self.prefix:
+            text = self.prefix + text.replace("\n", "\n" + self.prefix)
+        self._write(text, style)
 
     def __call__(self, event: TraceEvent) -> None:
         if event.kind == "intent" and event.data.get("accepted", True):
             if self._pending and self._pending[0].data.get("intent") != event.data.get("intent"):
                 self.flush()
             self._pending.append(event)
+            span = event.t - self._pending[0].t
+            too_long = self.progress_s is not None and span >= self.progress_s
+            if too_long or len(self._pending) >= self.max_burst:
+                self.flush()
             return
         self.flush()
         for text, style in render_lines(
             event, thinking_chars=self.thinking_chars, prompt=self.prompt
         ):
-            self._write(text, style)
+            self._out(text, style)
 
     def flush(self) -> None:
         if not self._pending:
             return
-        events, self._pending = self._pending, []
-        self._write(*intent_line(events))
+        # write first, clear after: a write that fails (the Tracer swallows and counts it)
+        # should leave the burst for the next flush rather than losing it
+        self._out(*intent_line(self._pending))
+        self._pending = []
 
 
 class ConsoleTrace(LineTrace):
     """The CLI view: every line to a Rich console, as plain text with a style, never markup."""
 
     def __init__(
-        self, console: Any, *, thinking_chars: int | None = None, prompt: bool = True
+        self,
+        console: Any,
+        *,
+        thinking_chars: int | None = 2000,
+        prompt: bool = True,
+        progress_s: float | None = PROGRESS_S,
+        max_burst: int = MAX_BURST,
+        prefix: str = "",
     ) -> None:
+        # `None` means unlimited here exactly as it does in `render_lines`: one sentinel, one
+        # meaning. The environment is read by the caller, where `QUACKD_TRACE` already is,
+        # because that has to happen after `.env` is loaded rather than at import.
         super().__init__(
             self._print,
-            thinking_chars=thinking_limit_default() if thinking_chars is None else thinking_chars,
+            thinking_chars=thinking_chars,
             prompt=prompt,
+            progress_s=progress_s,
+            max_burst=max_burst,
+            prefix=prefix,
         )
         self.console = console
 
@@ -491,31 +699,53 @@ def cap_lines(
     ]
 
 
+def call_lines(events: list[TraceEvent]) -> list[str]:
+    """One call's events as plain lines, uncapped.
+
+    Guarded, unlike the `Tracer`'s observers: this runs outside the tracer, so a formatting
+    error here would turn a robot's refusal into an MCP internal error rather than a result.
+    """
+    lines: list[str] = []
+    # `progress_s=None`: this renders once the call has already ended, so splitting one
+    # `-> move x200` into ten progressive lines would only spend the model's line cap
+    view = LineTrace(lambda text, _style: lines.append(text), prompt=False, progress_s=None)
+    try:
+        for event in events:
+            view(event)
+        view.flush()
+    except Exception as e:
+        lines.append(f"(the trace could not be rendered: {type(e).__name__}: {e})")
+    return lines
+
+
 def render_call(events: list[TraceEvent]) -> list[str]:
     """One MCP tool call's events as short plain lines for the `trace` field of its result."""
-    lines: list[str] = []
-    view = LineTrace(lambda text, _style: lines.append(text), prompt=False)
-    for event in events:
-        view(event)
-    view.flush()
-    return cap_lines(lines)
+    return cap_lines(call_lines(events))
 
 
 __all__ = [
+    "MAX_BURST",
     "MCP_TRACE_MAX_LINES",
+    "PROGRESS_S",
     "ConsoleTrace",
     "LineTrace",
     "Sink",
     "TraceEvent",
     "TracedTransport",
     "Tracer",
+    "call_lines",
     "cap_lines",
     "capture_sink",
     "capturing",
+    "counting",
+    "flock_caption",
     "fmt_params",
     "intent_line",
+    "parse_thinking_limit",
+    "prompt_shown_default",
     "render_call",
     "render_lines",
     "thinking_limit_default",
     "trace_enabled_default",
+    "unless_capturing",
 ]

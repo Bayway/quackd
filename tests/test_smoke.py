@@ -21,6 +21,7 @@ def test_cli_help() -> None:
         "list-verbs",
         "list-adapters",
         "record",
+        "trace",
         "discover",
         "announce",
     ):

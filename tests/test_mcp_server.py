@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -16,6 +17,7 @@ from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 
 from quackd.mcp_server import DuckSession, build_server
+from quackd.transport.mock import MockTransport
 from quackd.transport.sim2d import Sim2DTransport
 
 TOOLS = {
@@ -34,9 +36,11 @@ TOOLS = {
 
 @contextlib.asynccontextmanager
 async def connected(
-    **kwargs: Any,
-) -> AsyncIterator[tuple[ClientSession, DuckSession, Sim2DTransport]]:
-    transport = Sim2DTransport(seed=1)
+    transport: Any = None, **kwargs: Any
+) -> AsyncIterator[tuple[ClientSession, DuckSession, Any]]:
+    """The server over one robot, driven by a real client. `transport` defaults to the
+    simulator; a test that needs a body which misbehaves on purpose passes its own."""
+    transport = Sim2DTransport(seed=1) if transport is None else transport
     server, session = build_server(transport, heartbeat_period_s=0.05, **kwargs)
     async with create_client_server_memory_streams() as (client_streams, server_streams):
         low = server._lowlevel_server
@@ -273,6 +277,120 @@ async def test_two_calls_at_once_never_swap_traces() -> None:
         moved, quacked = _flat(_data(slow)["trace"]), _flat(_data(fast)["trace"])
         assert "-> move" in moved and "quack" not in moved
         assert "quack" in quacked and "-> move" not in quacked
+
+
+def _blocks(caplog: Any) -> list[list[str]]:
+    """The stderr log split into one block per tool call (each opens with a `tool` line)."""
+    blocks: list[list[str]] = []
+    for message in caplog.messages:
+        if ": tool " in message:
+            blocks.append([])
+        if blocks:
+            blocks[-1].append(message)
+    return blocks
+
+
+async def test_the_stderr_view_logs_a_call_as_one_block_at_its_end(caplog: Any) -> None:
+    caplog.set_level(logging.INFO, logger="quackd.mcp")
+    async with connected() as (client, _session, _transport):
+        await client.call_tool("robot_run_verb", {"verb": "quack", "params": {"text": "hi"}})
+    flat = " | ".join(" ".join(m.split()) for m in caplog.messages)
+    assert "duck: tool robot_run_verb" in flat
+    assert "duck: -> sound" in flat
+    assert "duck: <- quack ok" in flat
+    assert "duck: done ok" in flat
+
+
+async def test_two_calls_at_once_log_two_blocks_not_an_interleaving(caplog: Any) -> None:
+    """One coalescing view shared by concurrent calls merged their bursts and attributed one
+    call's intents to the other. Each call is logged as its own block when it ends."""
+    caplog.set_level(logging.INFO, logger="quackd.mcp")
+    async with connected() as (client, _session, _transport):
+        await asyncio.gather(
+            client.call_tool(
+                "robot_run_verb", {"verb": "move", "params": {"vx": 0.1, "duration_s": 2.0}}
+            ),
+            client.call_tool("robot_run_verb", {"verb": "quack", "params": {"text": "hi"}}),
+        )
+    for block in _blocks(caplog):
+        flat = " ".join(" ".join(m.split()) for m in block)
+        assert not ("-> move" in flat and "quack" in flat), f"two calls in one block: {flat}"
+
+
+async def test_out_of_call_events_reach_stderr_at_once(caplog: Any) -> None:
+    """The heartbeat's stop is the last event of a dying session. Buffered behind a
+    coalescing view it waited for a next event that never came."""
+    caplog.set_level(logging.INFO, logger="quackd.mcp")
+    async with connected() as (_client, session, _transport):
+        assert session.tracer is not None
+        session.tracer.emit("note", text="heartbeat failed: gone — sending stop")
+        session.tracer.emit("intent", intent="stop", params={}, accepted=True)
+    flat = " | ".join(" ".join(m.split()) for m in caplog.messages)
+    assert "duck: note heartbeat failed" in flat
+    assert "duck: -> stop" in flat
+
+
+async def test_the_heartbeat_narrates_to_stderr_and_lands_in_no_calls_trace(caplog: Any) -> None:
+    """An event that belongs to no call must not be attributed to whichever call happens to
+    be open. The heartbeat runs in a task that predates every capture block, so its note and
+    the stop it sends go straight to stderr; the call that comes afterwards carries its own
+    refusal and nothing of the link that died."""
+    caplog.set_level(logging.INFO, logger="quackd.mcp")
+    async with connected(MockTransport(fail_heartbeat_after=1)) as (client, session, _transport):
+        await asyncio.wait_for(session.executor.abort.wait(), timeout=2.0)
+        stderr = " | ".join(" ".join(m.split()) for m in caplog.messages)
+        assert "duck: note heartbeat failed" in stderr
+        assert "duck: -> stop" in stderr  # and the emergency stop, not only the note
+        refused = _data(await client.call_tool("robot_run_verb", {"verb": "quack"}))
+    trace = _flat(refused["trace"])
+    assert refused["ok"] is False and "session_aborted" in trace
+    assert "note heartbeat failed" not in trace
+    assert "-> stop" not in trace
+
+
+async def test_cap_lines_at_the_real_defaults_through_a_long_call(caplog: Any) -> None:
+    """An uncapped trace would put a megabyte of text into the model's context window on
+    one call. stderr keeps every line; the result keeps the first few, the last many, and a
+    line saying how many are missing so the reader knows to go and look."""
+    from quackd.trace import MCP_TRACE_MAX_LINES
+
+    caplog.set_level(logging.INFO, logger="quackd.mcp")
+    async with connected() as (client, _session, _transport):
+        # a full turn looking for something that is not there: sixteen turn-and-stop pairs,
+        # and a burst is only coalesced while the kind stays the same
+        result = _data(
+            await client.call_tool(
+                "robot_run_verb",
+                {"verb": "search_scan", "params": {"target": "unicorn", "max_steps": 16}},
+            )
+        )
+    logged = [m.removeprefix("duck: ") for m in caplog.messages if m.startswith("duck: ")]
+    trace = result["trace"]
+    assert len(logged) > MCP_TRACE_MAX_LINES, f"only {len(logged)} lines; nothing to cap"
+    assert len(trace) == MCP_TRACE_MAX_LINES == 30
+    head = trace.index(next(line for line in trace if "more lines" in line))
+    assert trace[:head] == logged[:head]
+    assert trace[head + 1 :] == logged[-(len(trace) - head - 1) :]
+    assert f"... {len(logged) - len(trace) + 1} more lines" in trace[head]
+    assert "stderr" in trace[head]  # where the omitted lines really are
+
+
+async def test_an_aborted_sessions_refusal_says_the_heartbeat_failed() -> None:
+    """The heartbeat's task predates every capture block, so its own note reaches no call's
+    trace. Without this the pilot was told the session had aborted and never why."""
+    from quackd.mcp_server import build_server
+
+    transport = MockTransport(fail_heartbeat_after=0)
+    _server, session = build_server(transport, heartbeat_period_s=0.01)
+    await session.connect()
+    try:
+        await asyncio.wait_for(session.executor.abort.wait(), timeout=2.0)
+        refused = await session.run("walk", {"vx": 0.1})
+    finally:
+        await session.close()
+    assert refused["ok"] is False
+    assert "heartbeat" in refused["summary"]
+    assert "heartbeat" in _flat(refused["trace"])
 
 
 async def test_an_aborted_session_says_why_it_refused() -> None:

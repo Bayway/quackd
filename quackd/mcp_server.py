@@ -50,12 +50,16 @@ from quackd.safety import (
     deny_all,
 )
 from quackd.trace import (
-    LineTrace,
+    Sink,
+    TraceEvent,
     Tracer,
+    call_lines,
+    cap_lines,
     capture_sink,
     capturing,
-    render_call,
+    render_lines,
     trace_enabled_default,
+    unless_capturing,
 )
 from quackd.transport.base import DuckTransport
 from quackd.verbs.registry import (
@@ -114,14 +118,21 @@ def _prefixed(emit: Callable[..., None], name: str) -> Callable[[str], None]:
     return log_line
 
 
-def _stderr_view(name: str) -> LineTrace:
-    """The trace's stderr view for one robot: one INFO line per rendered line, prefixed the
-    way every other log line is, so Claude Desktop's log file reads as one story."""
+def _stderr_view(name: str) -> Sink:
+    """Events that belong to no tool call, rendered to stderr the moment they happen.
 
-    def write(text: str, _style: str) -> None:
-        log.info("%s: %s", name, text)
+    A call's own lines are logged as one block when it ends (`RobotSession._call`), because
+    one coalescing view shared by concurrent calls interleaved their bursts and attributed
+    one call's intents to another. What is left is the heartbeat's: its note and the stop it
+    sends when the link dies. Those must render immediately and one at a time, because a
+    buffered burst is only flushed by the next event, and after the heartbeat fails there is
+    no next event: the emergency stop was the one line that never reached the log."""
 
-    return LineTrace(write, prompt=False)
+    def write(event: TraceEvent) -> None:
+        for text, _style in render_lines(event, prompt=False):
+            log.info("%s: %s", name, text)
+
+    return unless_capturing(write)
 
 
 def _stash_frames(session: RobotSession) -> Callable[[Any, str], None]:
@@ -167,15 +178,26 @@ class RobotSession:
         self, tool: str, args: dict[str, Any], fn: Callable[[], Awaitable[dict[str, Any]]]
     ) -> dict[str, Any]:
         """One tool call, narrated. The SDK runs every call as its own task, and `capturing`
-        is a context variable, so two calls on one robot never see each other's events. The
-        rendered lines land in the result's `trace`; stderr gets them as they happen."""
+        is a context variable, so two calls on one robot never see each other's events.
+
+        stderr gets the call as one block when it ends, rather than line by line as they
+        happen: two concurrent calls sharing one coalescing view merged their bursts, and a
+        `verb_end` from one split the other's at an arbitrary point. The result's `trace` is
+        the same lines, capped."""
         if self.tracer is None:
             return await fn()
         with capturing() as events:
             started = time.perf_counter()
+            robot_started = self.executor._robot_now()
             self.tracer.emit("tool_call", tool=tool, robot=self.name, **args)
             payload = await fn()
             budget = self.executor.budget
+            clocks: dict[str, Any] = {}
+            robot_now = self.executor._robot_now()
+            if robot_started is not None and robot_now is not None:
+                clocks["transport_s"] = round(robot_now - robot_started, 3)
+                if (label := self.executor._clock()) is not None:
+                    clocks["clock"] = label
             self.tracer.emit(
                 "tool_result",
                 tool=tool,
@@ -183,8 +205,12 @@ class RobotSession:
                 summary=payload.get("summary"),
                 elapsed_s=round(time.perf_counter() - started, 3),
                 budget=budget.status() if budget is not None else None,
+                **clocks,
             )
-        payload["trace"] = render_call(events)
+        lines = call_lines(events)
+        for line in lines:
+            log.info("%s: %s", self.name, line)
+        payload["trace"] = cap_lines(lines)
         return payload
 
     def shown_name(self, verb: Verb) -> str:
@@ -255,10 +281,15 @@ class RobotSession:
         # has just fired, and a verb that was already walking may still be finishing — and
         # refusing `stop` here closed the only control the tool surface offers.
         if self.executor.abort.is_set() and self.registry.canonical(name) != "stop":
+            # say *what* went wrong. The heartbeat's own note goes to stderr and reaches no
+            # call's trace (its task predates every `capturing` block), so without this the
+            # pilot was told only that the session had aborted, never that the link had died.
+            why = self.heartbeat.failure
             reason = (
-                "session aborted (heartbeat failed or kill switch); restart quackd. "
-                "`stop` still works and is worth sending."
-            )
+                f"session aborted: the heartbeat failed ({why}); restart quackd. "
+                if why is not None
+                else "session aborted (kill switch or abort_when); restart quackd. "
+            ) + "`stop` still works and is worth sending."
             self._gate(name, "session_aborted", reason)
             return _result(VerbResult.fail(reason))
         try:
@@ -273,7 +304,10 @@ class RobotSession:
         except BudgetExceeded as e:
             result = VerbResult.fail(f"budget exhausted: {e}")
         except Aborted as e:
-            result = VerbResult.fail(f"aborted: {e}")
+            why = self.heartbeat.failure
+            result = VerbResult.fail(
+                f"aborted: {e}" + (f" (the heartbeat failed: {why})" if why is not None else "")
+            )
         return _result(result)
 
     async def info(self, *, default: bool) -> dict[str, Any]:

@@ -2,6 +2,8 @@
 
 **Status:** accepted · **Date:** 2026-09-07 · Extends [ADR-0003](0003-three-loops.md) (the three loops are what the trace shows) and [ADR-0012](0012-safety-executor.md) (every gate the executor closes now says so) · Amends [ADR-0010](0010-providers.md) (the Anthropic request now carries a `thinking` parameter, so its reasoning has text to show) · Documented in [architecture.md](../architecture.md#trace)
 
+**Amended 2026-09-07:** flock mode is traced too. Each member records into its own `ducks/<name>/transcript.jsonl` and gets a view prefixed with its name; the coordinator's decisions and the planner's one model call print under `flock`. The decision below that deferred it is superseded; nothing else in this ADR changes.
+
 ## Context
 
 Ask quackd to walk in a circle and the terminal said three things: a header, an outcome, and
@@ -90,6 +92,8 @@ Four things were missing rather than merely hidden:
   each proves the default is on and that both switches turn it off.
 - **Flock mode is unchanged.** It builds its own executors with no tracer, keeps its own
   `flock.jsonl` and its own `--verbose`. Tracing a many-robot run is future work.
+  *Superseded in part by the amendment above: each member now records into its own transcript
+  and every terminal line names its robot. `flock.jsonl` is unchanged, and so is `--verbose`.*
 - **The trace shows quackd's layer, not the wire.** An adapter's keepalive, a deadman resend
   inside a daemon and an adapter's own stop-on-close are its business and appear only in its
   logs.

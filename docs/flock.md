@@ -167,6 +167,36 @@ Three annotated lines from a real `flock.jsonl`, and three more from a heterogen
 {"sim_t": 9.4, "kind": "bus", "msg": {"kind": "VERDICT", "src": "reachy-01", "kicker": "duck-01", "verdict": "moved", "moved_m": 0.38}}
 ```
 
+## Watching a flock run
+
+A flock is traced like a solo run, and on by default. Each robot gets its own view with its
+name on every line, so three robots moving at once stay three readable columns rather than
+one interleaving, and the coordinator's own decisions print under `flock`.
+
+```
+duck-0  verb    search_scan(sweep_deg=120) from agent
+duck-0  ->      move x18 over 1.8 s (vx 0, vy 0, wz 0.4..0.6)
+duck-1  <-      search_scan ok: ball at bearing 11 deg left ~0.62 m (1.8 s sim, 0.1 s wall, 18 intents)
+flock   auction first bid duck-1 0.62 m
+flock   claim   duck-1 (0.62 m), spotter reachy-01
+duck-1  <-      search_scan PREEMPTED: role change to kicker (0.9 s sim, 0.0 s wall, 9 intents)
+flock   verdict moved 0.51 m by reachy-01
+duck-2  end     stopped after 7 steps
+```
+
+Those are the words the GIF captions use, so a line on screen and a frame in `run.gif` say
+the same thing about the same moment.
+
+Each robot's `ducks/<name>/transcript.jsonl` is its own record and gets every event whether
+or not anyone is watching, exactly as a solo run's transcript does. `flock.jsonl` keeps the
+coordinator's story as it always has, under its own names, so nothing is written twice.
+
+When the flock's task file has a planner, the model call that plans it is traced under
+`flock` and recorded in `flock.jsonl` as `llm_request` and `llm`. With `--provider fake`
+there is no call to trace: the planner short circuits before it reaches a model.
+
+`--no-trace` or `QUACKD_TRACE=0` removes the views and leaves every record intact.
+
 ## The shared clock
 
 Sim time is a shared resource: the world advances one tick only while every participant

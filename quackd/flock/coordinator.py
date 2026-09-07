@@ -36,6 +36,7 @@ from quackd.flock.messages import (
 )
 from quackd.flock.transcript import FlockTranscript
 from quackd.sim2d.clock import FlockClock, HookInterrupt
+from quackd.trace import Tracer
 
 FlockOutcome = Literal["success", "failure", "budget", "aborted", "error"]
 COORD_TICK_S = 0.05
@@ -57,6 +58,9 @@ class FlockCoordinator:
     log: Any = lambda *_: None
     on_event: Any = None
     """Optional callback (kind: str, data: dict) for a recorder or a live view."""
+    trace: Tracer | None = None
+    """The same events as `TraceEvent`s, for a view and never a record: flock.jsonl already
+    carries every one of these kinds under its own name, written on the line above."""
 
     def __post_init__(self) -> None:
         self.abort = asyncio.Event()  # the kill switch binds here
@@ -94,6 +98,14 @@ class FlockCoordinator:
         self.bus.publish(msg)
 
     def _event(self, kind: str, **data: Any) -> None:
+        """The coordinator's decisions to whoever is watching: the tracer's views first, then
+        the recorder's callback.
+
+        There is no try/except here on purpose. `Tracer.emit` swallows and counts an
+        observer's exception, which is what makes a view safe to attach; `on_event` is the
+        recorder's own contract and a raising callback there would end the run."""
+        if self.trace is not None:
+            self.trace.emit(kind, **data)
         if self.on_event is not None:
             self.on_event(kind, data)
 
@@ -196,11 +208,13 @@ class FlockCoordinator:
         self.searching_empty.discard(msg.src)
         if msg.role is None or msg.role not in self.roles:
             self.transcript.write("bid_rejected", src=msg.src, role=msg.role, why="unknown role")
+            self._event("bid_rejected", src=msg.src, role=msg.role, why="unknown role")
             return
         lacking = missing(self.roles[msg.role].requires, msg.provides)
         if lacking:
             # defence in depth: the member already checked; a LAN peer might not have
             self.transcript.write("bid_rejected", src=msg.src, role=msg.role, missing=lacking)
+            self._event("bid_rejected", src=msg.src, role=msg.role, missing=lacking)
             return
         if msg.src in self._excluded_now() or self.kicker is not None:
             return
@@ -244,6 +258,7 @@ class FlockCoordinator:
         elif msg.status in ("budget", "aborted"):
             self._exclude(msg.src, math.inf)
             self.transcript.write("member_excluded", duck=msg.src, why=msg.status)
+            self._event("member_excluded", duck=msg.src, why=msg.status)
             if msg.src == self.kicker:
                 self._miss(msg.src, msg.status, math.inf)
 
@@ -307,6 +322,7 @@ class FlockCoordinator:
         self.auctions += 1
         if decision is None:
             self.transcript.write("auction_void", auctions=self.auctions)
+            self._event("auction_void", auctions=self.auctions)
             return
         self.transcript.write(
             "auction_decision",
@@ -341,13 +357,16 @@ class FlockCoordinator:
         if not self.assigner.complete(excluded):
             if not self._waiting_logged:
                 self._waiting_logged = True
-                self.transcript.write("auction_waiting", missing_roles=self.assigner.unfilled())
+                missing_roles = self.assigner.unfilled()
+                self.transcript.write("auction_waiting", missing_roles=missing_roles)
+                self._event("auction_waiting", missing_roles=missing_roles)
             return  # the window stays open until every role has a bidder
         prev = {KICKER: self.prev_kicker} if self.prev_kicker else {}
         decision = self.assigner.decide(prev, excluded)
         self.auctions += 1
         if decision is None or decision.kicker is None:
             self.transcript.write("auction_void", auctions=self.auctions)
+            self._event("auction_void", auctions=self.auctions)
             return
         kicker = decision.kicker
         newly_spotter = SPOTTER in decision.assignments and SPOTTER not in self.assigner.held
@@ -401,6 +420,7 @@ class FlockCoordinator:
             if seen is not None and now - seen > self.policy.hb_timeout_s:
                 self._exclude(name, math.inf)
                 self.transcript.write("member_dead", duck=name, last_hb=seen)
+                self._event("member_dead", duck=name, last_hb=seen)
                 if name == self.kicker:
                     self._miss(name, "heartbeat lost while holding the claim", math.inf)
 
@@ -457,6 +477,7 @@ class FlockCoordinator:
             half = 0.0
         self.searching_empty.clear()
         self.transcript.write("wedges_rotated", round=self.search_rounds, by_deg=half)
+        self._event("wedges_rotated", round=self.search_rounds, by_deg=half)
         for name in live:
             self._role(name, "SEARCH", self.wedges.get(name))
         return True

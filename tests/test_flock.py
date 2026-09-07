@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace as NS
 from typing import Any
 
@@ -17,8 +19,10 @@ from quackd.flock.auction import Auction, AuctionPolicy
 from quackd.flock.bus import InProcessBus
 from quackd.flock.messages import BidMsg, FlockMessage, TaskMsg
 from quackd.flock.planner import equal_wedges, plan_flock_task
+from quackd.flock.transcript import FlockTranscript
 from quackd.sim2d.clock import FlockClock
 from quackd.sim2d.world import DT, World
+from quackd.trace import TraceEvent, Tracer
 
 # ── schema ──────────────────────────────────────────────────────────────────────────────
 
@@ -207,6 +211,55 @@ async def test_planner_clamps_numbers_and_drops_only_the_invalid_field() -> None
     assert task.kick_leg == "right"  # the unclampable invalid field is dropped alone
 
 
+async def test_the_planners_one_call_is_traced_as_a_request_and_an_answer() -> None:
+    events: list[TraceEvent] = []
+    turn = ProviderTurn(
+        tool_calls=[ToolCall(name="plan_flock_task", arguments={"stop_distance": 0.3})],
+        usage=Usage(input_tokens=10, output_tokens=5),
+        text="one wedge each",
+    )
+    _task, _wedges, _usage, calls, fallback = await plan_flock_task(
+        DUCK, ["duck-0", "duck-1"], _PlannerStub(turn), "t", trace=Tracer(record=events.append)
+    )
+    assert calls == 1 and not fallback
+    assert [e.kind for e in events] == ["llm_request", "llm"]
+    assert events[0].data["provider"] == "stub" and events[0].data["purpose"] == "plan_flock_task"
+    answer = events[1].data
+    assert answer["text"] == "one wedge each" and "error" not in answer
+    assert answer["tool_calls"][0]["name"] == "plan_flock_task"
+    assert answer["usage"]["input_tokens"] == 10 and answer["latency_s"] >= 0
+
+    # the fake provider never reaches a model, so it must not narrate one either
+    events.clear()
+    await plan_flock_task(
+        DUCK,
+        ["duck-0", "duck-1"],
+        FakeProvider.for_duck("flock-kick"),
+        "t",
+        trace=Tracer(record=events.append),
+    )
+    assert events == []
+
+
+async def test_a_planner_that_fails_is_traced_as_an_error_and_a_fallback_note() -> None:
+    events: list[TraceEvent] = []
+    logged: list[str] = []
+    task, _wedges, _usage, calls, fallback = await plan_flock_task(
+        DUCK,
+        ["duck-0", "duck-1"],
+        _PlannerStub(RuntimeError("provider down")),
+        "t",
+        log=logged.append,
+        trace=Tracer(record=events.append),
+    )
+    assert calls == 1 and fallback and task.stop_distance == 0.22  # defaults
+    assert [e.kind for e in events] == ["llm_request", "llm", "note"]
+    assert events[1].data["error"] == "RuntimeError: provider down"
+    assert events[1].data["latency_s"] >= 0
+    # --verbose and the trace say the same sentence, from the one call site
+    assert events[2].data["text"] == logged[0] == "planner fallback: RuntimeError: provider down"
+
+
 # ── the lockstep clock ──────────────────────────────────────────────────────────────────
 
 
@@ -373,3 +426,64 @@ def test_excluded_duck_cannot_bid_and_a_bid_clears_search_empty() -> None:
     coord._dispatch(BidMsg(t=0.0, src="duck-1", task_id="t", ball_dist_m=0.7))
     assert coord.auction.is_open
     assert "duck-1" not in coord.searching_empty  # its sighting outranks the empty scan
+
+
+# ── the trace ───────────────────────────────────────────────────────────────────────────
+
+
+def test_the_flock_transcript_is_a_trace_record_stamped_in_sim_time(tmp_path: Path) -> None:
+    transcript = FlockTranscript(tmp_path, now=lambda: 4.2)
+    transcript.sink(TraceEvent("llm", 99.0, {"provider": "stub", "usage": {"input_tokens": 3}}))
+    transcript.close()
+    lines = (tmp_path / "flock.jsonl").read_text(encoding="utf-8").splitlines()
+    # the event's own wall clock (99.0) is dropped: flock.jsonl is stamped in sim time only
+    assert [json.loads(line) for line in lines if line.strip()] == [
+        {"sim_t": 4.2, "kind": "llm", "provider": "stub", "usage": {"input_tokens": 3}}
+    ]
+
+
+def test_a_flock_view_that_raises_never_ends_the_run_and_is_counted() -> None:
+    def boom(_event: TraceEvent) -> None:
+        raise RuntimeError("the console went away")
+
+    seen: list[tuple[str, dict[str, Any]]] = []
+    coord = _mini_coordinator()
+    coord.trace = Tracer(observers=[boom])
+    coord.on_event = lambda kind, data: seen.append((kind, data))
+    coord._event("auction", first_bid="duck-0", dist=0.5)  # must not raise
+    assert coord.trace.dropped == 1
+    # and the recorder behind it still got its event: one blind view blinds nobody else
+    assert seen == [("auction", {"first_bid": "duck-0", "dist": 0.5})]
+
+
+def test_the_coordinators_transcript_only_kinds_reach_the_view_with_the_records_keys() -> None:
+    """Six decisions used to reach `flock.jsonl` and nothing else, so a watcher saw a duck
+    stop bidding and never learned it had been declared dead. The view carries the record's
+    own keys, because two spellings of one fact is how a log starts lying."""
+    from quackd.trace import Tracer
+
+    seen: list[Any] = []
+    coord = _mini_coordinator()
+    coord.trace = Tracer(observers=[seen.append])
+
+    coord._event("member_dead", duck="duck-2", last_hb=3.0)
+    coord._event("member_excluded", duck="duck-1", why="repeated misses")
+    coord._event("auction_void", auctions=2)
+    coord._event("auction_waiting", missing_roles=["kicker"])
+    coord._event("wedges_rotated", round=1, by_deg=45)
+    coord._event("bid_rejected", src="duck-0", role="spotter", missing=["gaze"])
+
+    assert [e.kind for e in seen] == [
+        "member_dead",
+        "member_excluded",
+        "auction_void",
+        "auction_waiting",
+        "wedges_rotated",
+        "bid_rejected",
+    ]
+    assert seen[0].data == {"duck": "duck-2", "last_hb": 3.0}
+    assert seen[5].data == {"src": "duck-0", "role": "spotter", "missing": ["gaze"]}
+    # and every one of them has words in the renderer, or the view would show nothing
+    from quackd.trace import flock_caption
+
+    assert all(flock_caption(e.kind, e.data) is not None for e in seen)

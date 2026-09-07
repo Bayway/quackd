@@ -14,7 +14,8 @@ from typer.testing import CliRunner
 from quackd.agent.providers.fake import FakeProvider
 from quackd.cli import app
 from quackd.duckfile.parser import load_duck
-from quackd.flock.runner import run_flock
+from quackd.flock.runner import FLOCK_TRACE, run_flock
+from quackd.trace import TraceEvent
 
 runner = CliRunner()
 DUCK = load_duck("flock-kick")
@@ -84,6 +85,44 @@ async def test_flock_dry_run_moves_nothing(tmp_path: Path) -> None:
     assert result.outcome != "success"
     assert result.ball_displacement_m == 0.0
     assert all(d["kicks_connected"] == 0 for d in result.per_duck.values())
+
+
+async def test_a_flock_is_traced_per_member_and_every_view_sees_only_its_own_duck(
+    tmp_path: Path,
+) -> None:
+    seen: dict[str, list[TraceEvent]] = {}
+
+    result = await asyncio.wait_for(
+        run_flock(
+            DUCK,
+            provider=FakeProvider.for_duck("flock-kick"),
+            seed=3,
+            runs_dir=tmp_path,
+            trace=lambda name: seen.setdefault(name, []).append,
+        ),
+        timeout=120,
+    )
+    assert result.trace_dropped == 0  # nothing raised, so nothing was lost
+    assert set(seen) == set(result.per_duck) | {FLOCK_TRACE}
+
+    for name in result.per_duck:
+        records = read_jsonl(result.run_dir / "ducks" / name / "transcript.jsonl")
+        kinds = {r["kind"] for r in records}
+        assert {"verb_start", "intent", "verb_end", "member_end"} <= kinds, f"{name}: {kinds}"
+        # the view saw this duck's verbs, all of them and only them: a factory that handed
+        # two members one sink would show each of these twice
+        mine = [(r["name"], r.get("params")) for r in records if r["kind"] == "verb_start"]
+        theirs = [
+            (e.data["name"], e.data.get("params")) for e in seen[name] if e.kind == "verb_start"
+        ]
+        assert theirs == mine
+
+    story = {e.kind for e in seen[FLOCK_TRACE]}
+    assert "claim" in story and "verb_start" not in story  # decisions here, verbs per duck
+
+    flock_kinds = {e["kind"] for e in read_jsonl(result.run_dir / "flock.jsonl")}
+    assert "member_log" in flock_kinds  # the members' log lines still land here
+    assert "verb_start" not in flock_kinds  # and their narration still does not
 
 
 async def test_flock_kill_switch_stops_every_duck(tmp_path: Path) -> None:
@@ -238,3 +277,39 @@ def test_serve_mcp_refuses_flock_ducks() -> None:
         raise AssertionError("expected SystemExit")
     except SystemExit as e:
         assert "flock" in str(e)
+
+
+def test_cli_flock_trace_prefixes_every_line_with_its_duck_and_tells_the_flocks_story(
+    tmp_path: Path,
+) -> None:
+    """Three robots moving at once used to print nothing at all. Interleaved without a name
+    on each line they would be worse than nothing, so the prefix is the whole feature."""
+    args = [
+        "run",
+        "flock-kick",
+        "--provider",
+        "fake",
+        "--seed",
+        "3",
+        "--no-gif",
+        "--runs-dir",
+        str(tmp_path),
+    ]
+    on = runner.invoke(app, [*args, "--trace"])
+    assert on.exit_code == 0, on.output
+    shown = " ".join(on.output.split())
+    for needle in (
+        "duck-0 verb search_scan(",  # a member's own verb, under its own name
+        "-> move x",  # what went to that robot
+        "flock auction first bid duck-",  # the coordinator's story
+        "flock claim duck-",
+        "end stopped after",  # and each member's ending
+    ):
+        assert needle in shown, (needle, shown[:400])
+
+    off = runner.invoke(app, [*args, "--no-trace"])
+    assert off.exit_code == 0, off.output
+    quiet = " ".join(off.output.split())
+    for needle in ("duck-0 verb", "-> move x", "flock auction", "end stopped after"):
+        assert needle not in quiet, needle
+    assert "kicker=" in quiet, "the outcome is not part of the trace and must survive"
