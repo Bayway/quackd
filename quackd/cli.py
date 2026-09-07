@@ -88,21 +88,22 @@ def _print_outcome(
     outcome: str,
     reason: str,
     *,
-    steps: int,
-    llm_calls: int,
-    tokens: str,
+    detail: str,
     run_dir: Path | str,
     gif_path: Path | str | None = None,
     trace_dropped: int = 0,
 ) -> None:
-    """The three closing lines of a run. `quackd trace` prints them from the transcript, so
-    a replay of a run ends exactly the way the run itself did rather than in a second dialect
-    somebody has to keep in step."""
+    """The closing lines of a run: the verdict, one line of counters, where it all went.
+
+    `quackd trace` prints them from the transcript, so a replay ends exactly the way the run
+    itself did rather than in a second dialect somebody has to keep in step. `detail` is the
+    counter line because a flock counts different things than a solo run does."""
     colour = {"success": "green", "failure": "red", "budget": "yellow", "aborted": "red"}.get(
         outcome, "red"
     )
     console.print(f"[{colour}]{outcome.upper()}[/{colour}] — {escape(reason)}")
-    console.print(f"steps={steps} llm_calls={llm_calls} tokens={tokens}")
+    if detail:
+        console.print(detail)
     console.print(f"run dir: {run_dir}" + (f" · gif: {gif_path}" if gif_path else ""))
     if trace_dropped:
         # a console that raised on every event produced a silent trace and no sign of it
@@ -521,9 +522,10 @@ def _run_impl(
     _print_outcome(
         result.outcome,
         result.reason,
-        steps=result.steps,
-        llm_calls=result.llm_calls,
-        tokens=f"{result.usage.input_tokens}+{result.usage.output_tokens}",
+        detail=(
+            f"steps={result.steps} llm_calls={result.llm_calls} "
+            f"tokens={result.usage.input_tokens}+{result.usage.output_tokens}"
+        ),
         run_dir=result.run_dir,
         gif_path=result.gif_path,
         trace_dropped=result.trace_dropped,
@@ -695,25 +697,18 @@ def _run_flock_impl(
             pending.flush()
     if "rec" in holder:
         result.gif_path = holder["rec"].save_gif(result.run_dir / "run.gif")
-    colour = {"success": "green", "failure": "red", "budget": "yellow", "aborted": "red"}.get(
-        result.outcome, "red"
-    )
-    console.print(f"[{colour}]{result.outcome.upper()}[/{colour}] — {escape(result.reason)}")
     spotter = f"spotter={result.spotter} " if result.spotter else ""
-    console.print(
-        f"{spotter}kicker={result.kicker} auctions={result.auctions} bids={result.bids} "
-        f"ball moved {result.ball_displacement_m:.2f} m in {result.sim_elapsed_s:.1f}s sim"
+    _print_outcome(
+        result.outcome,
+        result.reason,
+        detail=(
+            f"{spotter}kicker={result.kicker} auctions={result.auctions} bids={result.bids} "
+            f"ball moved {result.ball_displacement_m:.2f} m in {result.sim_elapsed_s:.1f}s sim"
+        ),
+        run_dir=result.run_dir,
+        gif_path=result.gif_path,
+        trace_dropped=result.trace_dropped,
     )
-    console.print(
-        f"run dir: {result.run_dir}" + (f" · gif: {result.gif_path}" if result.gif_path else "")
-    )
-    if result.trace_dropped:
-        err_console.print(
-            f"trace: {result.trace_dropped} event(s) could not be shown (a view raised); "
-            "every transcript has them",
-            style="yellow",
-            markup=False,
-        )
     if result.outcome != "success":
         raise typer.Exit(code=1)
 
@@ -1091,12 +1086,21 @@ def trace_cmd(
         _fail("no run_end: the run did not finish, or is still running")
         return
     usage = end.get("usage") or {}
+    if "kicker" in end:  # a flock counts different things, and its summary is the only source
+        spotter = f"spotter={end['spotter']} " if end.get("spotter") else ""
+        detail = (
+            f"{spotter}kicker={end.get('kicker')} auctions={end.get('auctions')} "
+            f"bids={end.get('bids')}"
+        )
+    else:
+        detail = (
+            f"steps={int(end.get('steps') or 0)} llm_calls={int(end.get('llm_calls') or 0)} "
+            f"tokens={usage.get('input_tokens', 0)}+{usage.get('output_tokens', 0)}"
+        )
     _print_outcome(
         str(end.get("outcome", "error")),
         str(end.get("reason", "")),
-        steps=int(end.get("steps") or 0),
-        llm_calls=int(end.get("llm_calls") or 0),
-        tokens=f"{usage.get('input_tokens', 0)}+{usage.get('output_tokens', 0)}",
+        detail=detail,
         run_dir=run_dir,
         gif_path=gif if (gif := run_dir / "run.gif").exists() else None,
         trace_dropped=int(end.get("trace_dropped") or 0),

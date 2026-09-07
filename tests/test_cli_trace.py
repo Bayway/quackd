@@ -149,3 +149,32 @@ def test_trace_on_a_missing_run_is_one_line(tmp_path: Path) -> None:
 def test_trace_on_an_empty_runs_dir_says_what_to_do(tmp_path: Path) -> None:
     code, out = _trace(tmp_path)
     assert code == 1 and "quackd run" in out
+
+
+def test_trace_on_a_flock_run_names_every_member(tmp_path: Path) -> None:
+    """A flock writes no top-level transcript: the record is one file per robot, and a
+    replay that read only the first of them would quietly show a third of the run."""
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "flock-kick",
+            "--provider",
+            "fake",
+            "--seed",
+            "3",
+            "--no-gif",
+            "--runs-dir",
+            str(tmp_path),
+            "--no-trace",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    code, out = _trace(tmp_path, "--no-prompt", "--thinking", "0")
+    assert code == 0, out
+    for name in ("duck-0", "duck-1", "duck-2"):
+        assert f"{name} verb" in out, (name, out[:400])
+        assert f"{name} end stopped after" in out
+    # the outcome comes from summary.json, since no member wrote a run_end
+    assert "SUCCESS" in out and "kicker=duck-" in out
+    assert "steps=0" not in out, "a flock counts auctions and bids, not steps and tokens"
