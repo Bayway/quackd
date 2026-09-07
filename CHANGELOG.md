@@ -7,91 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-A sixth, a seventh and an eighth robot, and two hardware paths audited against upstream rather
-than against themselves. Two of the new robots quackd drives without importing anything from
-them, because neither is an installable package, and the third has no network API at all, so
-quackd ships the loop it runs on. Still nothing has run on a robot; what changed is that
-several things which could not have worked now can, and several claims that were not true no
-longer are.
+## [0.7.0] — 2026-09-07
 
-### The Open Duck Mini v2 hardware path
-
-An audit of `open_duck:bridge` against upstream at its pinned commit. A duck set up exactly
-the way `install.sh` and the docs instruct could not start the bridge; if it could, it would
-have had no camera verbs; and the operator's Ctrl-C would not have stopped it.
-
-**The duck could not be started at all.** The shipped `ExecStart` exits 2 before binding a
-socket, because `--script-arg --onnx_model_path` makes argparse refuse a value beginning with
-a dash — and it was the only `serve --script` invocation shipped anywhere, so it was the one
-an owner would copy. `WorkingDirectory` was one level above the data: upstream opens
-`./polynomial_coefficients.pkl` and `../mini_bdx_runtime/assets/` relative to the working
-directory, and the first is read inside `RLWalk.__init__` *after* the servo bus is powered, so
-the wrong directory is a traceback over fourteen energised joints. A pre-flight now refuses
-before the socket and before the servos. And no configuration produced both frames and the
-verbs that use them: the camera capability came from `expression_features.camera`, but that
-flag says who owns the *device*, and camd refused to start while it was true — so a
-correctly configured duck reported no camera and dropped `observe`, `go_to`, `search_scan` and
-`approach_and`, making both starter tasks and three checklist steps unreachable.
-
-**The operator's stop did not stop the duck.** An abort never reached the verb that was
-moving: `asyncio.wait_for` watches only the clock, so a kill switch, a Ctrl-C or a failed
-heartbeat set a flag nothing read until the verb returned on its own, while the verb's own
-10 Hz resend kept feeding the daemon's deadman. `stop` was then refused by the very gate that
-made it necessary, in both the executor and the MCP session. `duck.stop` lasted one tick and
-was undone by the next command. Nothing settled the duck on shutdown — the `finally` that
-looked like it did runs after the loop has exited, so its zeros had no reader — and
-`systemctl stop` killed the interpreter between two 20 ms ticks with the servos holding their
-last goal. Any client's disconnect zeroed a walking duck, including the `doctor` the checklist
-tells you to run from a second terminal. And `stop` reported a success it could not know,
-because the guard reads `stop_error` off the adapter and no adapter forwarded it.
-
-**It claimed guards it did not have.** The task file told the pilot every moving verb would
-refuse if it fell; nothing detects a fall on this backend, so none ever did, and an accepted
-`move` read to the model as evidence it was upright. A duck with `start_paused` could never
-walk and was misdiagnosed as a starved Pi. A wedged control loop reported itself healthy at
-50 Hz forever. A failed state read was dressed up as a healthy duck, with a fabricated pose
-for a robot that has no odometry. And the token was unreadable by the service user, so the
-bridge ran with authentication silently off while four places in the docs promised otherwise.
-
-**The camera was not safe to steer on.** camd served a frozen frame forever once capture
-stopped; its 1 fps default gives a divergent per-frame loop gain against a 10 Hz visual loop;
-`doctor` could not probe it at all; `go_to`'s command cadence was frame-fetch-bound against a
-300 ms deadman; and every distance was wrong, because the detector assumes the simulator's 90°
-field of view where a Pi Camera Module 2 is about 62 — 0.23 m against 0.38 m for the same
-ball, enough for `go_to` to announce arrival outside the task's own success criterion.
-`--no-swap-rb`, offered in the README as the cure for wrong colours, inverts a correct image
-and relabels an orange ball as a person.
-
-**Nine of ten upstream unknowns were closed by reading, not guessing** — the import form the
-shim depends on, that `get_last_command` runs at 50 Hz and before the pause check, that `B` is
-the sound button, that the antennas are trigger-driven and unclamped, that the head slots are
-written unconditionally with no mode button, that the walk loop opens no camera, and that the
-IMU in use is `raw_imu.Imu` (a dict of gyro and accelero) rather than `imu.Imu` (a quaternion).
-The four head floats turn out to be **offsets** added to the walk policy's own head targets,
-not absolute joint angles. Fall detection was deliberately left unimplemented: which axis
-reads gravity depends on an axis remap, a config flag and a tare offset, and a fall detector
-that is wrong fails as a confident "not fallen".
-
-### The Microduck's hardware path
+A sixth, a seventh and an eighth robot, two hardware paths audited against upstream rather
+than against themselves, and an abort that finally reaches the verb it is aborting. Two of the
+new robots quackd drives without importing anything from them, because neither is an
+installable package, and the third has no network API at all, so quackd ships the loop it runs
+on. The Open Duck Mini's daemon and installer were read against a duck set up exactly the way
+the docs instruct, and it could not start the bridge; if it could, it would have had no camera
+verbs; and the operator's Ctrl-C would not have stopped it. The Microduck's transport was read
+against an API that had moved on while nobody was looking. Still nothing has run on a robot;
+what changed is that several things which could not have worked now can, and several claims
+that were not true no longer are.
 
 ### Added
 
-- **Bring-up checklists for the XLeRobot and the AlohaMini**
-  ([docs/xlerobot-hardware-checklist.md](docs/xlerobot-hardware-checklist.md),
-  [docs/alohamini-hardware-checklist.md](docs/alohamini-hardware-checklist.md)). The two
-  bodies here you can buy today were the two without one. They are not copies of each other:
-  the cart's hazard is that its watchdog stops the wheels and leaves fourteen arm servos
-  holding, so it stays on blocks until step 9; the AlohaMini's is the opposite, that its arms
-  are limp until quackd's own host turns torque on, which makes upstream's stock host the
-  safest place to learn the base and the lift first.
-- **[docs/reading-robots.md](docs/reading-robots.md), the traps by pattern rather than by
-  robot.** quackd drives eight bodies and has run on none, so everything it does came from
-  reading upstream closely enough to be safe without executing it, and the same shapes kept
-  recurring: a number that looks like a different number, a default pose that is not neutral,
-  a stop that is not a stop, a partial message that means something else, a capability that is
-  only a claim, a name that exists on the wrong class, a line somebody commented out. The next
-  robot will not have the AlohaMini's bug; it will have one of the AlohaMini's shape.
-
+- **The XLeRobot: a dual-arm mobile manipulator on an IKEA cart, about $660 to build**
+  (`--robot xlerobot:mock` or `xlerobot:zmq`). Two five-joint arms with grippers on a
+  three-omniwheel base that really can drive sideways, so `move` here carries a `vy` that
+  means something for the first time. It is also the first body quackd talks to **without
+  importing anything from it**: XLeRobot is not a package — no PyPI entry, no `pyproject.toml`,
+  and its documented install is copying files into an existing lerobot tree — but it already
+  ships a ZeroMQ host, so quackd speaks that wire and its extra is `pyzmq` and nothing else.
+  That keeps the 3.11 floor and works on Windows, unlike `quackd[lerobot]`. Design:
+  `docs/adr/0026-xlerobot.md`, with the page at
+  [docs/adapters/xlerobot.md](docs/adapters/xlerobot.md).
+- **The whole wire format is exercised against a fake host over loopback**, on every CI
+  platform. Upstream ships no test, no CI and no simulator that runs — its ManiSkill host
+  imports `xlerobot_single`, which is defined nowhere in the repository — so the other end of
+  the protocol is written from upstream's source at a pinned commit and quackd's real client is
+  driven against it. That caught a bug no reading would have: `stop` rebuilt its hold from the
+  latest observation, which is several cycles behind and carries no timestamp, so stopping
+  would have commanded an arm back towards zero. A stop that moves an arm is the failure this
+  project exists to prevent. `stop` now zeroes the wheels and leaves every arm goal exactly
+  where it already was.
+- **`xlerobot-lookout`**, the task to point at a real cart first: nothing in its allowlist
+  moves a wheel or an arm. It is the thinnest starter quackd ships, and honestly so — without
+  a head to turn and without a voice, a task that moves nothing can only look and report.
+- **The AlohaMini: two arms on a motorised lift, on a wheeled base** (`--robot alohamini:mock`,
+  `sim2d` or `zmq`). quackd's second bimanual body and its first with a vertical axis. Like the
+  XLeRobot it is reached by speaking its ZeroMQ host protocol rather than importing it, and for
+  a stronger reason: upstream is a fork of LeRobot that *calls itself* `lerobot`, is not on
+  PyPI, and installs only from a large git clone on Python 3.12 with torch. Speaking the wire is
+  also more correct than importing would have been, because upstream's own client throws away
+  the camera list the host sends and its robot-model default disagrees with the host's, with
+  nothing cross-checking either. quackd reads both off the wire, so neither can be silently
+  wrong. Design: `docs/adr/0027-alohamini.md`, with the page at
+  [docs/adapters/alohamini.md](docs/adapters/alohamini.md).
+- **A host wrapper for the robot, because upstream's own host leaves the arms limp.**
+  `configure()` disables arm torque and both of its `enable_torque()` calls are commented out;
+  nothing else in the driver turns it on. So `bridge/alohamini/` holds a wrapper that runs
+  upstream's loop with torque enabled and the lift stopped, and adds three fields so quackd can
+  tell it from a stock host. Without it, `move_joints`, `gripper` and `home_arms` refuse and say
+  why, rather than commanding joints that would not move.
+- **A stop that actually stops this robot.** Three upstream behaviours conspire against one.
+  All three velocity keys are mandatory in every payload, because `send_action` indexes them
+  with no default and would otherwise discard the whole action, arms included, without
+  refreshing its own watchdog. The lift latches, so a payload that says nothing about it leaves
+  it travelling. And the lift's two keys are not symmetric, so a payload carrying both freezes
+  it instead. One function builds every payload and holds all three invariants, and the fake
+  host reproduces the bugs so the tests mean something: `test_stop_zeroes_the_lift` fails
+  against the naive three-key stop that the shape of the driver invites.
+- **`alohamini-lookout`**, the task to point at a real AlohaMini first: nothing in its
+  allowlist moves a wheel, an arm or the lift. It is the same shape as `xlerobot-lookout` and
+  for the same reason, since this body has no head and no voice either: `observe`,
+  `report_state` and `stop` are the whole allowlist, a human aims the camera, and the answer
+  goes in the reason the pilot declares success with. The budget is twelve steps and three
+  minutes. The scripted pilot takes one frame and answers, and on `alohamini:sim2d` it succeeds
+  on ten of ten seeds with the world's ground truth checked that the base never moved. The
+  AlohaMini checklist runs it at step 5, on upstream's stock host with the arms still limp.
 - **The ToddlerBot: a small open source humanoid, and the first body here that can hurt
   itself** (`--robot toddlerbot:mock`, `sim2d` or `bridge`). Two arms, two legs, a two joint
   neck and thirty servos, on a machine with no network API of any kind, so quackd ships the
@@ -123,52 +107,28 @@ that is wrong fails as a confident "not fallen".
   reset does, and holds.
 - **`toddlerbot-lookout`**, the task to point at a real humanoid first, on its safety stand:
   nothing in its allowlist moves a leg, an arm or the waist.
-- **The AlohaMini: two arms on a motorised lift, on a wheeled base** (`--robot alohamini:mock`,
-  `sim2d` or `zmq`). quackd's second bimanual body and its first with a vertical axis. Like the
-  XLeRobot it is reached by speaking its ZeroMQ host protocol rather than importing it, and for
-  a stronger reason: upstream is a fork of LeRobot that *calls itself* `lerobot`, is not on
-  PyPI, and installs only from a large git clone on Python 3.12 with torch. Speaking the wire is
-  also more correct than importing would have been, because upstream's own client throws away
-  the camera list the host sends and its robot-model default disagrees with the host's, with
-  nothing cross-checking either. quackd reads both off the wire, so neither can be silently
-  wrong. Design: `docs/adr/0027-alohamini.md`, with the page at
-  [docs/adapters/alohamini.md](docs/adapters/alohamini.md).
-- **A host wrapper for the robot, because upstream's own host leaves the arms limp.**
-  `configure()` disables arm torque and both of its `enable_torque()` calls are commented out;
-  nothing else in the driver turns it on. So `bridge/alohamini/` holds a wrapper that runs
-  upstream's loop with torque enabled and the lift stopped, and adds three fields so quackd can
-  tell it from a stock host. Without it, `move_joints`, `gripper` and `home_arms` refuse and say
-  why, rather than commanding joints that would not move.
-- **A stop that actually stops this robot.** Three upstream behaviours conspire against one.
-  All three velocity keys are mandatory in every payload, because `send_action` indexes them
-  with no default and would otherwise discard the whole action, arms included, without
-  refreshing its own watchdog. The lift latches, so a payload that says nothing about it leaves
-  it travelling. And the lift's two keys are not symmetric, so a payload carrying both freezes
-  it instead. One function builds every payload and holds all three invariants, and the fake
-  host reproduces the bugs so the tests mean something: `test_stop_zeroes_the_lift` fails
-  against the naive three-key stop that the shape of the driver invites.
-- **The XLeRobot: a dual-arm mobile manipulator on an IKEA cart, about $660 to build**
-  (`--robot xlerobot:mock` or `xlerobot:zmq`). Two five-joint arms with grippers on a
-  three-omniwheel base that really can drive sideways, so `move` here carries a `vy` that
-  means something for the first time. It is also the first body quackd talks to **without
-  importing anything from it**: XLeRobot is not a package — no PyPI entry, no `pyproject.toml`,
-  and its documented install is copying files into an existing lerobot tree — but it already
-  ships a ZeroMQ host, so quackd speaks that wire and its extra is `pyzmq` and nothing else.
-  That keeps the 3.11 floor and works on Windows, unlike `quackd[lerobot]`. Design:
-  `docs/adr/0026-xlerobot.md`, with the page at
-  [docs/adapters/xlerobot.md](docs/adapters/xlerobot.md).
-- **The whole wire format is exercised against a fake host over loopback**, on every CI
-  platform. Upstream ships no test, no CI and no simulator that runs — its ManiSkill host
-  imports `xlerobot_single`, which is defined nowhere in the repository — so the other end of
-  the protocol is written from upstream's source at a pinned commit and quackd's real client is
-  driven against it. That caught a bug no reading would have: `stop` rebuilt its hold from the
-  latest observation, which is several cycles behind and carries no timestamp, so stopping
-  would have commanded an arm back towards zero. A stop that moves an arm is the failure this
-  project exists to prevent. `stop` now zeroes the wheels and leaves every arm goal exactly
-  where it already was.
-- **`xlerobot-lookout`**, the task to point at a real cart first: nothing in its allowlist
-  moves a wheel or an arm. It is the thinnest starter quackd ships, and honestly so — without
-  a head to turn and without a voice, a task that moves nothing can only look and report.
+- **[docs/toddlerbot-hardware-checklist.md](docs/toddlerbot-hardware-checklist.md), the order
+  to try a real ToddlerBot in.** Fourteen steps on the safety stand upstream ships, feet off
+  the ground until step 13. Step 2 is `calibrate_zero`, because the daemon refuses to actuate
+  without a `motors.yml`. It runs the daemon with `--fake --once` and `quackd doctor` against
+  port 9873 before a motor is powered, points `toddlerbot-lookout` at the robot at step 8, and
+  holds steps 11 and 12 (pull the network cable mid-move, then send `SIGTERM`) as the two that
+  matter, because on this body silence means hold forever and the daemon is the only thing that
+  makes it mean anything else. It ends with the four things only a real robot can answer, the
+  safe-pose slew from a crawl or a prone start first. There is no issue template for it, so
+  open a plain issue with the transcript.
+- **`QUACKD_TODDLERBOT_TOKEN` and `TODDLERBOT_ROOT`**, the two environment variables the
+  ToddlerBot's adapter and daemon read. The token is the ToddlerBot's own and not
+  `QUACKD_DUCK_TOKEN`, and `--token`'s help says so now: `quackd/adapters/toddlerbot/bridge.py`
+  reads it when `--token` is absent and sends it in `bot.hello`, and
+  `bridge/toddlerbot/quackd_toddlerbot_bridge.py` reads the same name as the default for its
+  own `--token`, compares it with `hmac.compare_digest`, and refuses every other method until a
+  hello carries it. A daemon started with no token accepts everyone, and nothing writes one for
+  you, because this daemon has no installer. `TODDLERBOT_ROOT` is the daemon's alone: it is the
+  default for `--toddlerbot` (otherwise `.`), the upstream checkout the daemon changes
+  directory into and imports from, because every path upstream's `Robot` builds is relative,
+  and `--fake` never opens it. The nightly contract job sets it to its own sparse checkout of
+  upstream.
 - **Video off a real Microduck** (`--camera-url webrtc://host:8443`, `quackd[microduck-camera]`).
   There is no camera method in `duck-ipc-proto`, no snapshot route in `mediad` and no camera
   subcommand in `robotctl`, so a picture means being a WebRTC peer. It runs on your machine and
@@ -181,6 +141,21 @@ that is wrong fails as a confident "not fallen".
   assumes the duck is borrowed: nothing in it installs anything or needs `sudo`.
 - CI runs on Windows. `robotd` speaks over a unix socket, Windows cannot open one, and the test
   covering quackd's `ssh -L` answer only runs there — so it had never run anywhere.
+- **Bring-up checklists for the XLeRobot and the AlohaMini**
+  ([docs/xlerobot-hardware-checklist.md](docs/xlerobot-hardware-checklist.md),
+  [docs/alohamini-hardware-checklist.md](docs/alohamini-hardware-checklist.md)). The two
+  bodies here you can buy today were the two without one. They are not copies of each other:
+  the cart's hazard is that its watchdog stops the wheels and leaves fourteen arm servos
+  holding, so it stays on blocks until step 9; the AlohaMini's is the opposite, that its arms
+  are limp until quackd's own host turns torque on, which makes upstream's stock host the
+  safest place to learn the base and the lift first.
+- **[docs/reading-robots.md](docs/reading-robots.md), the traps by pattern rather than by
+  robot.** quackd drives eight bodies and has run on none, so everything it does came from
+  reading upstream closely enough to be safe without executing it, and the same shapes kept
+  recurring: a number that looks like a different number, a default pose that is not neutral,
+  a stop that is not a stop, a partial message that means something else, a capability that is
+  only a claim, a name that exists on the wrong class, a line somebody commented out. The next
+  robot will not have the AlohaMini's bug; it will have one of the AlohaMini's shape.
 
 ### Changed
 
@@ -213,6 +188,75 @@ that is wrong fails as a confident "not fallen".
 - `pyzmq` joins the `dev` extra, and is the extra for both new robots. CI installs only
   `dev`, and the fake-host tests are what the two `zmq` backends' 🧪 rest on, so a status claim
   CI could not check would not have been honest.
+- **`quackd run` asks "Are you watching the robot right now?" once before a fall-blind robot
+  walks.** The question comes at the start of the run, before any verb, when the task allows
+  `move`, `go_to`, `search_scan` or `approach_and` on a robot that reports `fall_detection`
+  false and has no `stand_up`, which today is `open_duck:bridge` alone, because the Microduck
+  can get up and no other body reports the flag. The default answer is no, and no aborts the
+  run with exit 1 before a leg moves, so a script that started the bridge walking without
+  `--yes` in 0.6.0 now stops at the question until you add `--yes`. Over MCP nothing asks: the
+  pilot sees `fall-blind=nothing-detects-falls` in `report_state` and every observation,
+  `quackd doctor` prints the warning, and that is all it gets. This is the guard that stands in
+  for the ones "It claimed guards it did not have" above says were never there
+  ([docs/open-duck-hardware-checklist.md](docs/open-duck-hardware-checklist.md)).
+- **`quackd serve-mcp` with no `.duck` loaded now runs on a default budget of 40 verb steps and
+  five minutes, counted from when the server started.** In 0.6.0 that session had no `Budget`
+  at all, so `quackd serve-mcp --robot open_duck:bridge` would have handed an MCP client
+  unlimited and uncounted control of a physical biped. The numbers are the frontmatter
+  defaults, `max_steps: 40` and `max_minutes: 5`, and every `robot_run_verb` and
+  `robot_observe` counts, `stop` included, so from the 41st call or once five minutes have
+  passed every verb answers `budget exhausted` until `robot_load_duckfile` starts the
+  contract's own budget. The clock is wall time on `open_duck:bridge` and `microduck:jsonrpc`
+  and the simulator's own clock on `sim2d`, and there is no flag to turn the budget off
+  ([docs/mcp.md](docs/mcp.md)).
+- **One Ctrl-C stops the robot, and a second one quits.** The first Ctrl-C, or `q`, cancels the
+  verb that is running and sends `stop`, the fix described under "The operator's stop did not
+  stop the duck" above. New here is the second: the kill switch hands `SIGINT` back before it
+  fires, so another Ctrl-C is a plain `KeyboardInterrupt`, where 0.6.0 swallowed every Ctrl-C
+  after the first for the rest of the run and left you holding a key on a robot you could not
+  be sure had heard. The `kill switch: Ctrl-C` line now prints to stderr on every `quackd run`
+  rather than only with `--verbose`, and the banner says `Ctrl-C or q stops the duck. Press it
+  twice to quit at once.` A flock run keeps its old banner, and its kill-switch line is still
+  `--verbose` only.
+- **The bridge refuses to start when `--max-vx`, `--max-vy` or `--max-vyaw` is above upstream's
+  own clamp, or `--head-safety` is outside (0, 1].** The three velocity flags, documented in
+  [bridge/open_duck/README.md](bridge/open_duck/README.md), were never checked, so the number
+  in the unit went straight into the clamp the bridge applies and into the limits it advertises
+  in the hello, and a unit asking for more than the 0.15, 0.2 and 1.0 that upstream's own
+  gamepad allows would have been honoured. Narrowing them is the obvious first power-on
+  precaution, and widening them past the pad is not something quackd should do quietly on your
+  behalf, so the bridge exits with the bound in the message rather than silently clamping.
+  `--head-safety` is the fraction of upstream's head range quackd will use, not a multiplier on
+  it, so 0 and anything above 1 are refused the same way.
+- **The bridge's systemd unit has no start rate limit any more (`StartLimitIntervalSec=0`).**
+  It was 3 starts in 120 s, and with `Restart=no` the only thing a burst limit could throttle
+  is you editing a path and running `systemctl start` again, which is exactly what bring-up is.
+  The fourth attempt failed with an error about none of the problems being debugged and needed
+  `systemctl reset-failed`, which appeared nowhere in the docs.
+- **camd captures at 5 fps and 256 px by default, from 1 fps and 512.** `go_to` and
+  `search_scan` close a visual loop at 10 Hz, and holding one steering correction for a whole
+  second gives a per-frame loop gain above 1, a weave that swings the target back out of frame.
+  The smaller frame pays for the faster rate on a Pi Zero 2 W, and `quackd-duck-camd.service`
+  now passes `--fps 5 --size 256` explicitly. A 0.6.0 unit left in place still passes `--fps 1`
+  and nothing for `--size`, so it keeps the slow loop at the new size until you re-run
+  `install.sh`.
+- **mypy type-checks `bridge/` now, the code that actually runs on the robot.** `[tool.mypy]`
+  had `packages = ["quackd"]`, so the daemons on the robot's side were the only Python in the
+  repository nothing type-checked. It is `files = ["quackd", "bridge"]` now, because mypy takes
+  packages or files and not both, and CI's bare `uv run mypy` enforces it. The two Open Duck
+  files were clean when the scope widened, and the gate earned its keep at the merge that
+  brought the three new robots in: the ToddlerBot daemon's `int(getattr(robot, "nu", ...))` was
+  typed `Any | None` because `robot` is optional there, and it now falls back to the frame's
+  own width instead of crashing on a body nobody passed.
+- **Nine of ten upstream unknowns were closed by reading, not guessing** — the import form the
+  shim depends on, that `get_last_command` runs at 50 Hz and before the pause check, that `B`
+  is the sound button, that the antennas are trigger-driven and unclamped, that the head slots
+  are written unconditionally with no mode button, that the walk loop opens no camera, and that
+  the IMU in use is `raw_imu.Imu` (a dict of gyro and accelero) rather than `imu.Imu` (a
+  quaternion). The four head floats turn out to be **offsets** added to the walk policy's own
+  head targets, not absolute joint angles. Fall detection was deliberately left unimplemented:
+  which axis reads gravity depends on an axis remap, a config flag and a tare offset, and a
+  fall detector that is wrong fails as a confident "not fallen".
 
 ### Fixed
 
@@ -238,9 +282,6 @@ that is wrong fails as a confident "not fallen".
   ZeroMQ wire carries a position, so the real backends report None and the offline doubles
   were dead-reckoning one. A double that is easier than the robot is a task that passes here
   and fails there.
-- **The ToddlerBot daemon moved to port 9873.** The Open Duck Mini already had 9871 for its
-  bridge and 9872 for its camera daemon, and `SECURITY.md` tells people to tunnel that pair.
-
 - **The ToddlerBot daemon stopped claiming four things it could not do.** An audit of the
   three new adapters against their own plan found the same shape of bug three times, and it
   is the shape this project exists to prevent: a capability flag the operator sets, a
@@ -298,7 +339,89 @@ that is wrong fails as a confident "not fallen".
   `docs/faq.md` listed five adapters, and the README said five in four more places while
   saying eight in a fifth. The architecture pages also still said quackd hosts a control loop
   on one body when it now does on two, and in very different ways.
-
+- **The duck could not be started at all.** The shipped `ExecStart` exits 2 before binding a
+  socket, because `--script-arg --onnx_model_path` makes argparse refuse a value beginning with
+  a dash — and it was the only `serve --script` invocation shipped anywhere, so it was the one
+  an owner would copy. `WorkingDirectory` was one level above the data: upstream opens
+  `./polynomial_coefficients.pkl` and `../mini_bdx_runtime/assets/` relative to the working
+  directory, and the first is read inside `RLWalk.__init__` *after* the servo bus is powered,
+  so the wrong directory is a traceback over fourteen energised joints. A pre-flight now
+  refuses before the socket and before the servos. And no configuration produced both frames
+  and the verbs that use them: the camera capability came from `expression_features.camera`,
+  but that flag says who owns the *device*, and camd refused to start while it was true — so a
+  correctly configured duck reported no camera and dropped `observe`, `go_to`, `search_scan`
+  and `approach_and`, making both starter tasks and three checklist steps unreachable.
+- **The operator's stop did not stop the duck.** An abort never reached the verb that was
+  moving: `asyncio.wait_for` watches only the clock, so a kill switch, a Ctrl-C or a failed
+  heartbeat set a flag nothing read until the verb returned on its own, while the verb's own 10
+  Hz resend kept feeding the daemon's deadman. `stop` was then refused by the very gate that
+  made it necessary, in both the executor and the MCP session. `duck.stop` lasted one tick and
+  was undone by the next command. Nothing settled the duck on shutdown — the `finally` that
+  looked like it did runs after the loop has exited, so its zeros had no reader — and
+  `systemctl stop` killed the interpreter between two 20 ms ticks with the servos holding their
+  last goal. Any client's disconnect zeroed a walking duck, including the `doctor` the
+  checklist tells you to run from a second terminal. And `stop` reported a success it could not
+  know, because the guard reads `stop_error` off the adapter and no adapter forwarded it.
+- **It claimed guards it did not have.** The task file told the pilot every moving verb would
+  refuse if it fell; nothing detects a fall on this backend, so none ever did, and an accepted
+  `move` read to the model as evidence it was upright. A duck with `start_paused` could never
+  walk and was misdiagnosed as a starved Pi. A wedged control loop reported itself healthy at
+  50 Hz forever. A failed state read was dressed up as a healthy duck, with a fabricated pose
+  for a robot that has no odometry. And the token was unreadable by the service user, so the
+  bridge ran with authentication silently off while four places in the docs promised otherwise.
+- **The camera was not safe to steer on.** camd served a frozen frame forever once capture
+  stopped; its 1 fps default gives a divergent per-frame loop gain against a 10 Hz visual loop;
+  `doctor` could not probe it at all; `go_to`'s command cadence was frame-fetch-bound against a
+  300 ms deadman; and every distance was wrong, because the detector assumes the simulator's
+  90° field of view where a Pi Camera Module 2 is about 62 — 0.23 m against 0.38 m for the same
+  ball, enough for `go_to` to announce arrival outside the task's own success criterion.
+  `--no-swap-rb`, offered in the README as the cure for wrong colours, inverts a correct image
+  and relabels an orange ball as a person.
+- **`express` on an Open Duck was a guaranteed no-op, and `droop` moved nothing even when it
+  played.** `duck.antennas` does not refresh the command timestamp and every verb is its own
+  tool call with an LLM turn between, so the command was always stale by the time a gesture
+  arrived and the deadman rested the antennas before it played, while `express` reported
+  success. Two 9 g servos on a GPIO pin are not motion, so a gesture now plays through a stale
+  command for `GESTURE_S` (1.0 s) and then rests on its own, and `duck.stop` still rests it at
+  once. `droop` sent 0.0, which upstream maps to the antennas' exact resting position, so it
+  now sends `DROOP_POSITION`, -0.6 on upstream's -1..1 scale, a value no gamepad trigger can
+  produce and a place nobody has watched these two servos go on a real duck, which is why it
+  stops short of -1.
+- **A second connection could drive the duck with no handshake at all.** The bridge kept its
+  `greeted` flag on the core rather than on the connection, so on a bridge with no token, which
+  the token bug above made every duck 0.6.0's `install.sh` set up, once any client had said
+  `duck.hello` another socket could send `duck.command` straight away and skip the protocol and
+  version checks on a socket that walks a robot. `authed` is per connection now, and anything
+  but `duck.hello` on a fresh connection is refused with `say duck.hello first` whether or not
+  a token is set.
+- **camd served its last frame forever once capture stopped.** The handler read the capture
+  timestamp and threw it away, so after one good frame the only 503 was unreachable: a ribbon
+  working loose on a walking duck left `/snapshot.jpg` answering 200 with the same JPEG,
+  `observe` reporting a confident detection and `go_to` steering on a photograph. Every
+  snapshot now carries an `X-Frame-Age` header, and one older than four capture periods, never
+  less than 1.5 s, answers 503 with the reason in the body (`/healthz` reports the threshold as
+  `stale_after_s`). On the laptop `get_frame` reads the header, returns no frame instead of
+  raising and keeps the reason where `doctor` can see it, treats a stamped frame over 2 s old
+  as stale whatever the server's own threshold was (a server that does not stamp its frames is
+  not checked), and gives up on a fetch after 1 s rather than 3, because `go_to` sends its next
+  command only when the fetch returns and the deadman is 300 ms.
+- **camd refused to start when `duck_config.json` had `expression_features.camera` true.** That
+  flag says who owns the device, and camd exited 2 to avoid fighting the runtime for it, while
+  the 0.6.0 bridge took its camera capability from the same flag, so the one setting under
+  which the bridge advertised a camera was the one under which nothing served frames. Reading
+  upstream at the pin, the walk loop the bridge runs opens no camera at all, so the collision
+  could not happen in that process. camd now logs a warning and starts, and if you do run one
+  of upstream's own camera scripts alongside it the contention shows up as failing captures on
+  `/healthz` and expiring snapshots rather than a frozen frame, though setting the flag false
+  is still the tidier setup.
+- **Every distance on a real camera was wrong, and nothing let you correct it.** The detector
+  assumed the simulator's 90 degree field of view where a Pi Camera Module 2 is about 62, so on
+  hardware distances came out about 40 percent short, and [docs/faq.md](docs/faq.md) told you
+  to set `fov_deg=62` in code. `quackd run` now takes `--fov-deg`, a manifest can carry
+  `camera_fov_deg` under `limits` ([docs/manifest-spec.md](docs/manifest-spec.md)), and the
+  flag wins over the key. Until one of them is set, every detection on a real backend ends in
+  `(uncalibrated: distance is a rough guess)` and a warning names the flag, while `sim2d` and
+  `mock` stay calibrated because their camera is the one the geometry assumes.
 - **The API version quackd was written against had moved on.** `upstream_api.py` was the one
   adapter ADR-0022 let cite `main` instead of a commit hash, and in the week after it was
   read upstream went from `API_VERSION` 16 to 23. The handshake refuses on mismatch rather
@@ -342,6 +465,64 @@ that is wrong fails as a confident "not fallen".
   could load a wider duck and start counting from zero. The limits still become the new
   contract's; the steps, the llm calls, the clock and the failure counts now stay the
   session's, and the tool's reply says what carried over.
+- **`quackd doctor` and `quackd validate` crashed on a Windows pipe.** Python uses the ANSI
+  codepage when stdout is not a console there, and quackd prints ✓, 🦆 and the status emoji in
+  `doctor`, so on cp1252 the first two commands
+  [docs/microduck-hardware-checklist.md](docs/microduck-hardware-checklist.md) puts in front of
+  a Windows user died with `UnicodeEncodeError`, and so did the last step of CI's own Windows
+  job. Both streams now replace what the codepage cannot carry, because a lost glyph costs a
+  character and the raise cost the command.
+
+### Known limitations
+
+- **Nothing has run on hardware, on any of the eight adapters.** `microduck:jsonrpc`,
+  `open_duck:bridge`, `reachy_mini:sdk`, `lerobot:real`, `rosbridge:ws`, `xlerobot:zmq`,
+  `alohamini:zmq` and `toddlerbot:bridge` spell every upstream name from upstream source at a
+  pinned commit and have only ever talked to fakes, the daemons quackd ships have only ever run
+  with `--fake` over loopback or, for the ToddlerBot's, against upstream's MuJoCo body in a
+  nightly job, and `microduck:websocket` is still a stub. If you have a body, the first thing
+  to point at it is the task that moves nothing: `open-duck-lookout` with the feet off the
+  ground until step 10 of
+  [docs/open-duck-hardware-checklist.md](docs/open-duck-hardware-checklist.md),
+  `microduck-lookout` on a duck you are probably borrowing with someone holding the gamepad
+  ([docs/microduck-hardware-checklist.md](docs/microduck-hardware-checklist.md), feet off until
+  step 9), `xlerobot-lookout` with the wheels on blocks until step 9, `alohamini-lookout` on
+  upstream's stock host with the arms limp, before quackd's wrapper ever turns torque on, and
+  `toddlerbot-lookout` on the safety stand with the feet off until step 13. The Reachy Mini,
+  the LeRobot arm and the rosbridge base have no lookout task and no checklist, and the base
+  has no verified deadman, so it goes on blocks first.
+- **An Open Duck set up by 0.6.0 needs `bridge/open_duck/install.sh` run again on the robot
+  before the new bridge will start.** 0.6.0's installer wrote the token `0600 root:root` inside
+  a `0700` directory while the unit ran as `pi`, and the new daemon refuses to start on a token
+  file it cannot read rather than run with authentication silently off, which is what the old
+  one did. Nothing is lost by re-running it: the 0.6.0 unit could never start the bridge
+  anyway, because argparse exits 2 on `--script-arg --onnx_model_path` before a socket is
+  bound. The new `install.sh` keeps an existing token, makes it group readable by the service
+  user and checks that it is, so the `--token` or `QUACKD_DUCK_TOKEN` your laptop already has
+  stays valid.
+- **Update the laptop and the robot together, because the handshake cannot tell 0.6.0 from
+  0.7.0.** `PROTOCOL_VERSION` is still 1 on both ends, so a 0.6.0 laptop pairs with an updated
+  bridge without a word and then sends every `duck.command` without the `epoch` the bridge now
+  uses to tell a deliberate command from one that was already in flight when a stop landed. A
+  client that sends none is held to the blunt window instead: for `--deadman-ms` (300 by
+  default) after every stop its commands are silently dropped, and since `_turn` ends every
+  `search_scan` step with a stop, the opening commands of the next step (up to three at 10 Hz)
+  are swallowed and the duck under-rotates the scan. The other way round is quieter and no
+  better: a 0.7.0 laptop drives a 0.6.0 bridge, which ignores `epoch`, but that bridge has none
+  of the fixes above.
+- **`--fov-deg` is a `run` option only, and no shipped manifest sets `camera_fov_deg`.**
+  `record` and `doctor` do not take the flag and `serve-mcp` reads only the manifest key, so an
+  MCP session on hardware carries the uncalibrated label with no way to clear it short of
+  editing the adapter's manifest in source. The label is text the pilot reads, not a gate:
+  nothing in the verbs checks `calibrated`, so an uncalibrated `go_to` still drives on the
+  number.
+- **`quackd[microduck-camera]` is a heavy extra, and the default install is unchanged.** It is
+  `aiortc`, `av` and `websockets`, and `aiortc` brings `aioice`, `pylibsrtp`, `pyee`,
+  `google-crc32c`, `cryptography` and `pyopenssl` with it, while `av` carries FFmpeg in a wheel
+  of 18 to 39 MB depending on the platform. Nothing imports any of it unless `--camera-url`
+  starts with `webrtc://`, and a missing extra is one error naming the `pip install` and the
+  HTTP snapshot alternative that needs none. Nobody who is not pointing quackd at a real
+  Microduck needs it, and the H.264 and the ICE inside it have never met a duck.
 
 ## [0.6.0] — 2026-09-04
 

@@ -185,12 +185,12 @@ Legend: ✅ done · 🔨 in progress · ⬜ todo · ⏸ blocked (with reason)
   fallen, whether the neck axes are what the motor names imply, and whether a calibrated zero
   survives a restart
 
-- 🔨 The Open Duck Mini v2 hardware path, audited against upstream at its pin rather than
+- ✅ The Open Duck Mini v2 hardware path, audited against upstream at its pin rather than
   against itself (`feat/open-duck-hardware-path`, 2026-09-05). A duck set up the way
   `install.sh` instructs could not start the bridge; if it could it would have had no camera
   verbs; and Ctrl-C would not have stopped it. Fixed in four passes — the daemon can start,
   the operator's stop works, it stops claiming guards it lacks, and the camera is safe to
-  steer a walking biped on — plus the deferred tail. See the CHANGELOG's Unreleased section.
+  steer a walking biped on — plus the deferred tail. See the 0.7.0 section of the CHANGELOG.
   Nine of ten upstream unknowns closed by reading source at the pin; four refs promoted to
   VERIFIED, one corrected (the head floats are offsets, not absolute joint angles)
 - ⏸ Only a human can, on an Open Duck: the five numbers at the end of
@@ -200,3 +200,12 @@ Legend: ✅ done · 🔨 in progress · ⬜ todo · ⏸ blocked (with reason)
   give this robot fall detection; quackd deliberately does not guess it, because a wrong fall
   detector fails as a confident "not fallen". Flip the `bridge` row in
   `docs/adapter-status.md` only after a run on a real duck
+- ✅ v0.7.0 (2026-09-07): three more bodies, and two hardware paths read against upstream.
+  The XLeRobot and the AlohaMini by speaking their ZeroMQ hosts rather than importing them
+  (ADR-0026, ADR-0027), the ToddlerBot with the fifty hertz loop quackd ships because
+  upstream has no network API (ADR-0028), each exercised against a fake host over loopback in
+  CI. The Open Duck's daemon and installer fixed so a duck set up as the docs instruct can
+  start, stop and be steered on its camera; the Microduck's transport moved to the API
+  upstream actually ships, with video over WebRTC. Across every body, an abort now cancels
+  the running verb and `stop` is exempt from the gate that made it necessary. 58 commits,
+  121 files, still nothing on a robot

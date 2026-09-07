@@ -684,8 +684,9 @@ _ADDR = typer.Option(None, "--address", help="jsonrpc: unix:///run/robotd.sock o
 _TOKEN = typer.Option(
     None,
     "--token",
-    help="The bridge token for a robot that wants one. Its installer writes one on the "
-    "robot. Reads QUACKD_DUCK_TOKEN when the flag is absent.",
+    help="The bridge token for a robot that wants one. The Open Duck's installer writes one "
+    "on the robot and QUACKD_DUCK_TOKEN carries it when the flag is absent. The ToddlerBot's "
+    "daemon has no installer and reads QUACKD_TODDLERBOT_TOKEN instead.",
 )
 _CAMERA_URL = typer.Option(
     None,

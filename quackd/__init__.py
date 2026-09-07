@@ -7,4 +7,4 @@ verbs, the robot's own controllers move, quackd enforces the contract. Everythin
 the repo serves that sentence.
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
