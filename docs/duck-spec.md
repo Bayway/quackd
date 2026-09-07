@@ -59,8 +59,6 @@ flock member (`robots: {reachy-01: reachy_mini:sim2d, duck-01: microduck:sim2d}`
 
 ### `flock` — cooperating robots (simulator only)
 
-Added in spec v0 by quackd 0.3.0 as an optional field. Older quackd versions refuse files
-that use it (strict parsing), which is the correct failure: they cannot honour the block.
 A flock duck with a non-empty `verbs.confirm` fails `quackd validate` (there is no per-duck
 terminal to prompt on). Full semantics: [flock.md](flock.md).
 
@@ -71,13 +69,13 @@ terminal to prompt on). Full semantics: [flock.md](flock.md).
 | `flock.allocation.bid` | `ball_distance` | `ball_distance` | coordinator | Lower camera-estimated distance wins. |
 | `flock.allocation.tie_break` | `duck_id` | `duck_id` | coordinator | Lexicographic member name. |
 | `flock.allocation.hysteresis_pct` | 0–100 | 20 | coordinator | A challenger must bid this much lower to unseat the current claimant. |
-| `flock.allocation.claim_lease_s` | 0–60 | 6 | coordinator | Longest a claim may be held before re-auction (sim clock). A fixed fuse from the grant, not a progress timer. |
+| `flock.allocation.claim_lease_s` | > 0 ≤ 60 | 6 | coordinator | Longest a claim may be held before re-auction (sim clock). A fixed fuse from the grant, not a progress timer. |
 | `flock.safety.min_separation_m` | 0.1–2.0 | 0.4 | coordinator | Non-kickers keep at least this far from the action. |
 | `flock.safety.one_claimant` | bool | true | coordinator | At most one robot approaches the ball. Always enforced, `false` is rejected at validation. |
-| `flock.safety.per_duck_heartbeat_s` | 0–10 | 1.0 | coordinator | Bus heartbeat period; the watchdog presumes a duck dead after 3×. |
+| `flock.safety.per_duck_heartbeat_s` | > 0 ≤ 10 | 1.0 | coordinator | Bus heartbeat period; the watchdog presumes a duck dead after 3× this, or this plus 2.5 s, whichever is longer. |
 | `flock.search.partition` | `heading` | `heading` | coordinator | Each duck owns a heading sector. |
-| `flock.search.restart_s` | 0–120 | 8 | member | Re-scan the sector when nothing was found for this long. |
-| `flock.roles` (v1) | mapping `{spotter: {requires: [...]}, kicker: {requires: [...]}}` | absent | coordinator | Heterogeneous roles. A robot bids only for a role whose `requires` its manifest satisfies. 0.4 knows exactly these two roles (both must be given), one robot each; `members` must then be a named list. Each role's `requires` ⊆ `allow`. |
+| `flock.search.restart_s` | > 0 ≤ 120 | 8 | member | Re-scan the sector when nothing was found for this long. |
+| `flock.roles` (v1) | mapping `{spotter: {requires: [...]}, kicker: {requires: [...]}}` | absent | coordinator | Heterogeneous roles. A robot bids only for a role whose `requires` its manifest satisfies. quackd knows exactly these two roles (both must be given), one robot each; `members` must then be a named list. Each role's `requires` ⊆ `allow`. |
 | `flock.frame_hints` (v1) | `auto` · `on` · `off` | `auto` | runner | Share arena-frame target hints between robots. `auto` is on only when every member runs in `sim2d`; there is no shared frame on hardware ([flock.md](flock.md)). |
 
 Unknown keys anywhere are errors (`extra="forbid"`).
@@ -90,7 +88,7 @@ Two phrasings are recognised (case-insensitive) and enforced by the executor:
   `battery_percent < N`, the run aborts. A body whose manifest has no `battery` sensor
   reports `None` and this rule can never fire on it, so it is silently unenforceable
   there rather than an error. A Reachy Mini is the shipped example
-  ([adapters/reachy_mini.md](adapters/reachy_mini.md)); `quackd validate --robot` warns.
+  ([adapters/reachy_mini.md](adapters/reachy_mini.md)).
 - `Same verb fails N times in a row` — N consecutive failed results of one verb abort the run.
 
 Every other entry is handed to the LLM under *"Abort conditions you must respect yourself"*.

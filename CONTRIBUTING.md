@@ -14,7 +14,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
 Windows, macOS and Linux are all first-class. Tests must never touch the network. About a
-third of that is the five seeded acceptance sweeps, which CI holds at 10 of 10 by setting
+third of that is the seven seeded acceptance sweeps, which CI holds at 10 of 10 by setting
 `QUACKD_STRICT_SEEDS=1`; locally they pass at 8 of 10 so a slow machine does not block you.
 
 Touching anything under `bridge/`? That is the code that runs on a robot, and there are
@@ -47,8 +47,9 @@ slug name · `allow` lists only verbs the robot provides (`quackd list-verbs --r
 phrasings if you want them enforced · body starts with `# Task` · `quackd validate
 your.duck --robot <adapter>:<backend>` passes for the robot you mean.
 
-**Ask for a note.** Since 0.6 every solo starter ends its numbered strategy with a
-`remember` and carries a short *Memory* section saying what is worth keeping for next time.
+**Ask for a note.** Every solo starter except `hello-world` and the three lookouts added in 0.7
+ends its numbered strategy with a `remember` and carries a short *Memory* section saying what
+is worth keeping for next time.
 Put the call in the strategy rather than only in a Memory section: a 14B local model read a
 prompt-level hint and never wrote to memory, and followed the same instruction on its first
 run once it was step 5. `remember` is offered automatically when memory is on and needs

@@ -8,7 +8,7 @@ on the body, and each adapter declares it in its manifest's `safety_authority`
 velocities, detects falls, and zeroes motion when commands stall. On an Open Duck Mini the
 deadman is quackd's own daemon, running on the robot and zeroing the velocity inside the
 50 Hz loop, so it is code we ship and therefore code we are answerable for. On the other
-six bodies there is no deadman in the robot that we verified. A Reachy Mini and a rosbridge
+six bodies upstream has no deadman that covers the whole body. A Reachy Mini and a rosbridge
 base declare `native: none`, and a LeRobot arm has a torque limit but holds its last goal.
 An XLeRobot's host watchdog zeroes its wheels and leaves the arms holding, and an
 AlohaMini's covers the base and the lift and never the arms, so both are partial by
@@ -19,15 +19,15 @@ layer (verb allowlists, confirm gates, budgets, the heartbeat, the kill switch)
 security-relevant, not just a convenience. A bug that lets an LLM or an MCP client bypass
 it is a security issue.
 
-Since 0.5 quackd also ships code that runs **on a robot**, which is a different kind of
+quackd also ships code that runs **on a robot**, which is a different kind of
 surface from everything above. Everything under `bridge/` is in scope in its own right:
 two daemons for an Open Duck Mini v2's Raspberry Pi, a host wrapper for an AlohaMini, and
-since 0.7 a daemon that walks a ToddlerBot.
+a daemon that walks a ToddlerBot.
 
 Also in scope:
 
 - API keys leaking into transcripts, GIFs, logs, run directories, or a robot's memory file.
-- **The memory file** (`~/.quackd/memory/<adapter>-<backend>.jsonl`, since 0.6). It holds
+- **The memory file** (`~/.quackd/memory/<adapter>-<backend>.jsonl`). It holds
   sentences a model wrote about a place it has been, it persists between runs, and it is
   read back into the next system prompt. It never leaves the machine and the executor never
   reads it, so a note cannot widen an allowlist, lift a budget or open a confirm gate. What
@@ -82,7 +82,9 @@ Only the latest released minor version receives fixes.
 The on-robot artifacts carry their own versions and live on someone else's computer, so
 they can drift from the quackd that talks to them: `BRIDGE_VERSION` and `CAMD_VERSION`
 on an Open Duck Mini's Raspberry Pi, `VERSION` in the ToddlerBot daemon on its Jetson,
-and the AlohaMini host wrapper's `quackd_host_version` field. Each handshake carries a
-protocol version and refuses a mismatch rather than guessing, but a daemon you installed
-months ago is a daemon that has not had your fixes. `quackd doctor --robot
-<adapter>:<backend> --address ...` prints what your robot is actually running.
+and the AlohaMini host wrapper's `quackd_host_version` field. The two daemons' handshakes carry a
+protocol version and refuse a mismatch rather than guessing (the AlohaMini wrapper only
+stamps its version into every observation, and quackd does not read it yet), but a daemon
+you installed months ago is a daemon that has not had your fixes. `quackd doctor --robot
+<adapter>:<backend> --address ...` connects and shows what the robot reports about itself,
+though none of these version strings is in that table yet.

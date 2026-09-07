@@ -124,7 +124,8 @@ the LAN ([lan.md](lan.md)), though that's identity only, not a way to drive it. 
 exceptions are the daemons quackd itself ships, for the Open Duck Mini and the ToddlerBot:
 each binds loopback, and if a token is configured it checks one with `hmac.compare_digest`
 before accepting a
-handshake (`--token`, or `QUACKD_DUCK_TOKEN`). Its camera server has no authentication at
+handshake (`--token`, or `QUACKD_DUCK_TOKEN` for the duck and `QUACKD_TODDLERBOT_TOKEN` for the
+ToddlerBot). The duck's camera server has no authentication at
 all, so tunnel it. On a Microduck the physical gamepad preempts remote commands; on an Open
 Duck it does not, because quackd's daemon *replaces* the gamepad the walk loop reads, which
 makes the power switch the only thing that always wins ([safety.md](safety.md)).

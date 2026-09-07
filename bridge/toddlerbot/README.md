@@ -44,10 +44,7 @@ there is no velocity at this hardware boundary at all.
 
 Line delimited JSON-RPC 2.0 over TCP on port **9873**, which is quackd's own at both ends. The
 Open Duck Mini already takes 9871 for its bridge and 9872 for its camera daemon, and
-SECURITY.md tells people to tunnel that pair, so this robot starts after both. The
-handshake reports what this particular robot actually has, and quackd narrows its manifest
-from the answer, so a build with no walk checkpoint loses locomotion entirely rather than
-being offered it and refused.
+SECURITY.md tells people to tunnel that pair, so this robot starts after both.
 
 The client also sends `bot.keepalive` on its own timer, several times a second, for as long
 as it is connected. That is the only thing that stops the deadman firing part way through a
@@ -71,10 +68,10 @@ to drive a robot. This runs over there and speaks a socket, so neither side has 
 win.
 
 ```bash
-git clone https://github.com/hshi74/toddlerbot && cd toddlerbot
-git checkout 84e02d14261292eec5d06f896e3145b35c54856c
-pip install -e . && pip install 'mujoco==3.3.4' 'scipy>=1.14'
-python quackd_toddlerbot_bridge.py --robot toddlerbot_2xc --toddlerbot .
+git clone https://github.com/hshi74/toddlerbot ~/toddlerbot
+git -C ~/toddlerbot checkout 84e02d14261292eec5d06f896e3145b35c54856c
+pip install -e ~/toddlerbot && pip install 'mujoco==3.3.4' 'scipy>=1.14'
+python quackd_toddlerbot_bridge.py --robot toddlerbot_2xc --toddlerbot ~/toddlerbot
 ```
 
 `mujoco` is not a declared dependency upstream. It arrives transitively and unpinned, so pin

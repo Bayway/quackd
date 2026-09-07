@@ -1,13 +1,13 @@
 # Architecture
 
-quackd is the brain daemon Microduck was missing, and since 0.4 a brain for any small robot
+quackd is the brain daemon Microduck was missing, and a brain for any small robot
 that has an adapter. This page is the map; the ADRs in [`adr/`](adr/) are the reasons.
 
 ## Three loops
 
 | Loop | Rate | Where | Owner |
 |---|---|---|---|
-| Reflexes | the body's own (50 Hz on both ducks) | below quackd: `robotd` on a Microduck, quackd's own bridge daemon on an Open Duck, the daemon on a Reachy Mini, the position controller on an arm, the driver on a base | the robot's own controllers: RL policies (ONNX) for balance, gait and stand-up on both ducks, a learned pick policy on the arm when one is loaded. quackd writes none of this control code. It does *host* the loop on two bodies, both of which have no network API to talk to. On the Open Duck Mini, since 0.5, it supplies only the seven numbers a gamepad would ([ADR-0024](adr/0024-open-duck-mini.md)). On the ToddlerBot, since 0.7, it owns the fifty hertz loop outright, because that robot's `step()` is a no-op and a humanoid frozen mid-stride while a model thinks is a humanoid on the floor ([ADR-0028](adr/0028-toddlerbot.md)). Even there quackd writes no gait: the walk checkpoint is the robot's own. |
+| Reflexes | the body's own (50 Hz on both ducks) | below quackd: `robotd` on a Microduck, quackd's own bridge daemon on an Open Duck, the daemon on a Reachy Mini, the position controller on an arm, the driver on a base | the robot's own controllers: RL policies (ONNX) for balance and gait on both ducks and for stand-up on the Microduck alone (a fallen Open Duck Mini needs a human), a learned pick policy on the arm when one is loaded. quackd writes none of this control code. It does *host* the loop on two bodies, both of which have no network API to talk to. On the Open Duck Mini it supplies only the seven numbers a gamepad would ([ADR-0024](adr/0024-open-duck-mini.md)). On the ToddlerBot it owns the fifty hertz loop outright, because that robot's `step()` is a no-op and a humanoid frozen mid-stride while a model thinks is a humanoid on the floor ([ADR-0028](adr/0028-toddlerbot.md)). Even there quackd writes no gait: the walk checkpoint is the robot's own. |
 | Steering | 5–20 Hz | quackd process | perception + composite verbs. `go_to` (alias `walk_to`) closes the approach loop on detections. |
 | Deliberation | ~0.2–1 Hz | LLM | reads frame summary + state + last result, picks one **verb**, judges success. |
 
@@ -66,7 +66,7 @@ sequenceDiagram
 | `quackd/perception/` | `Detection` + `Detector`; the HSV colour-blob default; the lazy YOLO extra. |
 | `quackd/agent/` | The loop, the prompts, the transcript, and one provider per vendor behind `LLMProvider`. |
 | `quackd/memory.py` | What a robot keeps between runs: one JSONL file per `adapter:backend` with the notes the pilot saved (`remember`) and an episode per run; rendered into the prompt next time ([memory.md](memory.md), ADR-0025). |
-| `quackd/mcp_server.py` | A robot, or a fleet (`--robots`), as MCP tools: eight `robot_*` tools through one executor per robot. The eight `duck_*` aliases 0.3 pinned to the default robot were removed in 0.5. |
+| `quackd/mcp_server.py` | A robot, or a fleet (`--robots`), as MCP tools: eight `robot_*` tools through one executor per robot. |
 | `bridge/toddlerbot/` | quackd's own ToddlerBot daemon: the fifty hertz loop upstream has no daemon for, plus the ten things it does not do at all, enumerated in the daemon's own docstring and in `bridge/toddlerbot/README.md` rather than a third time here. It owns the control loop rather than feeding one, which is true of no other body quackd drives. Standard library plus numpy, never imported by quackd, shipped in the sdist and never in the wheel ([ADR-0028](adr/0028-toddlerbot.md)). |
 | `bridge/alohamini/` | quackd's own AlohaMini host: upstream's host loop with the arm torque its own `configure()` disables and never re-enables, plus three fields in every observation so quackd can tell this host from a stock one. Never imports quackd, ships in the sdist and never in the wheel ([ADR-0027](adr/0027-alohamini.md)). |
 | `bridge/open_duck/` | **The first robot side quackd shipped**, and one of the three above. It has still never run on a duck, like everything else here. Two daemons for an Open Duck Mini v2's Raspberry Pi: the bridge, which is upstream's own walk loop with the gamepad it reads replaced by a socket, and the camera server, which serves one JPEG over HTTP. Standard library plus numpy, never imported by quackd, shipped in the sdist and never in the wheel ([ADR-0024](adr/0024-open-duck-mini.md)). |
@@ -98,7 +98,7 @@ sequenceDiagram
 
 Step 0, before all of that: the loop calls `connect()` and, when an adapter answers with a
 manifest, builds the registry from it (`registry_from_manifest`). A bare transport answers
-`None` and gets the Microduck vocabulary, which is why every 0.3 test path is unchanged.
+`None` and gets the Microduck vocabulary.
 
 Outcomes: `success` / `failure` (the LLM's claim via the meta tools), `budget`, `aborted`
 (heartbeat, kill switch, `abort_when`). In sim the run summary also carries ground truth
@@ -108,7 +108,7 @@ Outcomes: `success` / `failure` (the LLM's claim via the meta tools), `budget`, 
 
 One JSON object per line: `{"t": seconds, "kind": ..., ...}` with kinds `run_start`
 (contract, system prompt, tools), `observation`, `llm` (text, tool_calls, usage,
-stop_reason), `enforce`, `verb` (name, params, ok, summary, data), `declare`, `frame`,
+stop_reason), `enforce`, `verb` (name, params, ok, summary, data), `declare`, `memory`, `frame`,
 `run_end`. Example: [`assets/transcript-example.jsonl`](assets/transcript-example.jsonl).
 
 ## Where the seams are

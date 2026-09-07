@@ -126,8 +126,7 @@ because the host defaults to `alohamini2` while upstream's own client defaults t
 and nothing cross-checks them. A `--no_follower` host runs the base and the lift alone. quackd detects that from the
 first observation's key set and drops `move_joints`, `gripper` and `home_arms`, leaving
 eight verbs rather than eleven: `report_state`, `stop`, `move`, `lift`, `observe`, `go_to`,
-`search_scan` and `approach_and`. The lift survives because it is not an arm. And the
-manifest collapses to the non-arm verbs automatically.
+`search_scan` and `approach_and`. The lift survives because it is not an arm.
 
 ## VERIFIED (read from upstream source on 2026-09-05, at `ab4462b`)
 

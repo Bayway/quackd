@@ -59,4 +59,4 @@ what switches torque on, and that is when the arms become a thing to think about
 
 Whether the arms really were limp on the stock host, what the lift's travel speed actually is
 in mm/s, and whether the over-current trip fired before anything you would have wanted it to
-catch. The adapter page's "How to help" says where that goes.
+catch. Open an issue with the transcript.

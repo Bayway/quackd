@@ -63,7 +63,8 @@ wrote to it. What works is
 putting the call **inside the numbered strategy** of the `.duck` body, right before the
 declaration (`5. When the ball has moved ≥ 0.3 m, \`remember\` where you found the ball,
 \`quack\` once and declare success.`), plus a short *Memory* section saying what is worth
-keeping. Every solo starter duck now does that; `--goal` runs get the same line. The flock
+keeping. The solo starters do that, except the three lookouts added in 0.7 (`xlerobot-lookout`,
+`alohamini-lookout`, `toddlerbot-lookout`); `--goal` runs get the same line. The flock
 ducks do not, because the coordinator does not run the deliberation loop and has no
 `remember`. `hello-world` is left alone: it is a smoke test that says "do not do anything
 else". Write your own ducks the same way.

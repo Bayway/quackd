@@ -49,9 +49,10 @@ deadman has to be a *trajectory* — slew to a safe pose and hold — rather tha
 
 ## A stop that is not a stop
 
-Three of these upstreams disable torque inside `disconnect()`, by default. One of them
-installs a C-level `atexit` handler that disconnects every client, so **any** normal
-interpreter exit de-torques a standing robot, and `SIGTERM` does not even reach it.
+Four of these upstreams disable torque inside `disconnect()`, three by a flag that defaults
+on and the ToddlerBot unconditionally. That one also installs a C-level `atexit` handler
+that disconnects every client, so **any** normal interpreter exit de-torques a standing
+robot, and `SIGTERM` does not even reach it.
 
 **What to do:** treat teardown as part of the stop contract. quackd never calls those, and the
 daemon it ships settles to a safe pose before anything is allowed to exit.

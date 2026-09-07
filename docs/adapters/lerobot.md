@@ -12,7 +12,7 @@ backend has **never been run against an arm by us**.
 uvx quackd list-verbs --robot lerobot:mock
 uvx quackd validate ducks/find-and-kick.duck --robot lerobot:mock     # exit 1: requires ... does not provide it
 uvx quackd serve-mcp --robots arm=lerobot:mock,duck=microduck:sim2d   # an arm and a duck behind one MCP server
-uv pip install "quackd[lerobot]" && quackd list-verbs --robot lerobot:real --address /dev/ttyACM0   # Python 3.12+
+uv pip install "quackd[lerobot]" && quackd doctor --robot lerobot:real --address /dev/ttyACM0   # Python 3.12+
 ```
 
 ## Backends
@@ -125,7 +125,7 @@ Pinned at `fbb811f` (main, 2026-09-01; read 2026-09-02). PyPI had 0.6.1 that day
 | Name | What quackd does |
 |---|---|
 | `NO_CLIENT_DEADMAN` | stop is hold; torque is never disabled by quackd |
-| `POLICY_PIPELINE` | `pick` runs an injected policy object; `load_policy()` builds one from verified names and is untested |
+| `POLICY_PIPELINE` | `pick` runs an injected policy object; `load_policy()` builds one from a checkpoint and is untested |
 | `CAMERA_COLOR_ORDER` | RGB assumed; the assumption is listed in `report_state` |
 | `GRIPPER_OPEN_VALUE` | 100 is open, 0 is closed; `holding` is what was commanded, not sensed |
 | `JOINT_RANGES` | `move_joints` takes -180..180 degrees as a schema bound; the motors clip the rest |

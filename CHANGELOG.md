@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A documentation pass for 0.7.0, for fewer words rather than more.** The README lost about
+  a fifth of its length: the table that listed all eight bodies a third time is gone, the bullet
+  list that repeated the status table is gone, the "since 0.4" release narration is gone, and
+  the tagline no longer names four bodies out of eight. Every count and claim in the living
+  docs was then read against the code, twice, and the second read is where the value was.
+- **Three documented commands could not run, all the same way.** `quackd list-verbs` takes only
+  `--robot`, so the one line on `docs/adapters/lerobot.md` and on `docs/adapters/rosbridge.md`
+  that reaches a real robot exits 2 on an unknown option, and step 7 of the ToddlerBot checklist
+  did too. Worse than failing, that step could not have done its job even without the flag:
+  `list-verbs` builds its table from the static description, so `move` is absent whether or not
+  a walk checkpoint is staged. All three are `quackd doctor --robot X --address Y` now, which is
+  the command that connects and reports what the robot itself said.
+- **Two safety claims were the wrong way round.** `docs/adapters/xlerobot.md` told an owner that
+  when a camera takes down the observation stream "the arms keep holding their last goal under
+  torque, which is what you want". Upstream's host at the pin calls `get_observation()` outside
+  its inner `try`, so that exception leaves the loop and reaches `finally: robot.disconnect()`,
+  which is the torque-off path: the arms go limp and drop what they hold, and the watchdog never
+  fires because the loop that checks it is gone. The hour-mark exit takes the same path, which
+  the XLeRobot checklist now says at the step about the clock. And the README claimed a verb
+  timeout aborts the run; the executor stops the robot and returns a failed result, which the
+  model then sees.
+- **The rest of what reading found.** The README said the AlohaMini's arm verbs appear only with
+  quackd's host wrapper, when they exist and refuse without it, which is the distinction the
+  Open Duck row two lines up exists to make. The Open Duck's camera capability comes from
+  `--camera-url` and not from `duck_config.json`, so the checklist's abort note stopped an owner
+  at a correctly built duck; `FALL_SIGNAL` described an IMU read the daemon does not do; the
+  sound row said the bridge resolves a mood to a file when it presses the pad's random-sound
+  button. `bridge/open_duck/README.md` was missing three flags from a table that claims to list
+  them all, and still said a velocity ceiling above upstream's is "applied on top" when 0.7
+  refuses to start. The ToddlerBot page called itself the second body whose robot side quackd
+  ships (it is the third) and credited the daemon with a walk clamp that quackd applies. The
+  ToddlerBot checklist never mentioned that the daemon binds loopback, so every `<host>` in it
+  would have been refused. `docs/memory.md` and `CONTRIBUTING.md` said every solo starter asks
+  for a `remember` when the three 0.7 lookouts and `hello-world` do not, `docs/architecture.md`
+  gave the Open Duck a stand-up policy it does not have, `docs/lan.md` documented a `--json`
+  flag that `list-verbs` never had, the FAQ named only the duck's token variable for two
+  daemons, `docs/duck-spec.md` promised a `validate` warning nothing emits and three flock
+  ranges that included a zero the schema rejects, `docs/safety.md` put the consecutive-failure
+  abort at the wrong stage of the executor, `docs/reading-robots.md` counted three upstreams
+  that de-torque on disconnect when there are four, and `SECURITY.md` claimed a version
+  handshake and a `doctor` read-out that the AlohaMini wrapper and `doctor` do not do. The rest
+  is release-history narration deleted from pages that describe quackd as it is now.
 - **CI ends a hung test run in minutes, with every thread's stack.** A 20 minute job timeout,
   pytest's own `faulthandler_timeout` at 300 s, and an exit watchdog in `tests/conftest.py`
   that dumps every thread and forces the exit if the interpreter has not gone two minutes after

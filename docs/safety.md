@@ -6,7 +6,7 @@ A biped falls in 0.3 s; an LLM answers in 3 s. Everything here follows from that
 
 | Layer | Owner | What it guarantees |
 |---|---|---|
-| Body | the robot's own controller | **Whatever that particular body actually offers, which is not the same everywhere.** The Microduck's `robotd` gives joint and thermal clamps, fall detection and a **deadman**: velocity goes to zero when `robot.move` notifications stop. An Open Duck Mini v2 gives *none of those* — no fall detection, no thermal clamp, no deadman of its own (its command source is a local gamepad, which is never silent), and no way to get up if it goes over; its deadman is quackd's own daemon on the Pi, and the human watching is the only fall detector. The body is still the sole safety authority: clients send intents, never motor writes. What each body offers is declared in its manifest's `safety_authority`, and `quackd doctor` prints what the robot itself reported (see "On other bodies"). |
+| Body | the robot's own controller | **Whatever that particular body actually offers, which is not the same everywhere.** The Microduck's `robotd` gives joint and thermal clamps, fall detection and a **deadman**: velocity goes to zero when `robot.move` notifications stop. An Open Duck Mini v2 gives *none of those*: its deadman is quackd's own daemon on the Pi and the human watching is its only fall detector (details under "On hardware"). The body is still the sole safety authority: clients send intents, never motor writes. What each body offers is declared in its manifest's `safety_authority`, and `quackd doctor` prints what the robot itself reported (see "On other bodies"). |
 | Conversation | quackd `Executor` | The LLM and MCP clients can only do what the `.duck` allows, as often as the budget allows, with a human in the loop where the contract says so. |
 | Session | quackd `Heartbeat` + `KillSwitch` | A dead transport or a worried human ends in a `stop` intent. |
 
@@ -18,15 +18,16 @@ this order: abort flag (`stop` is exempt, so the brake still works) → **allowl
 model, not crashes) → **confirm gate** (`verbs.confirm` or `safety_class` ∈ {confirm,
 dangerous}; y/N in the terminal, `--yes` to auto-accept, MCP refuses unless `--yes`) →
 **budgets** (`max_steps` here; `max_llm_calls` and `max_minutes` in the loop) →
-machine-enforced **`abort_when`** (battery threshold, consecutive failures) →
+machine-enforced **`abort_when`** (the battery threshold here, consecutive failures once
+the result is in) →
 **preconditions** (not fallen, not sitting) → `--dry-run` → execute, racing the **timeout**
 against the abort, so a kill switch cancels the verb. A verb that times out or raises stops
 the duck and reports a failure.
 
 ## Heartbeat
 
-A task pings `transport.heartbeat()` every 500 ms (`robot.health` on hardware, a liveness
-check in sim). One failure → `stop` intent → abort flag → the loop ends with
+A task pings `transport.heartbeat()` every 500 ms (`robot.health` on a Microduck, each
+backend's own health call elsewhere, a liveness check in sim). One failure → `stop` intent → abort flag → the loop ends with
 `outcome: aborted`. Upstream's own rationale: "LLMs stall mid-inference".
 
 ## Kill switch
@@ -159,7 +160,7 @@ widen it. **You are responsible for your robot.**
 
 ## On other bodies
 
-Since 0.4 quackd drives more than the duck, and the honest answer to "what stops it when
+quackd drives more than the duck, and the honest answer to "what stops it when
 quackd goes quiet" differs per body. Each manifest says so
 (`safety_authority: {native, deadman}`), and `stop` always means stop, never collapse:
 
@@ -184,7 +185,7 @@ they move the whole body under a controller quackd does not write.
 A model that is *allowed* to `walk` can walk into a wall; the sim has walls, your living
 room has stairs. The allowlist is your tool: a `.duck` for a new space should start small.
 
-Since 0.6 there is one more thing to know about. A robot's memory
+There is one more thing to know about. A robot's memory
 ([memory.md](memory.md)) is text a model wrote, kept on disk, and handed to the *next*
 model as part of its system prompt. The executor never reads it, so a note cannot widen an
 allowlist, lift a budget or open a confirm gate: none of the guarantees above depend on it

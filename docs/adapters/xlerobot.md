@@ -54,7 +54,7 @@ API needs; this one has one.
   therefore never commands the head at all, and `search_scan` turns the whole cart instead.
 - **A battery reading.** The power station in the bill of materials has no data link, so
   `battery_percent` is permanently `None` and `battery` is not in `sensors`. A
-  "battery below N%" abort can never fire on this robot; `quackd validate` already warns.
+  "battery below N%" abort can never fire on this robot.
 - **A pose.** There is no odometry anywhere in the observation — velocities only — so `go_to`
   closes the loop on the camera alone and `report_state` never claims a position.
 - **Cartesian reach, `pick`, `place`.** There is no inverse kinematics on the robot class and no
@@ -128,8 +128,10 @@ about the host not answering and its one hour lifetime, because that is the far 
 cause. **If a cart goes quiet shortly after you enabled a camera, unplug the camera before you
 debug anything else.**
 
-The 500 ms watchdog handles the robot end of this correctly: the base stops. The arms keep
-holding their last goal under torque, which is what you want and is not a stop.
+The watchdog does not handle the robot end of this: it runs in the loop that just died. What
+runs instead is the host's `finally`, which is upstream's `disconnect()`: the wheels are
+zeroed, then torque is disabled and the arms go limp, dropping whatever they held. The same
+`finally` runs when the hour is up.
 
 ### Colour order
 
@@ -200,7 +202,7 @@ port can drive the robot. Bind it to loopback and reach it through an ssh tunnel
 | `CAMERA_COLOR_ORDER` | the host's JPEG holds BGR | quackd swaps to RGB. One photograph of a red object retires this |
 | `CAMERA_FOV_DEG` | upstream names no field of view | the detector's 90° is the simulator's camera, not this one; bearings are approximate and `extras.assumptions` says so |
 | `HEAD_AXES` | which head motor is yaw is undocumented | quackd never commands the head, and does not declare `gaze` |
-| `BASE_VARIANT` | the three-omniwheel base is the default | other variants declare `max_vy: 0.0`, so a strafe is clamped and reported rather than silently ignored |
+| `BASE_VARIANT` | the three-omniwheel base is the default | quackd cannot tell the bases apart on the wire, so the owner says which with `?variant=diff2` or `?variant=mecanum` on the address; those declare `max_vy: 0.0`, so a strafe is clamped and reported rather than silently ignored |
 | `OBSERVATION_STALENESS` | nothing on the wire is timestamped | quackd stamps on arrival and calls a reading older than the watchdog window a heartbeat failure, instead of serving a cache like upstream's own client does |
 | `THREAD_SAFETY` | the sockets' thread safety is undocumented | every send and receive is serialised under one lock in a worker thread |
 | `BATTERY` | nothing reports a battery | `battery_percent` is `None` and the sensor is not declared |

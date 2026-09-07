@@ -15,9 +15,9 @@ ships the daemon that runs on it, so the only untested thing left is the duck.
 
 | Channel | One line |
 |---|---|
-| GitHub | Pilot a small robot with any LLM through `.duck` skill files and MCP. Eight robots supported, four of them open hardware you can build, a built-in simulator, no hardware needed. |
+| GitHub | Pilot a small robot with any LLM through `.duck` skill files and MCP. Eight robots supported, three of them open hardware you can build, a built-in simulator, no hardware needed. |
 | Hacker News | A `.duck` file is a SKILL.md for a robot: the frontmatter is enforced, the body is the prompt, the executor never trusts the model. Point it at the wrong robot and it refuses before anything moves. |
-| X / Twitter | Give your Microduck a brain. Your Open Duck Mini, your Reachy Mini, your arm and your wheeled base too. Any LLM, one `.duck` file. 🦆🧠 |
+| X / Twitter | Give your Microduck a brain. Or one of seven other small robots, from a Reachy Mini head to a ToddlerBot humanoid. Any LLM, one `.duck` file. 🦆🧠 |
 | Pollen Discord | We built the brain daemon that was missing from `robotd / mediad / padd / tofd`, and it now drives the Reachy Mini too. We'd like you to tell us what we got wrong about both SDKs. |
 | Open Duck Mini builders (the apirrone Discord, the BDX droid crowd) | You printed a duck that walks. quackd is the layer that decides where it walks, from a plain-language goal. It ships the daemon for your Pi, it knows your duck cannot kick and cannot get up, and nobody has run it on real hardware yet, so the first person who does gets a row in the table. |
 | Reachy Mini owners (Pollen + HF communities) | Your head already knows how to look and emote. quackd is the layer that decides *when*, from a plain-language goal, and it will never offer it `kick` because its manifest does not have one. |
@@ -104,7 +104,7 @@ please correct it" framing.
   "it works on the real thing", with `quackd doctor` output and a transcript.
 - **Third beat: when Microducks arrive**, which is around Christmas 2026 for the earliest
   pre-orders and four to six months out for later ones, so this beat lands per person rather
-  than on one date: a hardware run of the five Microduck
+  than on one date: a hardware run of the six Microduck
   starters, `jsonrpc` flipped to ✅, and the WebSocket backend if upstream shipped it. That's
   the launch that earns v1.
 

@@ -32,7 +32,7 @@ spec = LearnedVerbSpec(
 verb = register_learned_verb(default_registry(), spec, runner=None)
 ```
 
-`default_registry()` is the Microduck manifest's registry, which matters since 0.4: a verb
+`default_registry()` is the Microduck manifest's registry, which matters: a verb
 that is not in a robot's manifest does not exist for that robot, so registering a learned
 verb into a registry is only half the story. For it to be offered to the model, allowed by a
 `.duck`, or listed by MCP on a given body, that body's manifest has to declare it. When

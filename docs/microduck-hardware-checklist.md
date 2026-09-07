@@ -55,8 +55,8 @@ Then read `report_state` in the transcript. **`posture` must not be `unknown`.**
 duck may walk is reading nothing: `fallen` is `false` because nobody is looking, not because
 the duck is upright. quackd refuses to walk in that state on purpose.
 
-> Abort if posture is `unknown`. Check that `robot.subscribe` was accepted — `quackd doctor`
-> prints the answer, including the robot's real skill list.
+> Abort if posture is `unknown`. Check that `robot.subscribe` was accepted — `report_state`
+> carries its answer in `extras.subscribed`, including the robot's real skill list.
 
 ## 4. A dry run moves nothing
 
@@ -121,7 +121,7 @@ thing that broke.
 > **Abort the whole session if the legs keep driving.** The deadman is the protection every
 > step below this one depends on. Nothing else quackd does matters if it is not there.
 
-The command, since this step never named one. `--provider fake` has no script for a free-form goal, so it needs a real model:
+The command, since this step never named one. `--provider fake` answers a free-form goal with a fixed script that ignores it, so it needs a real model:
 
 ```bash
 quackd run --goal "walk in place with small steps, do not turn, then stop" \

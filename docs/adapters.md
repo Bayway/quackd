@@ -3,7 +3,7 @@
 An adapter is how a robot joins quackd. It answers one question, "what is this body and
 what can it do", as a `RobotManifest`, and it moves the body through intents the robot's
 own controllers execute. Everything else (the loop, the executor, the `.duck` contract,
-the MCP server, flocks) is shared. quackd ships eight: `microduck`, `reachy_mini`,
+the MCP server) is shared. quackd ships eight: `microduck`, `reachy_mini`,
 `lerobot`, `rosbridge`, `open_duck`, `xlerobot`, `alohamini` and `toddlerbot`. This page is the recipe; [ADR-0017](adr/0017-robot-adapters-and-manifest.md),
 [ADR-0018](adr/0018-core-verbs-extensions-aliases.md) and
 [ADR-0022](adr/0022-per-adapter-upstream-refs.md) are the reasons.
@@ -135,8 +135,9 @@ robot side you ship needs no extra at all: `open_duck` and `toddlerbot` declare 
 
 **And never send the body's go-limp call.** `disable_motors`, `disable_torque`, `relax`, an
 XLeRobot `disconnect()`: stop means stop, not collapse. This applies to teardown as much as to
-`stop`, and upstream's own `disconnect()` is usually where the trap is — three of these robots
-disable torque inside it, by default, so `close()` has to stop and hold rather than delegate.
+`stop`, and upstream's own `disconnect()` is usually where the trap is — four of these robots
+disable torque inside it (three by default, the ToddlerBot always), so `close()` has to stop
+and hold rather than delegate.
 
 ### If you speak a wire
 
@@ -156,8 +157,7 @@ You own the framing, so you own the failure modes that come with it.
 
 ### If you ship the robot side
 
-The three rules are that it never imports quackd, it ships in the sdist and never in the
-wheel, and it stays testable with no hardware. What that actually costs, beyond writing it:
+What the three rules above actually cost, beyond writing it:
 
 - **A handshake that reports what is really there**, and a `connect()` that narrows the
   manifest from the answer. A capability the daemon reports is a verb quackd will offer, so it

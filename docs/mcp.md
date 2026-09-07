@@ -24,12 +24,6 @@ one, else the first Microduck, else the first declared.
 | `robot_recall(robot?)` | What that robot remembers from earlier sessions and runs: the notes a pilot saved and how its recent runs ended ([memory.md](memory.md)). Costs no step; the server's instructions ask the model to call it early. |
 | `robot_remember(robot?, text, tags?)` | Keep one short fact for future sessions on that robot. Moves nothing, costs no step; the same sentence twice updates the old note. Off with `--no-memory`. |
 
-0.3 shipped eight `duck_*` tools pinned to the default robot. 0.4 kept them as deprecated
-aliases and said they would go in 0.5, and they have. Omit the `robot` argument to address
-the default robot, which is what they did. `duck_get_frame` has no exact replacement by
-design: `robot_observe` does the same job but goes through the executor, so frames are
-budgeted and logged like every other verb.
-
 Without a loaded `.duck`, every verb that is not `dangerous` is allowed and the session runs
 on a default budget of 40 verb steps and five minutes, counted from when the server started.
 Load one to get the guard rails and the task's own budget. Contracts, budgets and abort
@@ -135,7 +129,7 @@ quackd serve-mcp --robot open_duck:sim2d                                     # a
 
 ## Driving a real Open Duck Mini from Claude
 
-The one body you can build yourself needs three flags, because its camera is a separate
+A real Open Duck Mini needs three flags, because its camera is a separate
 HTTP service on the robot and its bridge wants a token. Tunnel both ports rather than
 exposing them (`ssh -L 9871:127.0.0.1:9871 -L 9872:127.0.0.1:9872 your-pi`), then:
 

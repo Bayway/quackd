@@ -67,7 +67,7 @@ preempts it cleanly and does not count as a failure.
 
 ## Heterogeneous roles (0.4)
 
-A `duck: 1` file may declare `flock.roles`, and 0.4 knows exactly two:
+A `duck: 1` file may declare `flock.roles`, and quackd knows exactly two:
 
 ```yaml
 flock:
@@ -186,9 +186,8 @@ Sim only. Nothing multi robot has run on hardware, and the acoustic channel stay
 theatrical (a quack, or a Reachy's expressive sound, marks the sighting; Wi Fi would carry
 the real data). Two choreographies ship: `flock-kick` (ducks) and
 `reachy-spots-duck-kicks` (a head and a duck), both 10 of 10 seeds with scripted pilots
-and ground truth checks. An MQTT bus implementing the same `Bus` protocol exists since 0.4
+and ground truth checks. An MQTT bus implementing the same `Bus` protocol exists
 ([lan.md](lan.md)), library only and tested on a fake broker; a flock across machines
 also needs a clock across machines, which is future work, as are hardware flocks once
-Microducks ship, and a flock of Open Ducks additionally needs the runner to learn a
-third body. See [adapter-status.md](adapter-status.md) for the wider honesty
+Microducks ship. See [adapter-status.md](adapter-status.md) for the wider honesty
 table.

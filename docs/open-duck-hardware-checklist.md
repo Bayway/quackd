@@ -44,8 +44,9 @@ against upstream's numbers. Then read the seven element command layout in
 [`docs/adapters/open_duck.md`](adapters/open_duck.md) and satisfy yourself it matches what
 upstream's teleop sends.
 
-> Abort if the capabilities are wrong. They come from your `duck_config.json`, and they
-> decide which verbs exist.
+> Abort if the capabilities are wrong. They come from your `duck_config.json`, except
+> `camera`, which is true only when `check` is given the same `--camera-url` as the unit,
+> and they decide which verbs exist.
 
 ## 4. The protocol, with no robot at all
 
@@ -134,8 +135,9 @@ quackd run open-duck-lookout --robot open_duck:bridge --address tcp://127.0.0.1:
     --camera-url http://127.0.0.1:9872/snapshot.jpg --dry-run
 ```
 
-Verbs run, nothing moves. `--camera-url` goes on this side too when you are tunnelling: the
-bridge advertises a URL from its own point of view, which is not routable from your laptop.
+Verbs run, nothing moves. `--camera-url` is optional on this side when you are tunnelling: the
+bridge advertises `http://127.0.0.1:9872/snapshot.jpg` from its own point of view, and the
+tunnel is what makes that address reach it from your laptop.
 
 ## 7. The head only, feet still off the ground
 
@@ -163,8 +165,7 @@ quackd run --goal "walk in place with small forward steps, do not turn, then sto
 ```
 
 Watch `loop_hz` in the run's own `report_state`. Anything below 35 Hz fails the heartbeat on
-purpose, because a starved Pi walks badly with no other symptom — and a *paused* policy
-reports about 10 Hz, which quackd now names as a pause rather than blaming the CPU.
+purpose, because a starved Pi walks badly with no other symptom.
 
 Read it from the run, not from a second `quackd doctor` in another terminal: a second client
 is fine to have connected, but the run's own state is what the pilot is acting on.

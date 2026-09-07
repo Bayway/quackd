@@ -49,7 +49,7 @@ requires one is refused before a run starts, with the validator's own sentence.
 
 When the duck is down, `move` and `gaze` refuse with a message that names no verb and says a
 human must stand it up, because nothing quackd can call will recover it. A task pointed at
-this robot should say so in its body, and both starter tasks do.
+this robot should say so in its body, and `open-duck-scout` does.
 
 ## The manifest
 
@@ -137,11 +137,10 @@ frames can come from; `expression_features.camera` decides who owns the *device*
 URL the bridge advertises no camera, and `observe`,
 `go_to`, `search_scan` and `approach_and` do not exist for that duck rather than existing
 and failing. On camera ownership: upstream's walk loop — the script the bridge runs — opens no camera at
-all, so `camd` and the bridge cannot be fighting over the device. `camd` used to refuse to
-start when `expression_features.camera` was true and now only warns, because the collision it
-was avoiding cannot happen in that process. Setting the flag false is still tidier, and if
-you run one of upstream's *own* camera scripts alongside, the two really will contend — which
-now shows up honestly, as failing captures and expiring snapshots rather than a frozen frame.
+all, so `camd` and the bridge cannot be fighting over the device, and `camd` only warns when
+`expression_features.camera` is true. Setting the flag false is still tidier, and if you run
+one of upstream's *own* camera scripts alongside, the two really will contend, which shows up
+as failing captures and expiring snapshots.
 
 ### What is honestly degraded on hardware
 
@@ -197,8 +196,8 @@ less than its name suggests, and they are worth knowing before you write a task.
 | Thing | What quackd does |
 |---|---|
 | `COMMAND_TTL` | quackd's own deadman, in the consumer, reported at connect; the manifest claims one only when a bridge says it has one |
-| `FALL_SIGNAL` | a bridge that can see the IMU latches a fall; one that cannot reports posture unknown. Either way there is no recovery to attempt |
-| `SOUND_FILE_NAMES` | quackd sends a mood from its own vocabulary and the bridge resolves it, never spelling a `.wav` name |
+| `FALL_SIGNAL` | the bridge does not read the IMU, so it never reports a fall and posture reads unknown. There is no recovery to attempt anyway |
+| `SOUND_FILE_NAMES` | quackd sends a mood from its own vocabulary and never spells a `.wav` name; the bridge logs it and presses the random-sound button |
 | `ANTENNA_GESTURES` | perk, droop and wiggle are quackd's words, turned into servo positions by the bridge |
 | `LOOP_HEADROOM` | the bridge reports its loop rate and quackd's heartbeat fails below 35 Hz, so a starved Pi aborts a run instead of walking badly |
 

@@ -1,7 +1,7 @@
 # ToddlerBot
 
 A small open source humanoid, about 56 cm and 3 kg, with two arms, two legs, a two joint neck
-and thirty Dynamixel servos. It is quackd's first full humanoid, and the second body whose
+and thirty Dynamixel servos. It is quackd's first full humanoid, and the third body whose
 robot side quackd ships, because upstream has no network API of any kind.
 
 Upstream: [hshi74/toddlerbot](https://github.com/hshi74/toddlerbot), pinned at
@@ -122,8 +122,7 @@ answer:
 a checkpoint at `ckpts/NAME/` that upstream neither publishes nor checks in, so it is a file
 you supply. `--gripper` is only honoured if the robot has gripper motors. A capability the
 daemon reports is a verb quackd will offer, so the daemon reports only what it loaded: a
-camera that will not open means `observe` never appears, and a missing checkpoint means
-`move`, `go_to` and `approach_and` do not exist rather than being gated off.
+camera that will not open means `observe` never appears.
 
 The daemon also reads the loaded checkpoint's own `command_range` at startup and reports the
 velocity envelope it was really trained on, which is what quackd's `limits` narrow to. An
@@ -182,7 +181,7 @@ which is strictly more than the fake body proves and strictly less than a robot.
 | The version disagrees | `0.2.0` | while the tag says v2.0.0 |
 | CI is off | `Skipping tests` | nothing here was machine-verified upstream |
 | MuJoCo is transitive | `brax` | undeclared and unpinned |
-| The builds | `Robot` | five names, thirty to thirty-two motors |
+| The builds | `Robot` | five names: four robots of thirty to thirty-two motors, and a fourteen motor leader arm |
 | The only joint limits | `motor_limits` | parsed from the MJCF, never from YAML |
 | The safe pose | `default_motor_angles` | a dict of radians per motor, **not** `default_motor_pos`, which is a real upstream name on a different class. quackd reads it with no fallback: zeros are a large wrong motion on this body |
 | Calibration is absent | `motors.yml` | gitignored, so a fresh clone has none |
@@ -199,7 +198,7 @@ which is strictly more than the fake body proves and strictly less than a robot.
 | The walk step | `WalkPolicy.step` | takes the observation and the sim, returns a pair |
 | The envelope | `command_range` | rows 5, 6 and 7 are the walk velocities |
 | All three or none | `control_inputs` | a partial dict raises mid-tick |
-| Never clipped upstream | `walk_x` | out-of-envelope goes straight to the network, so the daemon clamps |
+| Never clipped upstream | `walk_x` | out-of-envelope goes straight to the network, so quackd clamps to the envelope before sending |
 | The simulated body | `MuJoCoSim` | takes the Robot, runs at the same fifty hertz |
 | Headless by default | `vis_type` | only render or view build anything that needs GL |
 | Do not use it | `controller_type` | the position controller's step takes the wrong arity |

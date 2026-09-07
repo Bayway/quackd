@@ -23,16 +23,17 @@ e-stop, and nothing reports a battery, so no run will ever abort on a flat one. 
    has not**: `XLerobot.connect()` blocks on a bare `input()` whenever a calibration file
    exists. Press enter.
 5. **Note the clock.** The host exits by itself after 3600 seconds and there is no systemd
-   unit, autostart or supervisor anywhere upstream. A session longer than an hour needs it
-   restarted, and quackd will report the silence as a heartbeat failure.
+   unit, autostart or supervisor anywhere upstream. Its exit is upstream's `disconnect()`, which
+   drops arm torque, so whatever an arm holds at the hour mark falls. A session longer than
+   an hour needs it restarted, and quackd will report the silence as a heartbeat failure.
 6. `uv pip install 'quackd[xlerobot]'`, then
 
    ```bash
    uv run quackd doctor --robot xlerobot:zmq --address tcp://<host>:5555
    ```
 
-   Read back which verbs exist. `doctor` connects; `list-verbs` does not, so it describes a
-   cart nobody has.
+   Read back which verbs exist. `doctor` connects; `list-verbs` does not, so it describes the
+   stock cart, not yours.
 
 ## Talking to it, still on blocks
 

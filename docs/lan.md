@@ -19,8 +19,7 @@ quackd discover --timeout 3                                   # a table of what 
 
 `announce` advertises a **static** manifest's identity and holds no robot connection. The
 TXT record carries identity only; a manifest is never squeezed into TXT, it is obtained
-out of band (for now: `quackd list-verbs --robot <spec> --json`, or the adapter's
-`describe()`) and verified against the advertised digest.
+out of band (for now: the adapter's `describe()`) and verified against the advertised digest.
 
 | TXT key | Meaning |
 |---|---|
@@ -72,7 +71,7 @@ local fan-out plus a non-blocking hand-off; members still `drain()` between sim 
 | Threads | remote messages are marshalled onto the event loop with `call_soon_threadsafe` before they are tapped and pushed, because the transcript writer is not thread-safe |
 | Tap | fires exactly once per message per node: on publish for local messages, on receive for remote ones, so `flock.jsonl` on the node that owns the run directory carries every message once |
 
-Library-only in 0.4:
+Library-only:
 
 ```python
 from quackd.flock.mqtt_bus import MqttBus
