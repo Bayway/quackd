@@ -76,6 +76,13 @@ def _expand(patterns: list[str]) -> list[str]:
     return out
 
 
+def _verbose_line(msg: str) -> None:
+    """A `--verbose` line, as plain text. A message can carry brackets Rich reads as markup:
+    the executor's own `[dry-run] would run ...`, and the flock planner logging a model's raw
+    tool arguments. Rich deletes `[bold]` silently and raises on an unpaired `[/think]`."""
+    err_console.print(msg, style="dim", markup=False, highlight=False, soft_wrap=True)
+
+
 def _fail(msg: str, code: int = 1) -> None:
     # escape: messages contain things like quackd[anthropic], which Rich would eat as markup
     err_console.print(f"[red]error:[/red] {escape(msg)}")
@@ -223,7 +230,7 @@ def list_verbs(
             f"{v.kind}{' (core)' if v.core else ''}",
             v.safety_class,
             v.param_summary(),
-            v.description,
+            escape(v.description),
         )
     console.print(table)
 
@@ -398,9 +405,8 @@ def _run_impl(
     def log(msg: str) -> None:
         # the compact view: one line per verb and the executor's notes. The trace shows all
         # of that and more, so with it on this prints nothing rather than every verb twice.
-        # Plain text: a message can carry brackets Rich would read as markup.
         if verbose and console_trace is None:
-            err_console.print(msg, style="dim", markup=False, highlight=False, soft_wrap=True)
+            _verbose_line(msg)
 
     robot_memory = None
     if memory:
@@ -472,7 +478,7 @@ def _run_impl(
         "aborted": "red",
         "error": "red",
     }[result.outcome]
-    console.print(f"[{colour}]{result.outcome.upper()}[/{colour}] — {result.reason}")
+    console.print(f"[{colour}]{result.outcome.upper()}[/{colour}] — {escape(result.reason)}")
     usage = result.usage
     console.print(
         f"steps={result.steps} llm_calls={result.llm_calls} "
@@ -542,7 +548,7 @@ def _run_flock_impl(
 
     def log(msg: str) -> None:
         if verbose:
-            err_console.print(f"[dim]{msg}[/dim]")
+            _verbose_line(msg)
 
     holder: dict[str, Any] = {}
 
@@ -618,7 +624,7 @@ def _run_flock_impl(
     colour = {"success": "green", "failure": "red", "budget": "yellow", "aborted": "red"}.get(
         result.outcome, "red"
     )
-    console.print(f"[{colour}]{result.outcome.upper()}[/{colour}] — {result.reason}")
+    console.print(f"[{colour}]{result.outcome.upper()}[/{colour}] — {escape(result.reason)}")
     spotter = f"spotter={result.spotter} " if result.spotter else ""
     console.print(
         f"{spotter}kicker={result.kicker} auctions={result.auctions} bids={result.bids} "

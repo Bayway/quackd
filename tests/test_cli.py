@@ -81,6 +81,69 @@ def test_verbose_is_the_compact_view_and_does_not_double_the_trace(
     assert "→ quack" in compact and "-> sound" not in compact
 
 
+def test_the_outcome_line_prints_the_models_reason_verbatim(tmp_path: Path, monkeypatch) -> None:
+    """The reason is the model's own `declare_failure` text. A local model that leaks
+    `[/think]` into it used to crash the CLI with a Rich MarkupError after a completed run,
+    replacing the verdict with a traceback."""
+    from quackd.agent.providers import factory
+    from quackd.agent.providers.base import ToolCall
+    from quackd.agent.providers.fake import FakeProvider
+
+    reason = "the ball is [behind] the sofa [/think]"
+    monkeypatch.setattr(
+        factory,
+        "make_provider",
+        lambda *a, **k: FakeProvider(
+            script=[ToolCall(name="declare_failure", arguments={"reason": reason})]
+        ),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "hello-world",
+            "--provider",
+            "fake",
+            "--robot",
+            "microduck:mock",
+            "--runs-dir",
+            str(tmp_path),
+            "--no-gif",
+        ],
+    )
+    # not the exit code: it is 1 both for the failure outcome and for the old traceback
+    assert "[behind]" in result.output and "[/think]" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_list_verbs_prints_a_description_with_brackets_verbatim(monkeypatch) -> None:
+    """A verb description is manifest text, which Rich would silently eat as a style tag."""
+    from quackd.verbs import registry as registry_mod
+    from quackd.verbs.registry import NoParams, Verb, VerbRegistry
+
+    reg = VerbRegistry()
+    reg.register(Verb("kick", "kick [left] or [right]", lambda c, p: None, params=NoParams))  # type: ignore[arg-type]
+    monkeypatch.setattr(registry_mod, "default_registry", lambda: reg)
+    result = runner.invoke(app, ["list-verbs"])
+    assert result.exit_code == 0, result.output
+    assert "[left]" in result.output
+
+
+def test_a_verbose_line_survives_a_bracket_a_planner_logged(monkeypatch) -> None:
+    """The flock's planner logs a model's raw tool arguments through this line."""
+    import io
+
+    from rich.console import Console
+
+    from quackd import cli as cli_mod
+
+    buf = io.StringIO()
+    monkeypatch.setattr(cli_mod, "err_console", Console(file=buf, force_terminal=False, width=200))
+    cli_mod._verbose_line("planner: [/think] chose [bold]walk")
+    out = buf.getvalue()
+    assert "[/think]" in out and "[bold]walk" in out
+
+
 def test_validate_starter_ducks() -> None:
     result = runner.invoke(app, ["validate", *[str(p) for p in sorted(DUCKS.glob("*.duck"))]])
     assert result.exit_code == 0, result.output
