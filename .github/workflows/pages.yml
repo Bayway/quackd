@@ -1,0 +1,36 @@
+name: pages
+
+# The browser demo is a static page with no build step: `web/` is published as it is.
+# Everything heavy — MuJoCo compiled to WebAssembly, onnxruntime-web, the Microduck model
+# and its walking policy — is fetched by the visitor's browser from its own upstream, so
+# this site carries no CC BY-SA-NC assets and nothing needs compiling here.
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web
+      - id: deploy
+        uses: actions/deploy-pages@v4

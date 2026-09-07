@@ -6,7 +6,17 @@ from __future__ import annotations
 import subprocess
 import sys
 
-HEAVY = ("torch", "lerobot", "roslibpy", "reachy_mini", "zmq", "zeroconf", "paho")
+HEAVY = (
+    "torch",
+    "lerobot",
+    "roslibpy",
+    "reachy_mini",
+    "zmq",
+    "zeroconf",
+    "paho",
+    "mujoco",
+    "onnxruntime",
+)
 
 SCRIPT = f"""
 import sys
@@ -37,6 +47,7 @@ for adapter, backends in BACKENDS.items():
         m = describe(RobotSpec(adapter, backend))
         assert "stop" in m.verb_names(), (adapter, backend)
 make_adapter("reachy_mini:sdk")
+make_adapter("microduck:mujoco")
 make_adapter("lerobot:real", address="COM5")
 make_adapter("rosbridge:ws", address="ws://robot.local:9090")
 for name in {HEAVY!r}:

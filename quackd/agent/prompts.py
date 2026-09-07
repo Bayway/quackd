@@ -114,12 +114,22 @@ where an object usually is, which strategy worked, what to avoid. It moves nothi
 costs no step, though it does use one of your calls. Do not save what is already listed
 above.
 """
-    sim_note = (
-        "\nYou are in the built-in 2D simulator: a cartoon top-down world. Distances are metres, "
-        "the arena is about 2 m across, and the ball is orange.\n"
-        if transport_name == "sim2d"
-        else ""
-    )
+    sim_note = ""
+    if transport_name == "sim2d":
+        sim_note = (
+            "\nYou are in the built-in 2D simulator: a cartoon top-down world. Distances are "
+            "metres, the arena is about 2 m across, and the ball is orange.\n"
+        )
+    elif transport_name == "mujoco":
+        sim_note = (
+            "\nYou are in the physics simulator (MuJoCo): a 2 m arena with low walls, an orange "
+            "ball that rolls when kicked, and a blue person marker. Distances are metres. This is "
+            "a real biped on its own learned gait, not a drawing, so two things differ. It does "
+            "not step at all below about 0.22 m/s or 1.0 rad/s, and quackd raises a smaller "
+            "twist to that floor and drops a tiny one to zero. And it achieves roughly half of "
+            "what it is asked. Read `pose` in the state after every move and correct from it, "
+            "rather than trusting the numbers you sent.\n"
+        )
     return f"""You are the brain of {blurb}. You are a high-level pilot:
 you choose ONE verb per turn; the robot's own controllers handle balance and gait, and composite
 verbs like `{loop_verb}` close their own loops on the camera. Do not micro-manage.

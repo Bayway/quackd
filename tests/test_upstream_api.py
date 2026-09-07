@@ -20,6 +20,7 @@ from quackd.adapters.reachy_mini import upstream_api as reachy_api
 from quackd.adapters.rosbridge import upstream_api as rosbridge_api
 from quackd.adapters.toddlerbot import upstream_api as toddlerbot_api
 from quackd.adapters.xlerobot import upstream_api as xlerobot_api
+from quackd.sim3d import upstream_api as microduck_rl_api
 from quackd.transport import upstream_api
 
 PKG = Path(__file__).resolve().parents[1] / "quackd"
@@ -103,6 +104,19 @@ UPSTREAMS: list[tuple[ModuleType, set[str], tuple[str, ...]]] = [
         },
         ("https://github.com/hshi74/toddlerbot",),
     ),
+    (
+        microduck_rl_api,
+        {
+            "sim3d/upstream_api.py",
+            "sim3d/assets.py",
+            "sim3d/microduck.py",
+            "doctor.py",
+        },
+        (
+            "https://github.com/pollen-robotics/microduck_rl",
+            "https://huggingface.co/pollen-robotics/microduck-policies",
+        ),
+    ),
 ]
 IDS = [
     "microduck",
@@ -113,6 +127,7 @@ IDS = [
     "xlerobot",
     "alohamini",
     "toddlerbot",
+    "microduck_rl",
 ]
 
 

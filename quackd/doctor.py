@@ -34,6 +34,7 @@ EXTRAS = {
     "gemini": ("google.genai", "quackd[gemini]"),
     "yolo": ("ultralytics", "quackd[yolo]"),
     "live": ("pygame", "quackd[live]"),
+    "mujoco": ("mujoco", "quackd[mujoco]"),
     "reachy": ("reachy_mini", "quackd[reachy]"),
     "lan (zeroconf)": ("zeroconf", "quackd[lan]"),
     "lan (mqtt)": ("paho.mqtt.client", "quackd[lan]"),
@@ -421,4 +422,27 @@ def run_doctor(
             f"VERIFIED refs: {len(api.refs_by_status('VERIFIED'))} · "
             f"the {backend} backend has never been run against {target}[/dim]"
         )
+    _microduck_rl_table(console)
     return bool(ok)
+
+
+def _microduck_rl_table(console: Console) -> None:
+    """The physics backend's upstream, which is a simulator rather than a robot: what it
+    assumes is not "never run", it is "measured here, on one machine"."""
+    from quackd.sim3d import upstream_api as rl
+
+    unverified = rl.refs_by_status("UNVERIFIED")
+    t = Table(
+        title=f"microduck_rl assumptions (UNVERIFIED: {len(unverified)}) — "
+        "see docs/adr/0030-mujoco-physics-backend.md"
+    )
+    t.add_column("what")
+    t.add_column("note")
+    for ref in unverified:
+        t.add_row(ref.name, ref.note)
+    console.print(t)
+    console.print(
+        f"[dim]microduck_rl pinned at {rl.PIN[:7]}, policies at {rl.POLICIES_PIN[:7]} "
+        f"(read {rl.READ_ON}) · VERIFIED refs: {len(rl.refs_by_status('VERIFIED'))} · "
+        "the model and the policies are fetched at run time and never shipped[/dim]"
+    )

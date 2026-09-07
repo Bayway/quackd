@@ -533,7 +533,7 @@ def build_fleet_server(
             tracer = Tracer(observers=[_stderr_view(name), capture_sink])
         reg = registry or default_registry()
         det = detector
-        if det is None and backend_name(transport) == "sim2d":
+        if det is None and backend_name(transport) in ("sim2d", "mujoco"):
             # a bare transport has no manifest to ask; an adapter is upgraded after connect
             from quackd.perception.color_blob import ColorBlobDetector
 

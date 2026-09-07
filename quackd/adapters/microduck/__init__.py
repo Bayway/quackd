@@ -26,7 +26,7 @@ from quackd.transport.base import Ack, DuckState, DuckTransport, HeartbeatError,
 from quackd.verbs.core import CORE
 from quackd.verbs.registry import Precondition, Verb
 
-BACKENDS = ("sim2d", "mock", "jsonrpc", "websocket")
+BACKENDS = ("sim2d", "mujoco", "mock", "jsonrpc", "websocket")
 
 # The 0.3 descriptions of the renamed verbs, so an old duck's tool schemas are byte-identical.
 _MOVE_DESCRIPTION = (

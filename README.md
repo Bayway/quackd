@@ -98,8 +98,14 @@ uvx quackd run open-duck-scout --provider fake                                  
 uvx quackd run reachy-spotter --provider fake                                       # another body: a Reachy Mini head, no legs, same loop
 uvx --from "quackd[anthropic]" quackd run find-and-kick --provider anthropic --robot microduck:sim2d   # needs ANTHROPIC_API_KEY
 uvx --from "quackd[openai]" quackd run find-and-kick --provider ollama --model qwen3:8b          # local model, no key
+uvx --from "quackd[mujoco]" quackd run --goal "walk in a circle" --robot microduck:mujoco --provider fake   # real physics, real gait
 open runs/*/run.gif                                                                 # a GIF on the simulator, a transcript every time
 ```
+
+**Or open [the browser demo](https://rokbenko.github.io/quackd/) and install nothing.** Same
+physics, same walking policy, same contract, in a page. Type a sentence, paste your own API
+key or point it at Ollama, and watch what the model chose. There is a switch that turns
+quackd off, which leaves you the robot, its policy and a keyboard: see [`web/`](web/).
 
 Put keys in the environment or in a `.env` file (copy [`.env.example`](.env.example)). `quackd doctor` tells you what is missing. Needs Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/), nothing else.
 
@@ -196,6 +202,8 @@ Version 0.7, simulator and mocks. What has been built, and how far each piece ha
 | Piece | Status |
 |---|---|
 | `sim2d` bundled simulator (default) | ✅ 10 of 10 seeds on `find-and-kick`, GIF and transcript per run |
+| `mujoco` physics simulator (`quackd[mujoco]`) | ✅ 10 of 10 seeds on `find-and-kick` with the duck walking on **upstream's own trained policy**, ground truth checked. The model and the policy are fetched from upstream at a pinned commit and hash checked, never shipped |
+| Browser demo ([`web/`](web/)) | ✅ the same physics, policy, verbs and contract in a static page. Bring your own key, or point it at Ollama. The rendering and the recording have not been run in a browser yet |
 | Manifests and core verbs (`quackd list-adapters`, `quackd list-verbs --robot`) | ✅ eight adapters, eight core verbs that appear only where the manifest meets their requirements, speed limits from the manifest, `manifest.schema.json` generated and drift tested |
 | MCP server (`quackd serve-mcp`) | ✅ Claude Code and Claude Desktop, fleets with `--robots` (eight `robot_*` tools, tested in process against the simulator and the mocks), no Claude Desktop session on record |
 | Memory between runs (`quackd memory`, `remember`) | ✅ one JSONL file per `adapter:backend`, notes and run outcomes into the next prompt, tested end to end offline, 🧪 the `remember` tool itself exercised by one local model on one machine and by no cloud model ([docs/memory.md](docs/memory.md)) |
@@ -226,6 +234,7 @@ Eight robots, and one table for how far each one has actually got. The distincti
 | Robot | `--robot` | The body | How far it has got |
 |---|---|---|---|
 | **Microduck** | `microduck:sim2d`, `mock` | a 25 cm biped from Pollen Robotics | ✅ simulator, ✅ mock |
+| | `microduck:mujoco` | the same robot in MuJoCo, on its own walking policy | ✅ physics. `find-and-kick` 10 of 10 seeds while it really walks ([ADR-0030](docs/adr/0030-mujoco-physics-backend.md)) |
 | | `microduck:jsonrpc` | the real one, over `robotd` | 🧪 names. Early pre-orders arrive around Christmas 2026, later orders in four to six months ([checklist](docs/microduck-hardware-checklist.md)) |
 | | `microduck:websocket` | upstream's planned agent gateway | ⏳ stub |
 | **Open Duck Mini v2** | `open_duck:sim2d`, `mock` | a 42 cm 3D printed biped you can build yourself | ✅ simulator, ✅ mock |
@@ -268,7 +277,7 @@ flowchart LR
         EXEC["safety executor<br/>allowlist · confirm gates · budgets · abort rules · heartbeat"]
         VERBS["verb registry<br/>built from the robot's manifest: core · the robot's own · aliases · learned (v2)"]
         PERC["perception<br/>frame → detections → “ball at bearing 18° left, ~0.6 m”"]
-        ADAPTER["robot adapter<br/>microduck · reachy_mini · lerobot · rosbridge · open_duck · xlerobot · alohamini · toddlerbot<br/>returns a manifest (embodiment, intents, sensors, verbs, limits, safety authority)<br/>sends intents, never motor writes<br/>backends: sim2d ✅ · mock ✅ · jsonrpc, sdk, real, ws, zmq, bridge 🧪 never run on a robot · websocket ⏳"]
+        ADAPTER["robot adapter<br/>microduck · reachy_mini · lerobot · rosbridge · open_duck · xlerobot · alohamini · toddlerbot<br/>returns a manifest (embodiment, intents, sensors, verbs, limits, safety authority)<br/>sends intents, never motor writes<br/>backends: sim2d ✅ · mujoco ✅ · mock ✅ · jsonrpc, sdk, real, ws, zmq, bridge 🧪 never run on a robot · websocket ⏳"]
     end
     ROBOT["Robot<br/>its own controllers: robotd at 50 Hz on a Microduck, the daemon on a Reachy Mini, the position controller and pick policy on an arm, the driver on a base"]
     SIM["sim2d and mocks<br/>cartoon world, duck cam and head cam, offline doubles for every adapter"]

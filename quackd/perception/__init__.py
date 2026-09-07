@@ -19,7 +19,7 @@ __all__ = ["detector_for"]
 log = logging.getLogger("quackd.perception")
 
 #: Backends whose camera really is the one the default geometry assumes.
-_SIMULATED = ("sim2d", "mock")
+_SIMULATED = ("sim2d", "mujoco", "mock")
 
 
 def detector_for(

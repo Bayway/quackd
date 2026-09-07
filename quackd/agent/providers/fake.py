@@ -8,6 +8,7 @@ transcript run whether the pilot is a rule or a frontier model.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -236,6 +237,182 @@ def toddlerbot_lookout_strategy(obs: Observation, step: int, history: list[Excha
 _TODDLER_SWEEP = (30.0, -30.0, 0.0)
 
 
+#: What the shape walkers ask for. Every body clamps a twist to its own limits, and the
+#: Microduck's gait has a floor besides, so these are requests rather than promises: the
+#: strategies close the loop on the pose the robot reports, which is what a model does too.
+SHAPE_VX = 0.25
+SHAPE_WZ = 0.9
+SHAPE_SIDE_M = 0.5
+_TURN_TOLERANCE = math.radians(10)
+
+
+def _pose(obs: Observation) -> tuple[float, float, float] | None:
+    state = obs.features.get("state") or {}
+    x, y, theta = state.get("x"), state.get("y"), state.get("theta")
+    if x is None or y is None or theta is None:
+        return None
+    return float(x), float(y), float(theta)
+
+
+def _wrap(radians_: float) -> float:
+    return math.atan2(math.sin(radians_), math.cos(radians_))
+
+
+class _Gait:
+    """How much of a commanded twist this body actually delivers, learned as it goes.
+
+    A cartoon duck walks at the speed it is asked for. A real one on an RL gait delivers
+    roughly forty percent of it, and a shape walker that assumes otherwise spends its whole
+    budget creeping up on the first corner. So each move records what it asked for and from
+    where, the next turn measures what happened, and the estimate is the ratio — which is
+    the same correction a model makes when it reads the pose and tries again.
+    """
+
+    def __init__(self) -> None:
+        self.walk = 1.0
+        self.turn = 1.0
+        self._pending: tuple[str, float, float] | None = None  # kind, asked, from
+
+    def expect(self, kind: str, asked: float, mark: float) -> None:
+        self._pending = (kind, asked, mark)
+
+    def observe(self, walked: float, turned: float) -> None:
+        if self._pending is None:
+            return
+        kind, asked, mark = self._pending
+        self._pending = None
+        got = (walked if kind == "walk" else turned) - mark
+        if asked <= 1e-6:
+            return
+        ratio = min(1.5, max(0.15, abs(got) / asked))
+        if kind == "walk":
+            self.walk = 0.5 * self.walk + 0.5 * ratio
+        else:
+            self.turn = 0.5 * self.turn + 0.5 * ratio
+
+    def seconds(self, kind: str, remaining: float, rate: float) -> float:
+        gain = self.walk if kind == "walk" else self.turn
+        return min(10.0, max(0.4, abs(remaining) / (rate * max(gain, 0.15))))
+
+
+def square_strategy(side: float = SHAPE_SIDE_M) -> Strategy:
+    """Walk a square by watching the pose, the way a model would.
+
+    Four legs and four corners, each ended by what the robot reports rather than by a
+    stopwatch, so a body whose gait delivers half of what it was asked still walks a square.
+    Returns a fresh closure per run, so one seed cannot leak into the next.
+    """
+    state: dict[str, Any] = {
+        "leg": 0,
+        "turning": False,
+        "anchor": None,
+        "target": None,
+        "gait": _Gait(),
+        "walked": 0.0,
+        "turned": 0.0,
+        "last": None,
+    }
+
+    def strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+        pose = _pose(obs)
+        if pose is None:
+            return _no_pose("a shape")
+        x, y, theta = pose
+        gait: _Gait = state["gait"]
+        if state["last"] is not None:
+            px, py, pt = state["last"]
+            state["walked"] += math.dist((x, y), (px, py))
+            state["turned"] += abs(_wrap(theta - pt))
+            gait.observe(state["walked"], state["turned"])
+        state["last"] = (x, y, theta)
+        if state["anchor"] is None:
+            state["anchor"] = (x, y)
+        if state["leg"] >= 4:
+            return ToolCall(
+                name="declare_success",
+                arguments={
+                    "reason": f"walked four {side:.2f} m legs with a 90 degree turn between "
+                    f"each; back at ({x:.2f}, {y:.2f})"
+                },
+            )
+        if state["turning"]:
+            error = _wrap(float(state["target"]) - theta)
+            if abs(error) < _TURN_TOLERANCE:
+                state["turning"] = False
+                state["leg"] += 1
+                state["anchor"] = (x, y)
+            else:
+                seconds = gait.seconds("turn", error, SHAPE_WZ)
+                gait.expect("turn", SHAPE_WZ * seconds, state["turned"])
+                return ToolCall(
+                    name="move",
+                    arguments={
+                        "vx": 0.0,
+                        "wz": math.copysign(SHAPE_WZ, error),
+                        "duration_s": round(seconds, 2),
+                    },
+                )
+        walked = math.dist((x, y), state["anchor"])
+        if walked >= side:
+            state["turning"] = True
+            state["target"] = _wrap(theta + math.pi / 2)
+            seconds = gait.seconds("turn", math.pi / 2, SHAPE_WZ)
+            gait.expect("turn", SHAPE_WZ * seconds, state["turned"])
+            return ToolCall(
+                name="move",
+                arguments={"vx": 0.0, "wz": SHAPE_WZ, "duration_s": round(seconds, 2)},
+            )
+        seconds = gait.seconds("walk", side - walked, SHAPE_VX)
+        gait.expect("walk", SHAPE_VX * seconds, state["walked"])
+        return ToolCall(
+            name="move", arguments={"vx": SHAPE_VX, "wz": 0.0, "duration_s": round(seconds, 2)}
+        )
+
+    return strategy
+
+
+def circle_strategy(turns: float = 1.0) -> Strategy:
+    """Walk a circle: one twist held until the heading has come all the way round."""
+    state: dict[str, Any] = {"turned": 0.0, "last": None, "gait": _Gait()}
+
+    def strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+        pose = _pose(obs)
+        if pose is None:
+            return _no_pose("a circle")
+        theta = pose[2]
+        gait: _Gait = state["gait"]
+        if state["last"] is not None:
+            state["turned"] += abs(_wrap(theta - float(state["last"])))
+            gait.observe(0.0, state["turned"])
+        state["last"] = theta
+        target = turns * 2 * math.pi
+        if state["turned"] >= target:
+            return ToolCall(
+                name="declare_success",
+                arguments={
+                    "reason": f"walked a circle: the heading came round "
+                    f"{math.degrees(state['turned']):.0f} degrees while walking forward"
+                },
+            )
+        seconds = gait.seconds("turn", target - state["turned"], SHAPE_WZ)
+        gait.expect("turn", SHAPE_WZ * seconds, state["turned"])
+        return ToolCall(
+            name="move",
+            arguments={"vx": SHAPE_VX, "wz": SHAPE_WZ, "duration_s": round(seconds, 2)},
+        )
+
+    return strategy
+
+
+def _no_pose(shape: str) -> ToolCall:
+    return ToolCall(
+        name="declare_failure",
+        arguments={
+            "reason": f"this robot reports no pose, so it cannot walk {shape} and know it did"
+        },
+    )
+
+
 def generic_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
     allowed = obs.features.get("allowed", [])
     if step == 0 and "quack" in allowed:
@@ -287,6 +464,10 @@ class FakeProvider:
                 strategy, label = find_and_kick_strategy, "goal:find-and-kick"
             elif "patrol" in text or "person" in text or "someone" in text:
                 strategy, label = patrol_strategy, "goal:patrol"
+            elif "square" in text:
+                strategy, label = square_strategy(), "goal:square"
+            elif "circle" in text or "circuit" in text:
+                strategy, label = circle_strategy(), "goal:circle"
         return cls(strategy=strategy or generic_strategy, model=f"scripted:{label}")
 
     async def step(

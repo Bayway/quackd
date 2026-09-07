@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>quackd — give a Microduck a brain, in your browser</title>
+<meta name="description" content="Type a sentence, watch a simulated Microduck do it. An LLM picks the robot's own skills; quackd decides what it is allowed to do. Bring your own API key, or run a local model.">
+<meta property="og:title" content="quackd — give a Microduck a brain">
+<meta property="og:description" content="Type a sentence, watch a simulated Microduck do it. Real MuJoCo physics, upstream's own walking policy, your own API key.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🦆</text></svg>">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/ort.min.js"></script>
+</head>
+<body>
+
+<header>
+  <h1><span aria-hidden="true">🦆</span> quackd <small>a Microduck with a brain</small></h1>
+  <nav>
+    <a href="https://github.com/rokbenko/quackd">GitHub</a>
+    <a href="https://github.com/rokbenko/quackd#readme">What is this?</a>
+  </nav>
+</header>
+
+<main>
+  <section class="stage">
+    <canvas id="view" width="960" height="640"></canvas>
+
+    <div id="loading" class="overlay">
+      <h2>Fetching a duck</h2>
+      <p id="loading-phase">starting</p>
+      <div class="bar"><div id="loading-bar"></div></div>
+      <p class="fine">
+        MuJoCo and the walking policy come from their own sources, about 45 MB the first
+        time and cached by your browser afterwards. Nothing is uploaded.
+      </p>
+    </div>
+
+    <div class="stage-bar">
+      <div class="camera-buttons" role="group" aria-label="camera">
+        <button type="button" data-camera="follow" class="on">Over the shoulder</button>
+        <button type="button" data-camera="duck">Duck cam</button>
+      </div>
+      <div id="readout" class="readout">twist 0.00, 0.00, 0.00</div>
+      <div class="record-buttons">
+        <button type="button" id="record">● Record</button>
+        <button type="button" id="save" disabled>Save clip</button>
+        <a id="share" class="button share" href="#" target="_blank" rel="noopener" hidden>Share on X</a>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <div class="toggle-row">
+      <label class="switch">
+        <input type="checkbox" id="quackd-on" checked>
+        <span class="slider" aria-hidden="true"></span>
+      </label>
+      <div>
+        <strong id="toggle-label">quackd is on</strong>
+        <p id="toggle-note" class="fine">An LLM reads your sentence and picks the robot's skills.</p>
+      </div>
+    </div>
+
+    <form id="goal-form">
+      <label for="goal">Tell the duck what to do</label>
+      <input id="goal" name="goal" value="Walk in a square, half a metre a side" autocomplete="off">
+      <div class="row">
+        <button type="submit" id="run">Run</button>
+        <button type="button" id="stop-run" disabled>Stop</button>
+        <button type="button" id="reset">Reset duck</button>
+      </div>
+      <div class="examples">
+        Try:
+        <button type="button" class="chip">Walk in a circle</button>
+        <button type="button" class="chip">Find the ball and kick it</button>
+        <button type="button" class="chip">Walk to the person and quack</button>
+      </div>
+    </form>
+
+    <details id="key-box" open>
+      <summary>Your API key</summary>
+      <p class="fine">
+        The key stays in this tab. It goes straight from your browser to the model you pick,
+        is never stored and never passes through any server of ours. Every call is billed to
+        you. Prefer nothing to leave the machine at all? Pick <em>Local</em>.
+      </p>
+      <div class="row">
+        <select id="provider" aria-label="model provider"></select>
+        <input id="model" placeholder="model" autocomplete="off">
+      </div>
+      <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off">
+      <input id="base-url" placeholder="http://localhost:11434/v1" autocomplete="off" hidden>
+      <p id="provider-note" class="fine"></p>
+    </details>
+
+    <section id="manual" hidden>
+      <h3>You are the pilot now</h3>
+      <p class="fine">
+        This is the whole interface the robot has: three numbers and nine learned policies.
+        No part of it understands a sentence.
+      </p>
+      <div class="keys">
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk and turn ·
+        <kbd>Q</kbd><kbd>E</kbd> look left and right · <kbd>K</kbd> kick · <kbd>Space</kbd> stop
+      </div>
+    </section>
+
+    <section class="transcript-box">
+      <h3>What the pilot did <button type="button" id="clear" class="link">clear</button></h3>
+      <ol id="transcript" class="transcript"></ol>
+    </section>
+  </aside>
+</main>
+
+<footer>
+  <p>
+    The robot model and its walking policy are
+    <a id="model-link" href="https://github.com/pollen-robotics/microduck_rl">Pollen Robotics'</a>,
+    fetched from upstream at a pinned commit and never served from here: the 3D model files are
+    CC BY-SA-NC. Physics is <a href="https://github.com/google-deepmind/mujoco">MuJoCo</a>
+    compiled to WebAssembly. quackd is Apache-2.0 and unaffiliated with Pollen Robotics.
+  </p>
+</footer>
+
+<script type="module" src="src/app.js"></script>
+</body>
+</html>

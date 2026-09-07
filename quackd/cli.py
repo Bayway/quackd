@@ -385,7 +385,7 @@ def _run_impl(
         backend=spec.backend,
     )
     # the recorder is sim2d only: it draws the world, and only the simulator has one
-    if spec.backend == "sim2d" and gif:
+    if spec.backend in ("sim2d", "mujoco") and gif:
         from quackd.sim2d.recorder import FrameRecorder
 
         recorder = FrameRecorder(duck_transport, size=gif_size)
@@ -640,7 +640,7 @@ _GOAL = typer.Option(
     "-g",
     help='A plain-language goal instead of a .duck file, e.g. --goal "find the ball and kick it".',
 )
-_GIFSIZE = typer.Option(256, "--gif-size", help="sim2d: pixel size of each GIF pane.")
+_GIFSIZE = typer.Option(256, "--gif-size", help="Simulators: pixel size of each GIF pane.")
 _FLOCK = typer.Option(
     None,
     "--flock",
@@ -691,7 +691,12 @@ _DRY = typer.Option(False, "--dry-run", help="Print every intent, send nothing."
 _MAXSTEPS = typer.Option(None, "--max-steps", help="Override the duck's max_steps budget.")
 _RUNS = typer.Option("runs", "--runs-dir", help="Where run directories go.")
 _YES = typer.Option(False, "--yes", "-y", help="Auto-confirm gated verbs (careful on hardware).")
-_LIVE = typer.Option(False, "--live", help="sim2d: open a live pygame window (needs quackd[live]).")
+_LIVE = typer.Option(
+    False,
+    "--live",
+    help="Simulators: watch the run in real time. sim2d opens a pygame window (needs "
+    "quackd[live]); mujoco opens MuJoCo's own viewer.",
+)
 _ADDR = typer.Option(None, "--address", help="jsonrpc: unix:///run/robotd.sock or tcp://host:port")
 _TOKEN = typer.Option(
     None,
@@ -749,7 +754,9 @@ def run(
     camera_url: str | None = _CAMERA_URL,
     token: str | None = _TOKEN,
     fov_deg: float | None = _FOV,
-    gif: bool = typer.Option(True, "--gif/--no-gif", help="sim2d: write run.gif into the run dir."),
+    gif: bool = typer.Option(
+        True, "--gif/--no-gif", help="Simulators: write run.gif into the run dir."
+    ),
     gif_size: int = _GIFSIZE,
     verbose: bool = _VERBOSE,
     base_url: str | None = _BASEURL,

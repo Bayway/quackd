@@ -21,10 +21,11 @@ DEFAULT_ROBOT = "microduck:sim2d"
 # name -> (backends, status line, pip extra for the SDK backends, SDK import to probe)
 _ADAPTERS: dict[str, tuple[tuple[str, ...], str, str | None, str | None]] = {
     "microduck": (
-        ("sim2d", "mock", "jsonrpc", "websocket"),
-        "✅ built-in: sim2d (default), mock · 🧪 jsonrpc · ⏳ websocket",
-        None,
-        None,
+        ("sim2d", "mujoco", "mock", "jsonrpc", "websocket"),
+        "✅ built-in: sim2d (default), mock · ✅ mujoco (physics, needs the extra) · "
+        "🧪 jsonrpc · ⏳ websocket",
+        "quackd[mujoco]",
+        "mujoco",
     ),
     "reachy_mini": (
         ("sim2d", "mock", "sdk"),

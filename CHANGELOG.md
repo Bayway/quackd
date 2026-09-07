@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A physics simulator, with the Microduck's own legs in it** (`--robot microduck:mujoco`,
+  needs `quackd[mujoco]`). The cartoon in `sim2d` has always said what it is: it tests the
+  agent loop, not the robot, and it will never tell you whether a gait works. `sim3d` is
+  MuJoCo, and the duck in it is upstream's: `robot_walk.xml` and its 38 meshes from
+  `microduck_rl` at a pinned commit, the `alpha_walking` and `alpha_stand` ONNX policies from
+  the Hugging Face Hub at a pinned revision, and upstream's own 50 Hz loop around them. quackd
+  supplies a twist and a head pose, which is what a gamepad supplies on the real robot, and
+  writes no gait at all. `find-and-kick` succeeds on 10 of 10 seeds with the scripted pilot
+  while the duck walks on its trained policy, ground truth checked. Design:
+  `docs/adr/0030-mujoco-physics-backend.md`.
+- **Nothing of upstream's is shipped.** The 3D model files are CC BY-SA-NC, so the first run
+  downloads them into `~/.quackd/cache`, checks every file against the sha256 it was read at,
+  and writes the licence notice beside them. `QUACKD_MICRODUCK_ASSETS` points at your own
+  checkout instead, and `QUACKD_MUJOCO_BODY=puppet` runs a kinematic stand-in that needs no
+  download and is what CI uses.
+- **The gait floor is in the open.** Under the model's own actuators the walking policy does
+  not step below about 0.22 m/s or 1.0 rad/s and achieves roughly half of what it is asked,
+  while `move` defaults to 0.15 m/s. A twist that would produce nothing is scaled up bodily,
+  keeping the ratio between its axes so an arc stays an arc; one below a third of the floor is
+  dropped rather than amplified into a lurch; and the floor, what was asked and what was sent
+  are all in the state, in the system prompt and in `extras.assumptions`. Four skills are
+  named stand-ins there too: `kick` and `grab` use the cartoon's contact rules, `sit` is
+  refused, and a fall is recovered by standing the model up, because upstream's episodic
+  policies did nothing from a standing pose and it ships no get-up policy.
+- **A browser demo, so trying quackd costs nobody an install** (`web/`, published to GitHub
+  Pages). The same physics and the same policy through MuJoCo's official WebAssembly build and
+  onnxruntime-web, with the verbs, the contract and the one-tool-per-turn loop in about 900
+  lines of JavaScript. Bring your own key for Anthropic, OpenAI or Gemini, or point it at
+  Ollama and keep everything on your machine. A switch turns quackd off, which removes the
+  layer and only the layer: the robot and its policy are identical, nothing reads English any
+  more, and you drive it with the keyboard. Runs can be recorded from the canvas and shared.
+- **`walk in a square` and `walk in a circle` need no API key.** The scripted pilot learned
+  two shapes, and both close the loop on the pose the robot reports rather than on a
+  stopwatch, so a body that delivers half of what it was asked still walks the shape. That is
+  also the correction a model makes, which is the point of them being here.
+
 - **quackd narrates itself now, on both surfaces, on by default.** Ask it to walk in a circle
   and the terminal used to print a header, an outcome and a run directory. It now shows the
   whole conversation as it happens: the system prompt once, then per turn the observation the
