@@ -18,6 +18,7 @@ from quackd.trace import (
     cap_lines,
     capture_sink,
     capturing,
+    counting,
     render_call,
     render_lines,
     thinking_limit_default,
@@ -148,18 +149,24 @@ async def test_a_nested_verbs_intents_count_for_its_parent_too() -> None:
     parent that reported zero intents would be the misleading kind of true."""
     from collections import Counter
 
-    tracer = Tracer()
-    parent: Counter[str] = Counter()
-    child: Counter[str] = Counter()
-    stack = [parent]
-    outer = TracedTransport(MockTransport(), tracer, stack)
-    await outer.send_intent(Intent.move(0.1))
-    stack.append(child)
-    inner = TracedTransport(MockTransport(), tracer, stack)
-    await inner.send_intent(Intent.move(0.2))
-    await inner.stop()
+    traced = TracedTransport(MockTransport(), Tracer())
+    with counting() as parent:
+        await traced.send_intent(Intent.move(0.1))
+        with counting() as child:
+            await traced.send_intent(Intent.move(0.2))
+            await traced.stop()
     assert child == Counter({"move": 1, "stop": 1})
     assert parent == Counter({"move": 2, "stop": 1})
+
+
+async def test_an_intent_sent_outside_any_verb_is_counted_by_nobody() -> None:
+    """The heartbeat's stop belongs to no verb: it must not land on whichever tally happens
+    to be open in another task."""
+    traced = TracedTransport(MockTransport(), Tracer())
+    await traced.stop()  # no `counting()` block: must not raise, must count nowhere
+    with counting() as tally:
+        pass
+    assert tally == {}
 
 
 # ── rendering ───────────────────────────────────────────────────────────────────────────

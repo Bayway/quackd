@@ -118,6 +118,31 @@ def capturing() -> Iterator[list[TraceEvent]]:
         _capture.reset(token)
 
 
+# ── counting one verb's intents ─────────────────────────────────────────────────────────
+
+_tallies: contextvars.ContextVar[tuple[Counter[str], ...]] = contextvars.ContextVar(
+    "quackd_intent_tallies", default=()
+)
+
+
+@contextlib.contextmanager
+def counting() -> Iterator[Counter[str]]:
+    """One tally for the verb in flight in this context, chained onto its parents' so a nested
+    verb's intents count for the composite too.
+
+    A context variable rather than a list on the executor: asyncio copies the context into
+    each task at creation, so two MCP calls running at once on one executor never see each
+    other's frame, and a verb that is cancelled unwinds its own frame instead of popping
+    somebody else's. With a shared stack, a `quack` that overlapped a `move` reported the
+    move's intents as its own and the move reported neither its resends nor its stop."""
+    tally: Counter[str] = Counter()
+    token = _tallies.set((*_tallies.get(), tally))
+    try:
+        yield tally
+    finally:
+        _tallies.reset(token)
+
+
 # ── the transport as verbs see it ───────────────────────────────────────────────────────
 
 
@@ -125,16 +150,14 @@ class TracedTransport:
     """A transport for verbs: every intent they send becomes an `intent` event.
 
     Everything else is delegated to the real transport, so a verb's
-    `getattr(ctx.transport, "stop_error", None)` still reaches the adapter. `counters` is the
-    executor's stack of per-verb tallies; a nested verb's intents count for its parent too,
-    which is how `approach_and` reports the intents its `go_to` sent."""
+    `getattr(ctx.transport, "stop_error", None)` still reaches the adapter. The tallies are
+    read from the context at send time, not captured here, so an intent counts for whichever
+    verb is in flight in the sending task and for each of its parents: that is how
+    `approach_and` reports the intents its `go_to` sent."""
 
-    def __init__(
-        self, inner: Any, tracer: Tracer, counters: list[Counter[str]] | None = None
-    ) -> None:
+    def __init__(self, inner: Any, tracer: Tracer) -> None:
         self._inner = inner
         self._tracer = tracer
-        self._counters = counters if counters is not None else []
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):  # never delegate our own privates (copy, pickle, half-init)
@@ -142,8 +165,8 @@ class TracedTransport:
         return getattr(self._inner, name)
 
     def _count(self, kind: str) -> None:
-        for counter in self._counters:
-            counter[kind] += 1
+        for tally in _tallies.get():
+            tally[kind] += 1
 
     async def send_intent(self, intent: Intent) -> Ack:
         try:
@@ -512,6 +535,7 @@ __all__ = [
     "cap_lines",
     "capture_sink",
     "capturing",
+    "counting",
     "fmt_params",
     "intent_line",
     "render_call",

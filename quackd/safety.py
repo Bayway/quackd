@@ -16,7 +16,6 @@ import signal
 import sys
 import threading
 import time
-from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -25,7 +24,7 @@ from pydantic import ValidationError
 
 from quackd.duckfile.schema import Budgets, DuckFrontmatter
 from quackd.perception.base import Detector
-from quackd.trace import TracedTransport, Tracer
+from quackd.trace import TracedTransport, Tracer, counting
 from quackd.transport.base import DuckState, DuckTransport
 from quackd.verbs.registry import Verb, VerbContext, VerbNotFound, VerbRegistry, VerbResult
 
@@ -129,10 +128,7 @@ class Executor:
     """The connected robot's manifest, handed to verbs so composites can pick a strategy."""
     trace: Tracer | None = None
     """Where the executor narrates itself: `verb_start`, every `gate` that fires, every
-    `intent` a verb sends, `verb_end`. None is silent, which is what tests and the flock get."""
-    intent_stack: list[Counter[str]] = field(default_factory=list, init=False, repr=False)
-    """One tally per verb in flight, innermost last; a nested verb's intents count for its
-    parent too."""
+    `intent` a verb sends, `verb_end`. None is silent, which is what tests get."""
 
     # ── narration ───────────────────────────────────────────────────────────────────
 
@@ -151,7 +147,7 @@ class Executor:
         intent. Also what the executor itself sends its safety stops through."""
         if self.trace is None:
             return self.transport
-        return TracedTransport(self.transport, self.trace, self.intent_stack)
+        return TracedTransport(self.transport, self.trace)
 
     # ── policy ──────────────────────────────────────────────────────────────────────
 
@@ -211,58 +207,57 @@ class Executor:
         params = params or {}
         canonical = self.registry.canonical(name)
         started = time.perf_counter()
-        counter: Counter[str] = Counter()
-        self.intent_stack.append(counter)
-        self._emit(
-            "verb_start",
-            name=name,
-            canonical=canonical,
-            params=params,
-            source=source,
-            nested=nested,
-        )
         outcome, summary, ok = "error", "verb exited unexpectedly", False
         data_keys: list[str] = []
-        try:
-            result = await self._run_verb(name, canonical, params, source=source, nested=nested)
-        except VerbNotAllowed as e:
-            outcome, summary = "refused", str(e)
-            raise
-        except ConfirmDenied as e:
-            outcome, summary = "denied", str(e)
-            raise
-        except BudgetExceeded as e:
-            outcome, summary = "budget", str(e)
-            raise
-        except Aborted as e:
-            outcome, summary = "aborted", str(e)
-            raise
-        except BaseException as e:  # a cancelled task ends the verb too, and says so
-            outcome, summary = "error", f"{type(e).__name__}: {e}"
-            raise
-        else:
-            ok = result.ok
-            outcome, summary, data_keys = (
-                ("ok" if ok else "fail"),
-                result.summary,
-                list(result.data),
-            )
-            return result
-        finally:
-            self.intent_stack.pop()
-            self._emit(
-                "verb_end",
-                name=name,
-                canonical=canonical,
-                ok=ok,
-                outcome=outcome,
-                summary=summary,
-                data_keys=data_keys,
-                elapsed_s=round(time.perf_counter() - started, 3),
-                intents=dict(counter),
-                source=source,
-                nested=nested,
-            )
+        with counting() as counter:
+            try:
+                # inside the try: a record sink that raises here must still leave a verb_end
+                self._emit(
+                    "verb_start",
+                    name=name,
+                    canonical=canonical,
+                    params=params,
+                    source=source,
+                    nested=nested,
+                )
+                result = await self._run_verb(name, canonical, params, source=source, nested=nested)
+            except VerbNotAllowed as e:
+                outcome, summary = "refused", str(e)
+                raise
+            except ConfirmDenied as e:
+                outcome, summary = "denied", str(e)
+                raise
+            except BudgetExceeded as e:
+                outcome, summary = "budget", str(e)
+                raise
+            except Aborted as e:
+                outcome, summary = "aborted", str(e)
+                raise
+            except BaseException as e:  # a cancelled task ends the verb too, and says so
+                outcome, summary = "error", f"{type(e).__name__}: {e}"
+                raise
+            else:
+                ok = result.ok
+                outcome, summary, data_keys = (
+                    ("ok" if ok else "fail"),
+                    result.summary,
+                    list(result.data),
+                )
+                return result
+            finally:
+                self._emit(
+                    "verb_end",
+                    name=name,
+                    canonical=canonical,
+                    ok=ok,
+                    outcome=outcome,
+                    summary=summary,
+                    data_keys=data_keys,
+                    elapsed_s=round(time.perf_counter() - started, 3),
+                    intents=dict(counter),
+                    source=source,
+                    nested=nested,
+                )
 
     async def _run_verb(
         self,

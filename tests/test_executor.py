@@ -492,6 +492,47 @@ async def test_the_heartbeats_stop_is_traced_too() -> None:
     assert any(e.kind == "intent" and e.data["intent"] == "stop" for e in seen)
 
 
+async def test_two_verbs_running_at_once_on_one_executor_count_only_their_own_intents(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """The MCP SDK runs every tool call as its own task on one robot's executor. With a tally
+    stack on the executor the two calls credited each other: a `quack` that overlapped a
+    `move` reported the move's resends as its own, and the move reported neither its ten
+    resends nor its stop."""
+    ex, seen = traced(registry, mock_transport, allow="quack, walk")
+    await asyncio.gather(
+        ex.run_verb("walk", {"vx": 0.1, "duration_s": 1.0}),
+        ex.run_verb("quack", {"text": "hi"}),
+    )
+    by_name = {e["name"]: e["intents"] for e in ends(seen)}
+    assert by_name["quack"] == {"sound": 1}
+    assert by_name["walk"] == {"move": 10, "stop": 1}
+
+
+async def test_a_record_sink_that_fails_on_verb_start_still_ends_the_verb(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """The record's failure is the run's, but it must not also leave a verb that started and
+    never ended (the tally frame used to leak onto a shared stack too)."""
+    from quackd.trace import Tracer
+
+    seen: list[Any] = []
+
+    def record(event: Any) -> None:
+        if event.kind == "verb_start":
+            raise OSError("disk full")
+
+    ex = Executor(
+        registry,
+        mock_transport,
+        contract=duck("quack").frontmatter,
+        trace=Tracer(record=record, observers=[seen.append]),
+    )
+    with pytest.raises(OSError, match="disk full"):
+        await ex.run_verb("quack")
+    assert [e.data["outcome"] for e in seen if e.kind == "verb_end"] == ["error"]
+
+
 async def test_without_a_tracer_the_executor_is_silent_and_hands_over_the_real_transport(
     registry: VerbRegistry, mock_transport: MockTransport
 ) -> None:
