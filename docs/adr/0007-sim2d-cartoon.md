@@ -1,6 +1,6 @@
 # ADR-0007: sim2d is a cartoon with two cameras
 
-**Status:** accepted · **Date:** 2026-08-28
+**Status:** accepted · **Date:** 2026-08-28 · Amended by [ADR-0030](0030-mujoco-physics-backend.md) (0.8: the GPU in "needs a GPU and CC BY-NC-SA meshes we will not vendor" below was only ever needed to *train* the policy. Running one is CPU MuJoCo and onnxruntime, so `microduck:mujoco` runs upstream's own robot on upstream's own gait. The meshes are still not vendored: they are fetched at run time into a user cache and hash checked, and `sim2d` stays the default)
 
 ## Context
 

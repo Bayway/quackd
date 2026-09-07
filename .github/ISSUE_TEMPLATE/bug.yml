@@ -9,27 +9,15 @@ body:
       description: Output of `quackd --version`
     validations:
       required: true
-  - type: dropdown
+  - type: input
     id: robot
     attributes:
       label: Robot
-      description: The `--robot <adapter>:<backend>` you ran. `quackd list-adapters` lists them all.
-      options:
-        - "microduck:sim2d (the default)"
-        - "microduck:mock"
-        - "microduck:jsonrpc (real robot, experimental)"
-        - "microduck:websocket (stub)"
-        - "open_duck:sim2d"
-        - "open_duck:mock"
-        - "open_duck:bridge (real duck, experimental)"
-        - "reachy_mini:sim2d"
-        - "reachy_mini:mock"
-        - "reachy_mini:sdk (real robot, experimental)"
-        - "lerobot:mock"
-        - "lerobot:real (real arm, experimental)"
-        - "rosbridge:mock"
-        - "rosbridge:ws (real bridge, experimental)"
-        - "not robot specific (CLI, docs, validation, MCP)"
+      description: >-
+        The `--robot <adapter>:<backend>` you ran. `quackd list-adapters` lists every one.
+        Put `browser demo` if you hit it in the web page, or `not robot specific` for the
+        CLI, docs, validation or MCP.
+      placeholder: "microduck:mujoco"
     validations:
       required: true
   - type: dropdown

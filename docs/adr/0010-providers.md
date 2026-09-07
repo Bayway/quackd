@@ -1,6 +1,6 @@
 # ADR-0010: One provider protocol, vendor SDKs as optional extras
 
-**Status:** accepted · **Date:** 2026-08-28
+**Status:** accepted · **Date:** 2026-08-28 · Amended by [ADR-0029](0029-tracing.md) (0.8: the Anthropic request now carries `thinking: {"type": "adaptive", "display": "summarized"}`, because without the display the thinking blocks come back empty and the trace has nothing to show. Read "no `thinking` param" below as what 0.2 sent. `QUACKD_THINKING_DISPLAY=omitted` opts out, and a model that rejects the parameter gets one retry without it)
 
 ## Context
 

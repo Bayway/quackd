@@ -173,10 +173,16 @@ What the three rules above actually cost, beyond writing it:
 
 ### A simulator, if the cartoon world already draws the body
 
-Half the bodies here ship a `sim2d` backend. It is worth writing when the shared 2D world can represent the
+Five of the eight bodies here ship a `sim2d` backend. It is worth writing when the shared 2D world can represent the
 body honestly and the robot has a task worth running end to end; it is not worth writing for a
 body the world would have to lie about. It earns a ✅ only with a seeded acceptance sweep that
 checks the world's ground truth, not merely a run that does not crash.
+
+There is a second simulator, and it is not a general one. `quackd/sim3d/` holds one arena and a
+`Body` protocol with two implementations, a kinematic puppet and the Microduck on its own
+trained policy, so a physics body for a new robot means its MJCF, its own controller and a
+reason the cartoon cannot serve, usually that you need to know whether a gait works. Nobody has
+written a second one, and `sim2d` is what the shared world and the flock are built on.
 
 ## `upstream_api.py`: never guess a name
 

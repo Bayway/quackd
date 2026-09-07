@@ -200,7 +200,9 @@ Start the same walk again and press Ctrl-C.
 
 ## 10. Feet down
 
-Clear floor, hand on the power switch:
+Clear floor, hand on the power switch. Abort and cut the power if the duck goes over: you are
+the fall detector on this robot, because nothing on it reports a fall, so quackd cannot know,
+and there is no get-up policy to call.
 
 ```bash
 quackd run open-duck-scout --robot open_duck:bridge --address tcp://127.0.0.1:9871 \

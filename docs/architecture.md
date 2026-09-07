@@ -16,6 +16,12 @@ turn; composites never call the LLM; verbs send *intents*, never joint targets; 
 adapter owns time, so the steering loop runs at sim speed in the simulator and in real
 time on hardware without changing verb code. ([ADR-0003](adr/0003-three-loops.md))
 
+One backend puts that first loop inside quackd's own process. `microduck:mujoco` steps
+upstream's `alpha_walking.onnx` at the robot's own 50 Hz next to the agent loop, because a
+simulated duck has no onboard computer to run it on. Nothing else changes: the transport
+sends a twist and a head pose, quackd still writes no gait, and the boundary that is a
+network hop on hardware is a function call here ([ADR-0030](adr/0030-mujoco-physics-backend.md)).
+
 None of this needs to run on the robot's own computer. The only quackd code that ever runs
 on a robot lives in `bridge/` (see Modules below): the Open Duck Mini's pair of daemons, a
 bridge and a camera server; a host wrapper for the AlohaMini; and a daemon for the
@@ -24,7 +30,7 @@ ToddlerBot. None of it carries model or perception code of its own.
 Since 0.4 the robot side is an **adapter** that declares a **manifest**: what body it has,
 which intents and sensors, which verbs. The registry, the tool list, the allowlist universe
 and the system prompt are all built from that manifest at connect time; a verb that is not
-in it does not exist. The Microduck is the first adapter, wrapping the four transports
+in it does not exist. The Microduck is the first adapter, wrapping the five transports
 below unchanged. ([ADR-0017](adr/0017-robot-adapters-and-manifest.md),
 [design/multi-robot.md](design/multi-robot.md))
 
@@ -58,11 +64,12 @@ sequenceDiagram
 |---|---|
 | `quackd/cli.py` | The front door: `run · validate · doctor · serve-mcp · list-verbs · list-adapters · record · memory · discover · announce`. `--robot <adapter>:<backend>` everywhere, with `--address`, `--camera-url` and `--token` for a real robot. |
 | `quackd/duckfile/` | The `.duck` contract (v0 and v1): strict pydantic frontmatter, parser, generated `schema.json`, `validate.py` (a task against one or more manifests). |
-| `quackd/adapters/` | `RobotManifest` (data: what a robot is and can do), the `RobotAdapter` protocol, the factory behind `--robot`, and one package per robot: `microduck/` wraps the four transports and declares its manifest and extension verbs; `reachy_mini/` is a stationary head (`sim2d`, `mock`, `sdk`) with its own `upstream_api.py` ([adapters/reachy_mini.md](adapters/reachy_mini.md)); `lerobot/` is a desktop arm (`mock`, `real`, [adapters/lerobot.md](adapters/lerobot.md)); `rosbridge/` is any wheeled base over rosbridge (`mock`, `ws`, [adapters/rosbridge.md](adapters/rosbridge.md)); `open_duck/` is an Open Duck Mini v2 (`sim2d`, `mock`, `bridge`, [adapters/open_duck.md](adapters/open_duck.md)), the first body whose robot side quackd also ships, in `bridge/open_duck/`, because its runtime has no network control API; `xlerobot/` is a dual-arm mobile manipulator (`mock`, `zmq`, [adapters/xlerobot.md](adapters/xlerobot.md)), the first body with both a base and arms, and the one quackd talks to by speaking its ZeroMQ host protocol rather than importing it, because upstream is not an installable package; `alohamini/` is two arms on a lift on a wheeled base (`mock`, `sim2d`, `zmq`, [adapters/alohamini.md](adapters/alohamini.md)), which quackd also reaches by speaking its ZeroMQ host protocol; `toddlerbot/` is a small humanoid (`mock`, `sim2d`, `bridge`, [adapters/toddlerbot.md](adapters/toddlerbot.md)), the third body whose robot side quackd ships, because upstream has no network API at all. Every SDK-touching package owns an `upstream_api.py` and a containment test. |
+| `quackd/adapters/` | `RobotManifest` (data: what a robot is and can do), the `RobotAdapter` protocol, the factory behind `--robot`, and one package per robot: `microduck/` wraps the five transports and declares its manifest and extension verbs; `reachy_mini/` is a stationary head (`sim2d`, `mock`, `sdk`) with its own `upstream_api.py` ([adapters/reachy_mini.md](adapters/reachy_mini.md)); `lerobot/` is a desktop arm (`mock`, `real`, [adapters/lerobot.md](adapters/lerobot.md)); `rosbridge/` is any wheeled base over rosbridge (`mock`, `ws`, [adapters/rosbridge.md](adapters/rosbridge.md)); `open_duck/` is an Open Duck Mini v2 (`sim2d`, `mock`, `bridge`, [adapters/open_duck.md](adapters/open_duck.md)), the first body whose robot side quackd also ships, in `bridge/open_duck/`, because its runtime has no network control API; `xlerobot/` is a dual-arm mobile manipulator (`mock`, `zmq`, [adapters/xlerobot.md](adapters/xlerobot.md)), the first body with both a base and arms, and the one quackd talks to by speaking its ZeroMQ host protocol rather than importing it, because upstream is not an installable package; `alohamini/` is two arms on a lift on a wheeled base (`mock`, `sim2d`, `zmq`, [adapters/alohamini.md](adapters/alohamini.md)), which quackd also reaches by speaking its ZeroMQ host protocol; `toddlerbot/` is a small humanoid (`mock`, `sim2d`, `bridge`, [adapters/toddlerbot.md](adapters/toddlerbot.md)), the third body whose robot side quackd ships, because upstream has no network API at all. Every SDK-touching package owns an `upstream_api.py` and a containment test. |
 | `quackd/verbs/` | `core.py`: the verbs any robot can carry and what each requires; `aliases.py`: the one alias table; `registry.py`: built from a manifest at connect time; `learned.py`: the v2 interface. |
 | `quackd/safety.py` | The layer that does not trust the LLM: `Executor`, `Budget`, `Heartbeat`, `KillSwitch`. Preconditions arrive from the adapter; the executor spells none. |
-| `quackd/transport/` | The Microduck backend layer: the `DuckTransport` protocol; `sim2d`, `mock`, `jsonrpc` (experimental), `websocket` (stub); `upstream_api.py` is the only file allowed to spell a Microduck upstream method. |
+| `quackd/transport/` | The Microduck backend layer: the `DuckTransport` protocol; `sim2d`, `mujoco` (physics, needs `quackd[mujoco]`), `mock`, `jsonrpc` (experimental), `websocket` (stub); `upstream_api.py` is the only file allowed to spell a Microduck upstream method. |
 | `quackd/sim2d/` | The cartoon world, two renders (top-down, duck-cam), the GIF recorder, the optional live window. |
+| `quackd/sim3d/` | The physics world: the cartoon's arena, seeds, deadman, kick cone and scoop, in MuJoCo. `world.py` steps a `Body`, and two exist, a kinematic puppet that needs no download and upstream's own Microduck model walking on upstream's own `alpha_walking.onnx` at 50 Hz. `assets.py` fetches the model and the policies at a pinned commit into `~/.quackd/cache` and checks every file against a recorded sha256; `upstream_api.py` is the only file allowed to spell a `microduck_rl` name ([ADR-0030](adr/0030-mujoco-physics-backend.md)). |
 | `quackd/perception/` | `Detection` + `Detector`; the HSV colour-blob default; the lazy YOLO extra. |
 | `quackd/agent/` | The loop, the prompts, the transcript, and one provider per vendor behind `LLMProvider`. |
 | `quackd/trace.py` | The run narrating itself: `TraceEvent`, the `Tracer` that fans out to the transcript and to any number of views, the transport wrapper that turns every intent into an event, and the renderer both surfaces share ([ADR-0029](adr/0029-tracing.md)). |
@@ -71,6 +78,7 @@ sequenceDiagram
 | `bridge/toddlerbot/` | quackd's own ToddlerBot daemon: the fifty hertz loop upstream has no daemon for, plus the ten things it does not do at all, enumerated in the daemon's own docstring and in `bridge/toddlerbot/README.md` rather than a third time here. It owns the control loop rather than feeding one, which is true of no other body quackd drives. Standard library plus numpy, never imported by quackd, shipped in the sdist and never in the wheel ([ADR-0028](adr/0028-toddlerbot.md)). |
 | `bridge/alohamini/` | quackd's own AlohaMini host: upstream's host loop with the arm torque its own `configure()` disables and never re-enables, plus three fields in every observation so quackd can tell this host from a stock one. Never imports quackd, ships in the sdist and never in the wheel ([ADR-0027](adr/0027-alohamini.md)). |
 | `bridge/open_duck/` | **The first robot side quackd shipped**, and one of the three above. It has still never run on a duck, like everything else here. Two daemons for an Open Duck Mini v2's Raspberry Pi: the bridge, which is upstream's own walk loop with the gamepad it reads replaced by a socket, and the camera server, which serves one JPEG over HTTP. Standard library plus numpy, never imported by quackd, shipped in the sdist and never in the wheel ([ADR-0024](adr/0024-open-duck-mini.md)). |
+| `web/` | The same loop in a browser, and the only quackd code that is not Python: MuJoCo compiled to WebAssembly, the same policy in onnxruntime-web, the same verbs, allowlist and budget, with the model and the policy fetched from the same pinned upstreams. It shares no code with the package and is kept in step by hand, which is the standing cost of it existing ([`web/README.md`](../web/README.md), [ADR-0030](adr/0030-mujoco-physics-backend.md)). |
 | `quackd/lan/` | LAN discovery over zeroconf (`_quackd._tcp.local.`): a pure TXT wire format, `announce`, `discover`; behind `quackd[lan]` ([lan.md](lan.md)). |
 | `quackd/flock/` | Many robots on one task: the in-process `Bus`, the typed messages, the Contract Net `Auction` and the role auction, the deterministic coordinator, the scripted member FSM, the one-call planner and the runner that judges from ground truth ([flock.md](flock.md)). |
 | `quackd/flock/mqtt_bus.py` | The flock `Bus` protocol over an MQTT broker, library only; the in-process bus stays the default. |
@@ -96,7 +104,7 @@ sequenceDiagram
    never turns off: `observation`, `llm_request`, `llm` (usage, latency, what the model
    thought), `verb_start`, a `gate` per rule that fired, an `intent` per command sent to the
    robot, `verb_end`, `verb` (`name` as called plus `canonical`) and a `memory` event for
-   every `remember`; `summary.json` at the end; `run.gif` from the recorder on sim2d. With
+   every `remember`; `summary.json` at the end; `run.gif` from the recorder in either simulator. With
    memory on, the run ends by appending one episode line to the robot's memory file
    ([memory.md](memory.md)). The terminal and the MCP tool results are views of the same
    stream (see [Trace](#trace)).

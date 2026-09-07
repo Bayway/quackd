@@ -25,7 +25,7 @@ than it read.
   policy has never needed a GPU.
 - **The policies are public and permissive.** The nine ONNX policies a Microduck ships with
   are on the Hugging Face Hub as `pollen-robotics/microduck-policies` under Apache-2.0. Only
-  the 3D model files are CC BY-SA-NC.
+  the 3D model files are CC BY-NC-SA.
 - **"We will not vendor" is not "we cannot use".** `docs/licenses.md` has said since 0.1
   that a future MuJoCo backend "fetches them from upstream at runtime into a user cache,
   prints the license, and stays optional". That is a design, and it works.
@@ -54,7 +54,7 @@ with cp311 and cp312 builds for Windows, macOS and Linux, and no GPU.
 - **Assets are fetched at run time, verified, and never shipped.** The first run downloads
   upstream's tarball into `~/.quackd/cache`, checks every file against the sha256 it was
   read at, and writes the licence notice beside it. `QUACKD_MICRODUCK_ASSETS` points at a
-  checkout instead. Nothing CC BY-SA-NC enters the wheel, the repository or a CI fixture.
+  checkout instead. Nothing CC BY-NC-SA enters the wheel, the repository or a CI fixture.
 - **A stand-in body for the tests.** `body="puppet"` is a kinematic block that moves exactly
   as the cartoon does inside the same MuJoCo scene. It needs no download and no policy, so
   CI exercises every intent, the recorder and a seeded acceptance sweep offline, and the
@@ -75,8 +75,8 @@ with cp311 and cp312 builds for Windows, macOS and Linux, and no GPU.
   transcript never implies more than happened.
 - **The same demo runs in a browser.** `web/` is a static page: MuJoCo compiled to
   WebAssembly, the same policy in onnxruntime-web, the same verbs and the same contract in
-  about 900 lines of JavaScript, with the model and the policy fetched from the same pinned
-  upstreams. It exists so that trying quackd costs nobody an install, and it carries a
+  six modules of plain JavaScript with no build step, and the model and the policy fetched from
+  the same pinned upstreams. It exists so that trying quackd costs nobody an install, and it carries a
   switch that removes the quackd layer and hands the visitor the keyboard instead.
 - **`sim2d` stays the default.** It starts in a second, needs no network, and is what eight
   adapters share. The physics backend is an extra, `quackd[mujoco]`, imported only inside
@@ -97,5 +97,10 @@ with cp311 and cp312 builds for Windows, macOS and Linux, and no GPU.
   `quackd/sim3d/upstream_api.py`. A new export from either is a new pin and a new sha256.
 - Flock mode stays `sim2d` only. `FlockClock` was generalised to any world with a `t` and a
   `step(dt)` so a MuJoCo arena could hold several ducks later, but nothing promises it.
+- **Nothing in `web/` has been run in a browser.** `microduck.js` and `pilot.js` were exercised
+  under Node against the real model and the real policy, and the rendering, the DOM and the
+  recording were read rather than run. No CI job touches `web/`, and GitHub Pages was not enabled
+  on the repository when this was written, so the page is not live. The first person to open it
+  is the test.
 - None of this makes a hardware claim. It is a better simulator, not a robot: the Microduck
   rows in `docs/adapter-status.md` that say "never run on a duck" still say it.

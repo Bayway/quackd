@@ -92,6 +92,31 @@ servers reject image parts. The text observation already carries what the camera
 
 `parallel_tool_calls` is never sent to local servers, because some reject unknown fields.
 
+Add physics by asking for both extras and naming the backend:
+
+```bash
+uvx --from "quackd[openai,mujoco]" quackd run find-and-kick --provider ollama --model qwen3:8b --robot microduck:mujoco
+```
+
+The duck then walks on upstream's own trained policy instead of sliding around a cartoon. It
+also undershoots what it is asked for, which is a harder task for a small model and which the
+run states in `report_state` ([ADR-0030](adr/0030-mujoco-physics-backend.md)).
+
+## The same duck in a browser, no Python
+
+[`web/`](../web/README.md) is a static page that runs the physics simulator through MuJoCo's
+WebAssembly build and drives it from any OpenAI compatible server, so a local model can pilot
+the duck with no key and nothing installed:
+
+```bash
+python -m http.server 8000 --directory web    # browsers refuse ES modules over file://
+```
+
+Pick Local in the page and give it your base URL. Ollama has to be told to accept the page
+(`OLLAMA_ORIGINS=* ollama serve`), and llama.cpp, vLLM and LM Studio need the same CORS
+permission. Browsers treat `http://localhost` as trustworthy, so an https page may still call
+it. What the page has and has not been run against is in [web/README.md](../web/README.md).
+
 ## Honest notes
 
 - Which local model pilots the duck well is an open question we have not measured. The

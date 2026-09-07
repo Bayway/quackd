@@ -17,9 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Hugging Face Hub at a pinned revision, and upstream's own 50 Hz loop around them. quackd
   supplies a twist and a head pose, which is what a gamepad supplies on the real robot, and
   writes no gait at all. `find-and-kick` succeeds on 10 of 10 seeds with the scripted pilot
-  while the duck walks on its trained policy, ground truth checked. Design:
+  while the duck walks on its trained policy, ground truth checked, measured here on one machine
+  because the sweep CI runs uses the stand-in body. Design:
   `docs/adr/0030-mujoco-physics-backend.md`.
-- **Nothing of upstream's is shipped.** The 3D model files are CC BY-SA-NC, so the first run
+- **Nothing of upstream's is shipped.** The 3D model files are CC BY-NC-SA, so the first run
   downloads them into `~/.quackd/cache`, checks every file against the sha256 it was read at,
   and writes the licence notice beside them. `QUACKD_MICRODUCK_ASSETS` points at your own
   checkout instead, and `QUACKD_MUJOCO_BODY=puppet` runs a kinematic stand-in that needs no
@@ -33,10 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   named stand-ins there too: `kick` and `grab` use the cartoon's contact rules, `sit` is
   refused, and a fall is recovered by standing the model up, because upstream's episodic
   policies did nothing from a standing pose and it ships no get-up policy.
-- **A browser demo, so trying quackd costs nobody an install** (`web/`, published to GitHub
-  Pages). The same physics and the same policy through MuJoCo's official WebAssembly build and
-  onnxruntime-web, with the verbs, the contract and the one-tool-per-turn loop in about 900
-  lines of JavaScript. Bring your own key for Anthropic, OpenAI or Gemini, or point it at
+- **A browser demo, so trying quackd costs nobody an install** (`web/`, a static page with a
+  GitHub Pages workflow ready, though Pages is not enabled on the repository yet so it is not
+  live). The same physics and the same policy through MuJoCo's official WebAssembly build and
+  onnxruntime-web, with the verbs, the contract and the one-tool-per-turn loop in six modules of
+  plain JavaScript and no build step. Bring your own key for Anthropic, OpenAI or Gemini, or point it at
   Ollama and keep everything on your machine. A switch turns quackd off, which removes the
   layer and only the layer: the robot and its policy are identical, nothing reads English any
   more, and you drive it with the keyboard. Runs can be recorded from the canvas and shared.

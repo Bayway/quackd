@@ -1,7 +1,9 @@
 # Learned verbs (v2) — this is the shape; nothing here runs yet
 
 **Status: reserved extension point.** The registry interface exists and is tested with a
-dummy; no policy executes. PRs welcome — especially from people with a GPU and a duck.
+dummy. quackd does run ONNX policies now, but only the two the Microduck ships and only
+through `microduck:mujoco`; nothing routes a learned verb to one. Training still wants a GPU.
+Running one no longer wants a duck.
 
 ## The idea
 
@@ -48,13 +50,17 @@ skill intent that the arm's own learned policy executes ([adapters/lerobot.md](a
 - A `.duck` can already *declare* them under `learned_verbs:` (parsed, validated, and
   rejected by `quackd validate` in v0.1 so nobody ships a file that silently does nothing).
 
-## What upstream's policies look like (VERIFIED, 2026-08-28)
+## What upstream's policies look like
 
 Every shipped policy is `obs[1,61] → actions[1,14]` at 50 Hz: 48 proprioception values +
 a 13-value command `[vel(3), head(4), body(6)]`; the observation normaliser is baked into
-the ONNX at export. `robotd` checks the shape at load and points at policies by role in
-`robotd.toml` (`[policy] walk = ...`). Roles today: walking, standing, sit↔stand, ground
-pick, kick left/right, roller, roller crouch, roulade.
+the ONNX at export. The whole contract is cited at a pin in
+[`quackd/sim3d/upstream_api.py`](../quackd/sim3d/upstream_api.py) (`OBSERVATION`, `COMMAND`,
+`CONTROL`, `POLICY_METADATA`), which is what the MuJoCo backend reads. Upstream's
+`manifest.json` lists every policy with its kind (perpetual, scripted or episodic) and its
+command encoding. `robotd` checks the shape at load and points at policies by role in
+`robotd.toml` (`[policy] walk = ...`, read 2026-08-28). Roles today: walking, standing,
+sit↔stand, ground pick, kick left/right, roller, roller crouch, roulade.
 
 ## What has to exist before a runner is real
 
@@ -62,15 +68,37 @@ pick, kick left/right, roller, roller crouch, roulade.
    roles from config at startup. A learned verb needs either an upstream "policy slot" that
    can be hot-swapped over the socket (not designed yet), or a `robotd.toml` edit + restart
    (slow, but real). Track upstream; do not guess.
-2. **A sim runner** for `sim2d` is out of scope — the cartoon has no joints. A MuJoCo
-   backend (fetching upstream's CC BY-NC-SA meshes at runtime, never vendored — see
-   [licenses.md](licenses.md)) is the honest place to run learned verbs before hardware.
-3. **Provenance.** `metadata` should carry the reward text, the training run, and the
-   eval numbers, so a `.duck` author knows what they are allowing.
+2. **A sim runner.** This is the part that changed. `microduck:mujoco` runs upstream's
+   walking and standing policies on upstream's model at 50 Hz on a laptop
+   ([ADR-0030](adr/0030-mujoco-physics-backend.md)), so the machinery a learned verb needs
+   already exists in `quackd/sim3d/microduck.py`: an onnxruntime session, the 61-value
+   observation built from the model's own state, and `ctrl = default_pose + action *
+   action_scale` written every tick. What is missing is a way in. `MicroduckBody` loads
+   exactly two sessions in `__init__` and chooses between them in `control()` by the twist
+   norm. There is no third slot, no way to hand it a policy for the length of one verb, and
+   no termination condition for a policy that ends. A runner reaches the world through
+   `ctx.transport`, which `VerbContext` already carries, so nothing is needed on the
+   executor side. A sim runner for `sim2d` is still out of scope: the cartoon has no joints.
+3. **An answer to the episodic problem.** Both policies quackd runs are perpetual: they are
+   handed a twist every tick and never finish. A learned verb is the other kind, and
+   upstream's own episodic policies (`ball_kick_left`, `ball_kick_right`,
+   `alpha_ground_pick`, `alpha_sitstand`) did nothing from a standing pose when quackd tried
+   them, which is why `kick`, `grab` and `sit` on `microduck:mujoco` are stand-ins rather
+   than policies (`KICK_STANDIN` in
+   [`quackd/sim3d/upstream_api.py`](../quackd/sim3d/upstream_api.py)). The entry pose, the
+   start condition and the stop condition are not in the 61-value observation, and nobody
+   has worked out where they belong. Until that is answered, the cheapest first learned verb
+   to attempt in sim is a perpetual one with the same contract: a different gait rather than
+   a new skill.
+4. **Provenance.** `metadata` should carry the reward text, the training run, and the
+   eval numbers, so a `.duck` author knows what they are allowing. Upstream's
+   `manifest.json` is the shape to copy: one entry per policy with its kind and its command
+   encoding.
 
 ## How to help
 
-- Prototype a runner against `microduck_rl`'s evaluation env and open a PR that keeps
-  `tests/test_registry.py::test_learned_verb_registers_and_runs` green.
+- Prototype a runner against `microduck:mujoco`, which needs `quackd[mujoco]` and no GPU,
+  rather than against `microduck_rl`'s evaluation env, which wants Python 3.12 exactly, torch,
+  warp and mjlab. Keep `tests/test_registry.py::test_learned_verb_registers_and_runs` green.
 - If you are upstream: a hot-swappable policy slot over the socket is the one API this
   needs. We will track it in `upstream_api.py` the day it is designed.

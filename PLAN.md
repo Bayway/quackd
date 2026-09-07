@@ -1,220 +1,87 @@
 # PLAN.md — quackd
 
-The task DAG per milestone. Updated as work lands. Decisions live in `docs/adr/`.
+What is still open. Everything that has shipped is in [CHANGELOG.md](CHANGELOG.md), the
+[ADRs](docs/adr/) and the git history, which record it better than a task list can.
 
-Legend: ✅ done · 🔨 in progress · ⬜ todo · ⏸ blocked (with reason)
+Legend: 🔨 in progress · ⬜ todo · ⏸ blocked (with reason)
 
-## M0 — Identity & scaffold 🔨
+## Only a human can
 
-- ✅ Verify name: PyPI `quackd` free (404, 2026-08-28); repo `rokbenko/quackd` owned → ADR-0002
-- ✅ ADR-0001 language/tooling
-- ✅ `pyproject.toml` (uv, hatchling, extras: anthropic/openai/gemini/grok/all/yolo/live/dev; 0.4 adds reachy/lerobot/rosbridge/lan)
-- ✅ Package skeleton with "why it exists" docstrings; `quackd --help`, `--version`
-- ✅ LICENSE (Apache-2.0), NOTICE, CODE_OF_CONDUCT, SECURITY, CHANGELOG, .env.example, .gitignore
-- ✅ CI (ruff · mypy · pytest · validate ducks; 3.11/3.12 × ubuntu/macos), pre-commit, dependabot, issue/PR templates
-- ✅ `uv sync --extra dev` green locally; `mcp` tree ≈ 15 MB → stays core (ADR-0009)
-- ✅ Five starter `.duck` files written (needed by the wheel's force-include; validated in M1)
-- ✅ Commit `chore: scaffold quackd v0.1.0 skeleton (M0)`
+Six bring-ups, one per body. Each needs hardware quackd has never touched, and each ends the
+same way: flip that backend's row in [`docs/adapter-status.md`](docs/adapter-status.md), and
+not before.
 
-## M1 — Contract & registry ✅
+- ⏸ **An Open Duck Mini v2**, the most reachable of the six because you can build it. Run
+  `open_duck:bridge` against a duck you built, work through
+  [docs/open-duck-hardware-checklist.md](docs/open-duck-hardware-checklist.md), and confirm
+  the deadman by pulling Wi-Fi mid-walk. Then the five numbers at the end of that checklist:
+  boot time against the watchdog budget, camd's peak memory against its cap, the observed
+  loop-rate floor, the camera's field of view against a tape measure, and the accelerometer
+  upright versus on its side. The last one is what would give this robot fall detection, and
+  quackd deliberately does not guess it, because a wrong fall detector fails as a confident
+  "not fallen".
+- ⏸ **A Microduck.** Run `--robot microduck:jsonrpc` against a real `robotd` and work through
+  [docs/microduck-hardware-checklist.md](docs/microduck-hardware-checklist.md), whose step 0
+  now rehearses the whole pilot in the physics simulator first. The path is built and audited:
+  pinned at a commit and bumped to API v23 (it was v16 against a moving link, so the handshake
+  would have refused), state actually subscribed to, and video over `webrtc://` because
+  upstream serves no frames on the socket. Pre-orders opened 2026-08-27, earliest arrivals
+  estimated around Christmas 2026 and later orders four to six months out.
+- ⏸ **A ToddlerBot** on its safety stand, running `bridge/toddlerbot/quackd_toddlerbot_bridge.py`
+  through [docs/toddlerbot-hardware-checklist.md](docs/toddlerbot-hardware-checklist.md). What
+  most needs a real robot: whether the safe-pose slew is safe from a crawl, what tilt really
+  means fallen, whether the neck axes are what the motor names imply, and whether a calibrated
+  zero survives a restart.
+- ⏸ **An XLeRobot.** Start the host (it is commented out of upstream's own package `__init__`
+  and exits after an hour) and point `xlerobot-lookout` at it. What most needs a real cart: the
+  camera colour order, whether `+x` is really forward, and whether the head motors are what
+  upstream's agent library implies.
+- ⏸ **An AlohaMini.** Start `bridge/alohamini/quackd_alohamini_host.py` rather than upstream's
+  host and point `alohamini-lookout` at it. What most needs a real robot: whether `+x` is
+  physically forward, the camera colour order, how fast the lift travels in mm/s, and whether
+  the wrapper really does leave the arms holding.
+- ⏸ **A Reachy Mini, an SO-101 arm or any rosbridge base.** `reachy_mini:sdk` (or
+  `reachy-mini-daemon --mockup-sim`), `lerobot:real` against a calibrated arm, `rosbridge:ws`
+  against a bridge. A flock across two machines needs a distributed clock first.
 
-- ✅ `duckfile/schema.py` (pydantic), `parser.py`, `schema.json` export (`python -m quackd.duckfile.export`), `quackd validate`
-- ✅ `verbs/registry.py`, `builtin.py`, `composite.py` (registered stubs → M2), `learned.py` (interface only)
-- ✅ `transport/base.py`, `mock.py`, `upstream_api.py` (VERIFIED/UNVERIFIED, from duck-ipc-proto API v16)
-- ✅ `safety.py`: Budget, Executor (allowlist · confirm · dry-run · machine-enforced abort_when), Heartbeat, KillSwitch
-- ✅ `agent/loop.py`, `prompts.py`, `providers/{base,fake,factory}.py`, `transcript.py`
-- ✅ Five starter `.duck` files validate
-- ✅ Tests (61): parser + invalid fixtures, schema sync, registry, learned dummy, executor rules, heartbeat, loop golden, CLI
-- ✅ ADR-0003…0006, 0011, 0012
-- ✅ ✅-criterion: `quackd run hello-world --provider fake --transport mock` writes a transcript + summary
+## Open here
 
-## M2 — The world ✅
+- ⬜ **Enable GitHub Pages** (Settings → Pages → Source: GitHub Actions). The README and
+  `web/README.md` both point at `rokbenko.github.io/quackd`, `.github/workflows/pages.yml` is
+  in place, and until this is switched on the workflow fails and there is no live demo.
+- ⬜ **Nothing checks `web/`.** Its rendering, DOM and recording have never run in a browser,
+  the Node harness behind its four measured claims is not in the repository, and no CI job
+  reads the directory. The cheapest fix is somebody opening the page.
+- ⬜ **CI installs no `quackd[mujoco]`**, so `tests/test_sim3d.py` and
+  `tests/test_acceptance_mujoco.py` skip on every runner and the physics sweep runs nowhere but
+  a developer's machine. Adding the extra to the matrix would cost a wheel download per job.
+- ⬜ Flock mode does not know `open_duck` yet (`flock/runner.py` knows two adapters), and a
+  hardware flock waits on Microducks shipping.
+- ⏸ **A real model recording**, in either simulator, to replace a scripted-pilot asset and drop
+  the label (see [docs/assets](docs/assets/README.md)). Needs a key.
+- 🔨 **A transcript from a live local server** (Ollama, vLLM, llama.cpp). None on the dev
+  machine. PR #5's contributor reports `find-and-kick` against Qwen 2.5 Coder 14B through LM
+  Studio on seeds 5 and 6, both successes with memory read and written, but no transcript from
+  it is in the repository, so the README says exactly that.
+- ⏸ **Exercise `remember` against a cloud model.** The scripted pilot has no script for it, so
+  `--provider fake` writes episodes and never a note.
+- ⏸ Verify the `gpt-5`, `grok-4` and `gemini-2.5-pro` default IDs against vendor docs. All are
+  overridable with `QUACKD_MODEL`.
+- ⏸ Upload `docs/assets/social-preview.png` under Settings → Social preview. There is no API
+  for it.
 
-- ✅ `sim2d/world.py` (20 Hz, seeded noise, deadman, kick cone, unreliable scoop), `render.py` (top-down + perspective duck-cam), `recorder.py` (GIF via tick hook), `live.py` (optional pygame)
-- ✅ `transport/sim2d.py`; `perception/color_blob.py` (HSV + bearing/distance geometry), `yolo.py` (lazy extra)
-- ✅ Composite `search_scan`, `walk_to` (10 Hz closed loop), `approach_and`; FakeLLM find-and-kick strategy
-- ✅ `quackd record`, `quackd list-verbs`
-- ✅ Acceptance: find-and-kick succeeds on **10/10** seeds 0–9 (ground truth checked), ~1–2 s wall-clock each; `run.gif` in `runs/`
-- ✅ ADR-0007, ADR-0008; 83 tests
+## Release checklist
 
-## M3 — The brain ✅
+The one reusable thing the shipped milestones left behind. Every release since 0.1.0 has run
+this, and the per-release detail is in [CHANGELOG.md](CHANGELOG.md).
 
-- ✅ Providers: anthropic (Messages API, adaptive thinking default, one tool call via `tool_choice any + disable_parallel_tool_use`, thinking blocks replayed, refusal handling, server-side fallbacks with SDK-age fallback), openai, grok (xAI endpoint), gemini; lazy imports, clear missing-extra / missing-key errors
-- ✅ Prompts carry the contract; confirm gates (`typer.confirm`, `--yes`), budgets, `--dry-run` live in the CLI
-- ✅ Offline provider tests against stubbed clients (request mapping, response parsing, refusal, error chain); 98 tests
-- ✅ Hero GIF `docs/assets/hero.gif` + `transcript-example.jsonl` — ADR-0013: **scripted-pilot recording, labelled**
-- ⏸ Real-provider hero recording — blocked on an API key. Unblock: `quackd record find-and-kick --provider anthropic --seed 3`, copy `run.gif` + `transcript.jsonl` into `docs/assets/`, drop the label
-- ⏸ Verify non-Anthropic default model IDs (`gpt-5`, `grok-4`, `gemini-2.5-pro`) against vendor docs; all overridable via `QUACKD_MODEL`
-
-## M4 — The socket ✅
-
-- ✅ `mcp_server.py` (MCP SDK v2 `MCPServer`, stdio, lifespan-managed transport + heartbeat), eight `duck_*` tools through the shared Executor, `duck_get_frame` returns `Image` content; `--yes` for confirm gates
-- ✅ `transport/jsonrpc_unix.py` (EXPERIMENTAL: hello handshake with API-version check, NDJSON, `robot.move` notifications, `robot.health` heartbeat, `unix://` + `tcp://` addresses) + fake-robotd TCP tests
-- ✅ `transport/websocket_stub.py` (STUB that points at upstream's draft)
-- ✅ `quackd doctor` (core deps, providers/keys masked, extras, transports, UNVERIFIED assumptions)
-- ✅ `docs/mcp.md` with verified Claude Code (`claude mcp add`, `.mcp.json`) and Claude Desktop config; 2-minute script; Windows note
-- ✅ In-process MCP client tests over memory streams (tool list, image content, contract enforcement, budgets, dry-run, confirm gate)
-
-## M5 — The launch surface ✅
-
-- ✅ README per brief §7 (hero GIF, quickstart, three loops + Mermaid, provider matrix, `.duck` in 20 lines, status table, roadmap, credits, safety, disclaimer)
-- ✅ LAUNCH.md per §8; CONTRIBUTING.md (add a verb / submit a duck); project `.mcp.json`
-- ✅ docs: architecture, duck-spec, transport-status, safety, learned-verbs, licenses, faq, mcp
-- ✅ `tests/test_docs.py` keeps transport-status.md and README in sync with the code
-- ✅ CHANGELOG 0.1.0; tag `v0.1.0`
-- ✅ Definition of done: `uvx quackd run find-and-kick --provider fake` from README alone; `tests/test_upstream_api.py` proves no UNVERIFIED ref is reachable outside `jsonrpc`/`websocket`/`doctor`
-
-## M6 — The first robot you can actually build ✅
-
-- ✅ `open_duck` adapter (ADR-0024): manifest, verbs, `sim2d` and `mock`; `kick` `grab`
-  `sit` `stand` `stand_up` never declared, because this robot has none of them
-- ✅ `fix(cli)`: `run` validates a `.duck` against its robot before connecting, instead of
-  raising a bare `VerbNotFound` mid-run and leaving an empty run directory
-- ✅ `open-duck-scout` 10 of 10 seeds, `open-duck-lookout` (moves no legs, for bring-up)
-- ✅ `open_duck:bridge` and `bridge/open_duck/`, the first quackd code that runs on a robot:
-  upstream's own walk loop with its gamepad class rebound to a socket, a deadman evaluated
-  by the control loop, head control off by default, protocol exercised end to end over
-  loopback against the real daemon
-- ✅ Docs: ADR-0024, `docs/adapters/open_duck.md`, the hardware checklist, the issue
-  template, licences and NOTICE for two upstreams (one of which has no LICENSE file)
-- ⏸ Only a human can: run `open_duck:bridge` against a duck they built, work the checklist
-  in `docs/open-duck-hardware-checklist.md`, and confirm the deadman by pulling Wi-Fi
-  mid-walk. Flip the `bridge` row in `docs/adapter-status.md` only after
-- ✅ 0.5 docs pass: README leads with the buildable robot and gains a `Which robots work`
-  table, SECURITY covers the two on-robot services, three claims that had become false are
-  corrected, and every command in the Open Duck docs was run before it shipped
-- ✅ `--transport` and the eight `duck_*` MCP tools removed, as 0.4 promised in ten places
-- ⬜ Flock mode does not know `open_duck` yet (`flock/runner.py` knows two adapters)
-
-## Open after v0.1.0
-
-- ⏸ Real-model hero recording (needs an API key) — `quackd record find-and-kick --provider anthropic --seed 3`
-- ⏸ Verify `gpt-5` / `grok-4` / `gemini-2.5-pro` default IDs against vendor docs
-- ⏸ Run `--robot microduck:jsonrpc` against a real Microduck and flip its rows in `docs/adapter-status.md` (see the human-only list below, which covers all eight adapters). The path it needs is now built and audited: pinned at a commit and bumped to API v23 (it was v16 against a moving link, so the handshake would have refused), state actually subscribed to, video over `webrtc://` since upstream serves no frames on the socket, and [docs/microduck-hardware-checklist.md](docs/microduck-hardware-checklist.md) with `microduck-lookout` to work through it. Pre-orders opened 2026-08-27: the earliest ones are estimated to arrive around Christmas 2026, later orders 4–6 months out
-- ✅ Published `quackd 0.1.0` to PyPI (2026-08-28); `uvx quackd --version` resolves
-- ✅ v0.2.0 (2026-08-29): local and open-source LLM providers, `--goal`, README rewrite, logo
-- ⏸ v0.2.0 PyPI publish needs `UV_PUBLISH_TOKEN` again (the line was removed from `.env` after 0.1.0)
-- 🔨 First transcript from a live local server (Ollama, vLLM, llama.cpp) — still none on the
-  dev machine, but PR #5's contributor reports `find-and-kick` against Qwen 2.5 Coder 14B
-  through LM Studio on seeds 5 and 6, both successes with memory read and written. No
-  transcript from it is in the repository, so the README says exactly that
-- ✅ v0.3.0 (2026-08-31): flock mode — multi-duck sim, lockstep clock, in-process bus, Contract Net auction, one planner LLM call, 10/10 seeded acceptance (ADR-0015/0016); hardened by a 69-agent adversarial review, 24 confirmed findings fixed pre-release
-- ⏸ Flock future work: hardware flocks when Microducks ship, real-provider planner recording
-- ✅ v0.4.0 (2026-09-02): "a brain for any small robot" — robot adapters and manifests (ADR-0017/0018), `.duck` v1 with `requires` and `robots` (ADR-0019), the Reachy Mini adapter (ADR-0023), heterogeneous flocks with `reachy-spots-duck-kicks` 10/10 (ADR-0020), multi-robot MCP (`--robots`, six `robot_*` tools), zeroconf discovery and an MQTT bus behind `quackd[lan]` (ADR-0021), LeRobot and rosbridge adapters (ADR-0022); 360 tests collected, still offline, four seeded sweeps at 10 of 10
-- ✅ Published `quackd 0.4.0` to PyPI (2026-09-02), tagged `v0.4.0` (annotated), GitHub Release `v0.4.0 "adapters"` created on `main` with the wheel and sdist attached, About description and Topics updated for four bodies
-- ⏸ Only a human can: run `reachy_mini:sdk` against a Reachy Mini (or `reachy-mini-daemon --mockup-sim`), `lerobot:real` against an SO-101, `rosbridge:ws` against a bridge, `microduck:jsonrpc` against a robotd; a flock across two machines needs a distributed clock first; flip rows in `docs/adapter-status.md` only after
-- ✅ Pushed `main` + `v0.1.0`; repo public; About/Topics/homepage set; GitHub Release created
-- ✅ v0.5.0 (2026-09-03): the Open Duck Mini v2, the first robot anyone can build (ADR-0024,
-  [design](docs/design/open-duck.md)); the first quackd code that runs on a robot; four
-  hardware-path blockers fixed; `--transport` and the `duck_*` tools removed as promised;
-  457 tests, five seeded sweeps at 10 of 10, still offline
-- ✅ Tagged `v0.5.0` (annotated) and pushed `main`, GitHub Release
-  `v0.5.0 "open duck"` created on `main` with the wheel and sdist attached (2026-09-03).
-  A pre-release audit of the note against the code fixed a half-applied detector fix, two
-  commands still advertising `--transport`, and a PyPI summary with no Open Duck in it
-- ✅ Published `quackd 0.5.0` to PyPI (2026-09-03), the same two files attached to the
-  release; `uvx quackd run open-duck-scout --provider fake` verified from a clean install.
-  About description and Topics updated for five bodies (`open-duck-mini` and
-  `bipedal-robot` in, `python` and `llama-cpp` out, at GitHub's cap of 20)
-- ✅ v0.6.0 (2026-09-04): memory between runs (ADR-0025, [docs/memory.md](docs/memory.md)),
-  and the first release assembled out of other people's contributions rather than written
-  here. One JSONL file per `adapter:backend` holds the notes a pilot saves with `remember`
-  and one line per earlier run, and the newest of both are in the prompt before the first
-  observation; `quackd memory show|add|clear`, `--no-memory`, `--memory-dir`, and
-  `robot_recall`/`robot_remember` taking the MCP surface to eight tools. Also: `max_minutes`
-  is now enforced against a provider that answers after the deadline, the README's 53
-  relative links are absolutised at build time so the PyPI page resolves them, and the two
-  CI actions move off deprecated Node 20. Reviewing the two contributions found fifteen
-  defects, two of them blockers, none of which their green checklists could see. 500 tests,
-  five seeded sweeps at 10 of 10, still offline
-- ⏸ Only a human can: exercise `remember` against a cloud model. The scripted pilot has no
-  script for it, so `--provider fake` writes episodes and never a note, and the only
-  evidence a model uses the tool is the contributor's Qwen 2.5 Coder 14B runs
-- ✅ Tagged `v0.6.0` (annotated) and pushed `main`, GitHub Release `v0.6.0 "memory"` created
-  on `main` with the wheel and sdist attached (2026-09-04). PRs #3 and #5 were merged with
-  `git merge`, so both contributors' commits are on `main` under their own names and the
-  fifteen corrections sit in six commits after the merges. A pre-release review by 179
-  agents found those fifteen, two of them blockers, plus six claims already stale on `main`
-- ✅ Published `quackd 0.6.0` to PyPI (2026-09-04), the same two files attached to the
-  release (SHA256 checked identical in both places); `uvx --from quackd==0.6.0 quackd run
-  find-and-kick --provider fake` verified from a clean install, twice, so the second run
-  reads the first one's episode. The PyPI long description now carries 0 relative links
-  and 60 rewritten ones, which is the first release whose project page links resolve
-- ✅ About description gained "memory between runs" (dropping "Apache 2.0.", which GitHub
-  already renders in that sidebar, to stay under the 350 character cap). Topics unchanged
-  at GitHub's cap of 20: memory is a feature, not a change to what quackd is
-- ✅ The README's Contributing section shows everyone who has contributed, humans only,
-  ordered by lines added from `git log`, regenerated by `.github/workflows/contributors.yml`
-  and committed only when the people or their avatars change
-- ⏸ Upload `docs/assets/social-preview.png` under Settings → Social preview (no API for it)
-- ✅ The XLeRobot adapter (ADR-0026, [docs/adapters/xlerobot.md](docs/adapters/xlerobot.md)):
-  a dual-arm mobile manipulator on an IKEA cart, and the first body with both a base and arms.
-  quackd imports nothing from it, because it is not a package: it speaks the ZeroMQ host
-  upstream already ships, so the extra is `pyzmq` alone and the 3.11 floor and Windows both
-  hold. The whole wire format is exercised against a fake host over loopback in CI, which
-  caught a `stop` that would have moved an arm before any hardware could
-- ⏸ Only a human can: run `xlerobot:zmq` against a cart they built. Start the host (it is
-  commented out of upstream's own package `__init__` and exits after an hour), point
-  `xlerobot-lookout` at it, then flip the `zmq` row in `docs/adapter-status.md`. What most
-  needs a real cart: the camera colour order, whether `+x` is really forward, and whether the
-  head motors are what upstream's agent library implies
-- ✅ The AlohaMini adapter (ADR-0027, [docs/adapters/alohamini.md](docs/adapters/alohamini.md)):
-  two arms on a lift on a wheeled base, reached by speaking its ZeroMQ host protocol because
-  upstream is a fork of LeRobot that calls itself `lerobot` and is not installable. quackd also
-  ships `bridge/alohamini/`, a host wrapper that enables the arm torque upstream disables and
-  never re-enables. The wire is exercised against a fake host over loopback in CI, which caught
-  a `get_state` that would have served stale readings forever and a `lift` the watchdog stopped
-  mid-travel
-- ⏸ Only a human can: run `alohamini:zmq` against a robot they built. Start
-  `bridge/alohamini/quackd_alohamini_host.py` rather than upstream's host, point
-  `alohamini-lookout` at it, then flip the `zmq` row in `docs/adapter-status.md`. What most
-  needs a real robot: whether `+x` is physically forward, the camera colour order, how fast the
-  lift travels in mm/s, and whether the wrapper really does leave the arms holding
-- ✅ The ToddlerBot adapter (ADR-0028, [docs/adapters/toddlerbot.md](docs/adapters/toddlerbot.md)):
-  quackd's first full humanoid, pinned at the commit the `v2.0.0` tag points at. It has no
-  network API at all, so `bridge/toddlerbot/` runs the fifty hertz loop and carries the seven
-  things upstream does not: a clamp, a rate limit, an all-zeros detector, a fault guard, a
-  safe-pose slew, signal handlers and a construction watchdog. Verified before a line was
-  written: `set_motor_kps` raises on hardware, `enable_motors` is not bound to Python, the
-  atexit handler de-torques a standing robot, and there is no walk checkpoint anywhere
-- ⏸ Only a human can: put a ToddlerBot on its safety stand, run
-  `bridge/toddlerbot/quackd_toddlerbot_bridge.py`, work through
-  [docs/toddlerbot-hardware-checklist.md](docs/toddlerbot-hardware-checklist.md) and point
-  `toddlerbot-lookout` at it, then flip the `bridge` row in `docs/adapter-status.md`. What most
-  needs a real robot: whether the safe-pose slew is safe from a crawl, what tilt really means
-  fallen, whether the neck axes are what the motor names imply, and whether a calibrated zero
-  survives a restart
-
-- ✅ The Open Duck Mini v2 hardware path, audited against upstream at its pin rather than
-  against itself (`feat/open-duck-hardware-path`, 2026-09-05). A duck set up the way
-  `install.sh` instructs could not start the bridge; if it could it would have had no camera
-  verbs; and Ctrl-C would not have stopped it. Fixed in four passes — the daemon can start,
-  the operator's stop works, it stops claiming guards it lacks, and the camera is safe to
-  steer a walking biped on — plus the deferred tail. See the 0.7.0 section of the CHANGELOG.
-  Nine of ten upstream unknowns closed by reading source at the pin; four refs promoted to
-  VERIFIED, one corrected (the head floats are offsets, not absolute joint angles)
-- ⏸ Only a human can, on an Open Duck: the five numbers at the end of
-  `docs/open-duck-hardware-checklist.md`. Boot time against the watchdog budget, camd's peak
-  memory against its cap, the observed loop-rate floor, the camera's field of view against a
-  tape measure, and the accelerometer upright versus on its side. The last one is what would
-  give this robot fall detection; quackd deliberately does not guess it, because a wrong fall
-  detector fails as a confident "not fallen". Flip the `bridge` row in
-  `docs/adapter-status.md` only after a run on a real duck
-- ✅ v0.7.0 (2026-09-07): three more bodies, and two hardware paths read against upstream.
-  The XLeRobot and the AlohaMini by speaking their ZeroMQ hosts rather than importing them
-  (ADR-0026, ADR-0027), the ToddlerBot with the fifty hertz loop quackd ships because
-  upstream has no network API (ADR-0028), each exercised against a fake host over loopback in
-  CI. The Open Duck's daemon and installer fixed so a duck set up as the docs instruct can
-  start, stop and be steered on its camera; the Microduck's transport moved to the API
-  upstream actually ships, with video over WebRTC. Across every body, an abort now cancels
-  the running verb and `stop` is exempt from the gate that made it necessary. 58 commits,
-  121 files, still nothing on a robot
-- ✅ Tagged `v0.7.0` (annotated) and pushed `main`, GitHub Release `v0.7.0 "three more bodies"`
-  created on `main` with the wheel and sdist attached (2026-09-07). The release note was
-  drafted twice with different emphases and one reader checked every claim against the
-  0.7.0 section and the code, sixteen corrections, seventeen links
-- ✅ Published `quackd 0.7.0` to PyPI (2026-09-07), the same two files attached to the
-  release (SHA256 checked identical in both places); `uvx --from quackd==0.7.0 quackd run
-  find-and-kick --provider fake` verified from a clean install, twice, so the second run
-  reads the first one's episode, and the four commands in the release note's bash block
-  each ran to SUCCESS from the published package
+1. All four CI gates green on `main`: `ruff check`, `ruff format --check`, `mypy` on 3.11 and
+   3.12, `pytest` with `QUACKD_STRICT_SEEDS=1`, plus `quackd validate ducks/*.duck`.
+2. Read the release note against the code before it ships. Every release so far has found
+   claims that had gone stale between writing and tagging.
+3. Annotated tag, pushed with `main`.
+4. GitHub Release on `main` with the wheel and the sdist attached.
+5. Publish to PyPI, and check the SHA256 of both files is identical in both places.
+6. `uvx --from quackd==<version> quackd run find-and-kick --provider fake` from a clean
+   install, twice, so the second run reads the first one's episode.
+7. Update the About description (GitHub's cap is 350 characters) and Topics (cap 20).

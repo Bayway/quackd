@@ -8,14 +8,22 @@ Thanks for taking a toy duck seriously. Two kinds of contribution matter most: *
 ```bash
 git clone https://github.com/rokbenko/quackd && cd quackd
 uv sync --extra dev            # add --extra anthropic etc. if you want a real provider
+uv sync --extra dev --extra mujoco   # the physics simulator, or its tests just skip
 uv run pre-commit install
 uv run pytest                  # the whole suite, a few minutes, no network, no keys
-uv run ruff check . && uv run ruff format --check . && uv run mypy
+uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run quackd validate ducks/*.duck
 ```
 
 Windows, macOS and Linux are all first-class. Tests must never touch the network. About a
-third of that is the seven seeded acceptance sweeps, which CI holds at 10 of 10 by setting
+third of that is the seeded acceptance sweeps, which CI holds at 10 of 10 by setting
 `QUACKD_STRICT_SEEDS=1`; locally they pass at 8 of 10 so a slow machine does not block you.
+
+Touching `quackd/sim3d/` or `quackd/transport/mujoco.py`? Install `--extra mujoco` or your work
+is untested: both test modules start with `pytest.importorskip("mujoco")` and vanish without it,
+and CI does not install the extra either, so the physics sweep runs nowhere but a developer's
+machine. The tests use the kinematic stand-in body, so they still touch no network. A real run
+does: the first `--robot microduck:mujoco` fetches about 10 MB of upstream model into
+`~/.quackd/cache`.
 
 Touching anything under `bridge/`? That is the code that runs on a robot, and there are
 three lots of it now (`open_duck/`, `alohamini/`, `toddlerbot/`). It plays by different
@@ -78,7 +86,7 @@ nothing in your `allow` list. Skip it for a smoke test, the way `hello-world` do
    what makes the verb exist: a verb not in the manifest is not in the registry, the MCP
    tool list, `.duck` validation or the prompt). Preconditions are named in the manifest
    and supplied by the adapter's `conditions()`.
-4. Add a test: on `MockTransport` for intent sequences, on `Sim2DTransport` for behaviour.
+4. Add a test: on `MockTransport` for intent sequences, on `Sim2DTransport` for behaviour, and on `MujocoTransport(body="puppet")` if the verb makes a claim about the body, because the cartoon cannot tell you whether one is true.
 5. If the verb needs an upstream method we have not verified, add it to the adapter's
    `upstream_api.py` as `UNVERIFIED` with a note and a row in that adapter's page under
    `docs/adapters/` (the Microduck's table is in `docs/adapter-status.md`). Never invent
@@ -107,7 +115,12 @@ arrive 🧪 in the status tables until someone runs it against the real thing.
 - Consequential decisions get a short ADR in `docs/adr/` (copy the shape of an existing one).
 - Every module opens with a docstring saying *why it exists*.
 - Keep the default install light: provider SDKs and YOLO stay optional extras.
-- No Pollen Robotics assets — no logos, meshes, or videos — ever.
+- **Never commit an upstream asset.** No logos, meshes, CAD, MJCF, ONNX policies or videos,
+  from Pollen Robotics or anyone else, in a commit, a test fixture or a docs asset. This got
+  sharper in 0.8: a real `--robot microduck:mujoco` run puts upstream's `robot_walk.xml` and
+  38 CC BY-NC-SA meshes in `~/.quackd/cache`. quackd's whole licence position is that it
+  redistributes none of them, and a public history does not forget. `.gitignore` now catches
+  `.stl` and `robot_walk.xml` as well as `.onnx`, but do not rely on it.
 - Tone: confident, playful, honest about status.
 
 ## How your PR gets handled

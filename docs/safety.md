@@ -45,7 +45,10 @@ point a new `.duck` at hardware.
 
 ## On hardware
 
-Nothing here has run on hardware yet, on any body. When it does, start with `--dry-run`
+Nothing here has run on hardware yet, on any body. If the body is a Microduck, run the contract
+in the physics simulator first (`--robot microduck:mujoco`): it is the only place quackd can
+show you a body that undershoots, refuses and falls over, and nothing there can be hurt. When
+you do reach the robot, start with `--dry-run`
 every time, then a `.duck` whose `allow` list is the smallest thing that could work, then
 widen it. **You are responsible for your robot.**
 
@@ -196,5 +199,17 @@ under") will keep telling itself so until somebody deletes the line. That is the
 of the feature and also its whole risk, which is why the file is plain text you can read,
 `quackd memory show` prints exactly what the pilot was told, `quackd memory clear` forgets
 it, and `--no-memory` runs as if it were never there.
+
+There is a second thing that is not about the body. `--robot microduck:mujoco` downloads an
+MJCF, 38 meshes and two ONNX policies from GitHub and the Hugging Face Hub the first time it
+runs, into `~/.quackd/cache`, and then runs those policies in quackd's own process. What guards
+that: the commit and the revision are pinned in `quackd/sim3d/upstream_api.py`, every file is
+checked against a sha256 recorded when it was read and a mismatch is a refusal, and the tarball
+is unpacked by name against a fixed list rather than by whatever it contains. What does not:
+`QUACKD_MICRODUCK_ASSETS` points quackd at a checkout of your own, and there a file that differs
+from the pin is a warning and the run continues, which is deliberate, because a newer export is
+what somebody with a checkout usually wants. The state says which you got
+(`extras.model_pinned`), so the transcript records it. Nothing in this path reaches a robot: the
+physics backend has no address and drives nothing outside the process.
 
 Report anything that lets a model bypass the executor — see [`SECURITY.md`](../SECURITY.md).
