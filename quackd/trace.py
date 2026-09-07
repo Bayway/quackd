@@ -308,6 +308,11 @@ def _ok(outcome: str) -> bool:
     return outcome == "ok"
 
 
+_BAD = dict.fromkeys(("fail", "refused", "denied", "budget", "aborted", "error"), "red")
+"""Red is for a run that did not do what was asked. A word from another layer (a flock's
+`preempted`) is yellow: the verb ended early on purpose and nothing is wrong."""
+
+
 _FLOCK_STYLE = {
     "auction": "cyan",
     "claim": "bold",
@@ -491,7 +496,7 @@ def render_lines(
         text = f"{_label('<-')}{d.get('name')} {verdict}: {d.get('summary')}{tail}"
         if d.get("nested"):
             text = f"{_label('<-')}  {d.get('name')} {verdict}: {d.get('summary')}{tail}"
-        return [(text, "green" if _ok(outcome) else "red")]
+        return [(text, "green" if _ok(outcome) else _BAD.get(outcome, "yellow"))]
     if k == "declare":
         return [
             (

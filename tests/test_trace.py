@@ -649,3 +649,12 @@ def test_the_coordinators_events_render_as_flock_lines_in_the_recorders_words() 
     word, detail = flock_caption("claim", {"kicker": "duck-1", "dist": 0.62}) or ("", "")
     assert word == "CLAIM" and detail.startswith("duck-1 (0.62 m)")
     assert flock_caption("verb_end", {}) is None
+
+
+def test_a_verb_ended_by_another_layer_is_yellow_and_keeps_its_own_word() -> None:
+    data = {"name": "search_scan", "outcome": "preempted", "summary": "role change to kicker"}
+    ((text, style),) = render_lines(TraceEvent("verb_end", 0.0, data))
+    assert "PREEMPTED: role change to kicker" in text
+    assert style == "yellow", "a routine handover must not read as the red that means a bug"
+    ((_, style),) = render_lines(TraceEvent("verb_end", 0.0, {**data, "outcome": "error"}))
+    assert style == "red"

@@ -131,7 +131,7 @@ One JSON object per line: `{"t": seconds, "kind": ..., ...}`.
 | `verb_start` | name as called, canonical name, params, source (`agent` · `mcp` · `cli`), whether it is nested inside a composite |
 | `gate` | one per executor rule that fired: `abort` · `allowlist` · `unknown` · `params` · `confirm` · `budget` · `abort_when` · `precondition` · `dry_run`, with the reason and, where it matters, the robot state that caused it |
 | `intent` | every command sent to the robot: kind, params, whether it was accepted |
-| `verb_end` | outcome (`ok` · `fail` · `refused` · `denied` · `budget` · `aborted` · `error`), summary, seconds, and how many intents of each kind it sent |
+| `verb_end` | outcome (`ok` · `fail` · `refused` · `denied` · `budget` · `aborted` · `preempted` · `error`), summary, seconds, and how many intents of each kind it sent |
 | `verb` | the loop's own record of the call it made (name, params, ok, summary, data) |
 | `declare`, `memory`, `note`, `frame`, `run_end` | the model's verdict, a saved note, a free-text line, a captured frame, the summary |
 

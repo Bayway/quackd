@@ -17,10 +17,12 @@ from quackd.safety import (
     ConfirmDenied,
     Executor,
     Heartbeat,
+    SafetyStop,
     VerbNotAllowed,
     allow_all,
     deny_all,
 )
+from quackd.trace import Tracer
 from quackd.transport.base import DuckState, Intent
 from quackd.transport.mock import MockTransport
 from quackd.verbs.registry import NoParams, Verb, VerbContext, VerbRegistry, VerbResult
@@ -691,3 +693,29 @@ async def test_without_a_tracer_the_executor_is_silent_and_hands_over_the_real_t
     assert ex.traced_transport() is mock_transport
     assert ex.context().transport is mock_transport
     assert (await ex.run_verb("quack")).ok
+
+
+async def test_a_safety_stop_from_another_layer_ends_the_verb_with_its_own_word(
+    registry: VerbRegistry, mock_transport: MockTransport
+) -> None:
+    """A flock's role change preempts an in-flight verb by raising a `SafetyStop` subclass.
+    Before this the trace called that `error`, which the docs define as a bug, and every
+    handover in a three-robot run printed a red line about nothing being wrong."""
+
+    class Preempted(SafetyStop):
+        outcome = "preempted"
+
+    async def handover(_ctx: VerbContext, _p: NoParams) -> VerbResult:
+        raise Preempted("role change to kicker")
+
+    registry.register(Verb("handover", "gives way", handover, timeout_s=5))
+    tracer = Tracer()
+    seen: list[Any] = []
+    tracer.add(seen.append)
+    ex = Executor(registry, mock_transport, contract=duck("handover").frontmatter, trace=tracer)
+    with pytest.raises(Preempted):
+        await ex.run_verb("handover")
+
+    (end,) = [e for e in seen if e.kind == "verb_end"]
+    assert end.data["outcome"] == "preempted"
+    assert end.data["summary"] == "role change to kicker"

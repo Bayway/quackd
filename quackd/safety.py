@@ -38,6 +38,11 @@ Source = Literal["agent", "mcp", "cli"]
 class SafetyStop(Exception):
     """Base for every reason the run must end now, regardless of what the LLM wants."""
 
+    outcome = "aborted"
+    """The word `verb_end` records. A layer above the executor that ends a verb for a reason
+    of its own overrides this, so the trace says `PREEMPTED` and not the red `ERROR` that
+    means a bug."""
+
 
 class BudgetExceeded(SafetyStop):
     pass
@@ -249,6 +254,11 @@ class Executor:
                 raise
             except Aborted as e:
                 outcome, summary = "aborted", str(e)
+                raise
+            except SafetyStop as e:
+                # another layer ended the verb on purpose (a flock role change): its own word,
+                # so the console does not call a routine handover an error
+                outcome, summary = e.outcome, str(e)
                 raise
             except asyncio.CancelledError:
                 # the caller went away (an MCP client, the CLI's second Ctrl-C). `_execute`
