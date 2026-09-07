@@ -280,16 +280,23 @@ async def test_silence_trips_the_hosts_watchdog_and_stops_the_base() -> None:
 
 async def test_a_stale_reading_is_a_heartbeat_failure_not_a_reading() -> None:
     """Nothing on the wire is timestamped and upstream's own client serves its cache on a
-    timeout. A stopped robot must not look like a moving one."""
+    timeout. A stopped robot must not look like a moving one.
+
+    The limit is the host's own window rather than a tighter one, because a loaded runner
+    can starve the fake's thread for longer than 50 ms and fail the live heartbeat this test
+    needs to pass first. And the socket is drained once after the host stops, because its
+    last cycle may have published an observation nobody has read, and a heartbeat that finds
+    it is right to call it fresh. The silence this test is about starts after that."""
     with FakeXLerobotHost() as host:
-        link = await _connected(host, stale_limit_ms=50.0)
+        link = await _connected(host)
         await link.heartbeat()
         host.stop()
-        await asyncio.sleep(0.2)
+        await link.get_state()  # take whatever the host's last cycle left in the socket
+        await asyncio.sleep(link.stale_limit_ms / 1000.0 + 0.2)
         with pytest.raises(HeartbeatError, match="no observation"):
             await link.heartbeat()
         state = await link.get_state()
-        assert state.extras["stale_ms"] > 50.0
+        assert state.extras["stale_ms"] > link.stale_limit_ms
         await link.close()
 
 

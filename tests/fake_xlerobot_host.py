@@ -73,10 +73,14 @@ class FakeXLerobotHost:
         broken_camera: bool = False,
     ) -> None:
         self.ctx = zmq.Context()
+        # LINGER 0 at creation so a fake left unclosed by a failing test cannot hold the
+        # interpreter's exit in term(), which is forever with the default linger
         self.cmd = self.ctx.socket(zmq.PULL)
+        self.cmd.setsockopt(zmq.LINGER, 0)
         self.cmd.setsockopt(zmq.CONFLATE, 1)
         self.cmd_port = self.cmd.bind_to_random_port("tcp://127.0.0.1")
         self.obs = self.ctx.socket(zmq.PUSH)
+        self.obs.setsockopt(zmq.LINGER, 0)
         self.obs.setsockopt(zmq.CONFLATE, 1)
         self.obs_port = self.obs.bind_to_random_port("tcp://127.0.0.1")
 

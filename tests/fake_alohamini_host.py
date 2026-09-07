@@ -79,10 +79,14 @@ class FakeAlohaMiniHost:
         watchdog_s: float = WATCHDOG_S,
     ) -> None:
         self.ctx = zmq.Context()
+        # LINGER 0 at creation so a fake left unclosed by a failing test cannot hold the
+        # interpreter's exit in term(), which is forever with the default linger
         self.cmd = self.ctx.socket(zmq.PULL)
+        self.cmd.setsockopt(zmq.LINGER, 0)
         self.cmd.setsockopt(zmq.CONFLATE, 1)
         self.cmd_port = self.cmd.bind_to_random_port("tcp://127.0.0.1")
         self.obs = self.ctx.socket(zmq.ROUTER)
+        self.obs.setsockopt(zmq.LINGER, 0)
         self.obs.setsockopt(zmq.SNDHWM, 3)
         self.obs.setsockopt(zmq.RCVHWM, 3)
         self.obs_port = self.obs.bind_to_random_port("tcp://127.0.0.1")

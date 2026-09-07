@@ -90,10 +90,16 @@ class _PyZmqLink:
         zmq = self._zmq
         self._ctx = zmq.Context()
         # the host BINDS both sockets, so quackd connects; CONFLATE on each, as upstream sets
+        # LINGER 0 at creation, not only on the close() path. A context that is garbage
+        # collected with a socket still holding a message to a peer that has gone calls
+        # term() with the default linger, which is forever: that held a macOS test run
+        # alive for six hours after one failed test skipped its close().
         self._cmd = self._ctx.socket(zmq.PUSH)
+        self._cmd.setsockopt(zmq.LINGER, 0)
         self._cmd.setsockopt(zmq.CONFLATE, 1)
         self._cmd.connect(f"tcp://{host}:{cmd_port}")
         self._obs = self._ctx.socket(zmq.PULL)
+        self._obs.setsockopt(zmq.LINGER, 0)
         self._obs.setsockopt(zmq.CONFLATE, 1)
         self._obs.connect(f"tcp://{host}:{obs_port}")
 

@@ -104,10 +104,16 @@ class _PyZmqLink:
     def open(self, host: str, cmd_port: int, obs_port: int) -> None:
         zmq = self._zmq
         self._ctx = zmq.Context()
+        # LINGER 0 at creation, not only on the close() path. A context that is garbage
+        # collected with a socket still holding a message to a peer that has gone calls
+        # term() with the default linger, which is forever: that held a macOS test run
+        # alive for six hours after one failed test skipped its close().
         self._cmd = self._ctx.socket(zmq.PUSH)
+        self._cmd.setsockopt(zmq.LINGER, 0)
         self._cmd.setsockopt(zmq.CONFLATE, 1)  # as upstream's host sets on its PULL
         self._cmd.connect(f"tcp://{host}:{cmd_port}")
         self._obs = self._ctx.socket(zmq.DEALER)
+        self._obs.setsockopt(zmq.LINGER, 0)
         self._obs.setsockopt(zmq.SNDHWM, 3)  # upstream's observation_request_window
         self._obs.setsockopt(zmq.RCVHWM, 3)
         self._obs.connect(f"tcp://{host}:{obs_port}")
