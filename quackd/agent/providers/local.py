@@ -44,10 +44,15 @@ def split_thinking(text: str) -> tuple[str | None, str]:
     A server that does not separate reasoning (llama.cpp without `--reasoning-format`, LM
     Studio with separation off, vLLM without a parser) leaves the model's thoughts inline in
     `content`. Left there they would be shown as the answer and replayed to the model next
-    turn as something it said."""
+    turn as something it said. An opening tag with no closing one is thinking to the end of
+    the reply: a max_tokens cut mid-thought must not turn a half-finished thought into the
+    answer."""
     thoughts = [m.group(1).strip() for m in _THINK_RE.finditer(text)]
-    rest = _THINK_RE.sub("", text).strip()
-    return "\n\n".join(t for t in thoughts if t) or None, rest
+    rest = _THINK_RE.sub("", text)
+    if (cut := rest.find("<think>")) != -1:
+        thoughts.append(rest[cut + len("<think>") :].strip())
+        rest = rest[:cut]
+    return "\n\n".join(t for t in thoughts if t) or None, rest.strip()
 
 
 def _candidates(text: str) -> list[dict[str, Any]]:
@@ -175,11 +180,19 @@ class LocalProvider(OpenAIProvider):
         self, system: str, history: list[Any], tools: list[dict[str, Any]]
     ) -> ProviderTurn:
         await self.ensure_model()
-        turn = await super().step(system, history, tools)
+        return await super().step(system, history, tools)
+
+    def _normalise(self, turn: ProviderTurn) -> ProviderTurn:
+        """Split inline `<think>` off before anything else reads the text.
+
+        It runs here, not after `super().step()`, because the JSON text fallback reads
+        `turn.text`: a model that weighs a verb in its reasoning and then rejects it
+        (`<think>maybe {"name": "kick"} but no</think>I will wait.`) would otherwise have
+        that call parsed out of the discarded thought and executed.
+        """
         if turn.thinking is None and turn.text and "<think>" in turn.text:
             thinking, rest = split_thinking(turn.text)
-            if thinking is not None:
-                turn = turn.model_copy(update={"thinking": thinking, "text": rest or None})
+            turn = turn.model_copy(update={"thinking": thinking, "text": rest or None})
         return turn
 
     def _fallback(self, turn: ProviderTurn, tools: list[dict[str, Any]]) -> ProviderTurn:

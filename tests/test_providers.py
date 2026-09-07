@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from types import SimpleNamespace as NS
 from typing import Any
 
@@ -392,6 +393,74 @@ async def test_anthropic_other_bad_requests_still_raise() -> None:
         await AnthropicProvider(client=client, fallbacks=False).step("S", history()[:1], TOOLS)
 
 
+def sdk_bad_request(api_message: str) -> BadRequestError:
+    """A 400 in the shape the real SDK raises: `message` is `Error code: 400 - {whole body}`,
+    and the sentence the API itself wrote is one level down, in `body["error"]["message"]`."""
+    body: dict[str, Any] = {
+        "type": "error",
+        "error": {"type": "invalid_request_error", "message": api_message},
+    }
+    e = BadRequestError(f"Error code: 400 - {body}")
+    e.body = body  # type: ignore[attr-defined]
+    return e
+
+
+async def test_a_400_about_a_replayed_thinking_block_does_not_disable_thinking() -> None:
+    """The signature of a thinking block replayed from an earlier turn can be rejected. That
+    complaint names a message path, not the parameter: retrying without `thinking` sends the
+    identical messages, fails identically, and would cost the rest of the run its thoughts."""
+    calls: list[dict[str, Any]] = []
+
+    async def create(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        raise sdk_bad_request("messages.3.content.0.thinking.signature: Invalid signature")
+
+    client = NS(messages=NS(create=create), beta=NS(messages=NS(create=create)))
+    p = AnthropicProvider(client=client, fallbacks=False)
+    with pytest.raises(ProviderError, match="bad request"):
+        await p.step("S", history()[:1], TOOLS)
+    assert len(calls) == 1  # no pointless second request
+    assert p.thinking_display == "summarized"  # and the next turn still asks to think
+
+
+async def test_the_real_sdk_message_shape_still_matches_a_top_level_thinking_complaint() -> None:
+    """The same wrapping, but the API's sentence names the `thinking` parameter itself: this
+    one is the old model the retry was written for."""
+    calls: list[dict[str, Any]] = []
+
+    async def create(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        if "thinking" in kwargs:
+            raise sdk_bad_request("thinking: Extra inputs are not permitted")
+        return anthropic_response(tool_use_block())
+
+    client = NS(messages=NS(create=create), beta=NS(messages=NS(create=create)))
+    p = AnthropicProvider(client=client, fallbacks=False)
+    turn = await p.step("S", history()[:1], TOOLS)
+    assert [tc.name for tc in turn.tool_calls] == ["walk"]
+    assert len(calls) == 2 and p.thinking_display is None
+
+
+async def test_a_type_error_inside_the_request_is_not_an_old_sdk() -> None:
+    """Only a TypeError about the two fallback keywords means the SDK predates them. One
+    raised inside the request is a real failure: retrying on the plain endpoint would hide it
+    and drop server-side fallbacks for the rest of the run."""
+    plain_calls: list[dict[str, Any]] = []
+
+    async def plain(**kwargs: Any) -> Any:
+        plain_calls.append(kwargs)
+        return anthropic_response(tool_use_block())
+
+    async def beta(**_: Any) -> Any:
+        raise TypeError("'NoneType' object is not subscriptable")
+
+    client = NS(messages=NS(create=plain), beta=NS(messages=NS(create=beta)))
+    p = AnthropicProvider(client=client)
+    with pytest.raises(ProviderError, match="TypeError"):
+        await p.step("S", history()[:1], TOOLS)
+    assert p.fallbacks is True and plain_calls == []
+
+
 def test_anthropic_thinking_display_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUACKD_THINKING_DISPLAY", "")
     assert AnthropicProvider(client=FakeAnthropic(None)).thinking_display is None
@@ -484,10 +553,62 @@ async def test_gemini_other_errors_still_raise() -> None:
         await GeminiProvider(client=client).step("S", history()[:1], TOOLS)
 
 
+async def test_gemini_does_not_retry_a_rate_limit_that_mentions_thinking() -> None:
+    """Only INVALID_ARGUMENT means "this model has no thoughts". A 429 that happens to say
+    the word would otherwise buy a second, equally rate-limited request and give up thought
+    summaries for the rest of the run."""
+    calls: list[dict[str, Any]] = []
+
+    async def generate_content(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        raise ValueError("429 RESOURCE_EXHAUSTED. quota exceeded for thinking tokens")
+
+    client = NS(aio=NS(models=NS(generate_content=generate_content)))
+    p = GeminiProvider(client=client)
+    with pytest.raises(ProviderError, match="RESOURCE_EXHAUSTED"):
+        await p.step("S", history()[:1], TOOLS)
+    assert len(calls) == 1 and p.include_thoughts is True
+
+
 def test_gemini_thoughts_can_be_turned_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUACKD_GEMINI_THOUGHTS", "0")
     p = GeminiProvider(client=NS())
     assert not p.include_thoughts and "thinking_config" not in p._config("S", TOOLS)
+
+
+# ── a malformed response is an error, not a traceback ───────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(
+            lambda: OpenAIProvider(client=FakeOpenAI(NS(choices=[], usage=None))), id="openai"
+        ),
+        pytest.param(
+            lambda: AnthropicProvider(
+                client=FakeAnthropic(
+                    NS(content=None, stop_reason=None, usage=None, stop_details=None)
+                )
+            ),
+            id="anthropic",
+        ),
+        pytest.param(
+            lambda: GeminiProvider(
+                client=FakeGemini(NS(candidates=[], usage_metadata=NS(prompt_token_count="lots")))
+            ),
+            id="gemini",
+        ),
+    ],
+)
+async def test_a_malformed_response_is_a_provider_error_not_a_traceback(
+    build: Callable[[], Any],
+) -> None:
+    """A gateway that answers a content filter with no choices, or a usage field that is not
+    a number, must reach the CLI as a ProviderError: parsing is inside the classifying try,
+    and the CLI catches nothing else."""
+    with pytest.raises(ProviderError):
+        await build().step("S", history()[:1], TOOLS)
 
 
 def test_usage_adds_reasoning_tokens_too() -> None:

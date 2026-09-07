@@ -190,6 +190,10 @@ class OpenAIProvider:
             params["parallel_tool_calls"] = False
         return params
 
+    def _normalise(self, turn: ProviderTurn) -> ProviderTurn:
+        """Hook: tidy a parsed turn before anything reads its text. Base: nothing."""
+        return turn
+
     def _fallback(self, turn: ProviderTurn, tools: list[dict[str, Any]]) -> ProviderTurn:
         """Hook for providers that can rescue a tool call from plain text. Base: nothing."""
         return turn
@@ -198,15 +202,19 @@ class OpenAIProvider:
         self, system: str, history: list[Exchange], tools: list[dict[str, Any]]
     ) -> ProviderTurn:
         self.calls += 1
+        # parse_response is inside the try on purpose: a gateway that answers a content
+        # filter with `choices: []`, or a usage field that is not a number, would otherwise
+        # escape the provider as a raw traceback — the CLI only catches TransportError and
+        # ProviderError. The fallback stays outside: it is quackd's code, not the SDK's.
         try:
             response = await self.client.chat.completions.create(
                 **self._params(system, history, tools)
             )
+            turn = self._normalise(parse_response(response))
         except ProviderError:
             raise
         except Exception as e:
             raise ProviderError(f"{self.name}: {type(e).__name__}: {e}") from e
-        turn = parse_response(response)
         if not turn.tool_calls:
             turn = self._fallback(turn, tools)
         return turn

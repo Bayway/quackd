@@ -129,8 +129,20 @@ def parse_response(response: Any) -> ProviderTurn:
 
 
 def _rejects_thoughts(e: Exception) -> bool:
-    """The API's INVALID_ARGUMENT for a model without thinking names the config it refused."""
-    return "thinking" in str(e).lower() or "thought" in str(e).lower()
+    """The API's INVALID_ARGUMENT for a model without thinking names the config it refused.
+
+    Both halves are needed. `APIError` carries `.code`/`.status` and stringifies as
+    `400 INVALID_ARGUMENT. {details}`; without that check, a 429 or a 503 whose text merely
+    mentions thinking would trigger a second (billed) request that fails the same way, and
+    would turn thought summaries off for the rest of the run.
+    """
+    text = str(e).lower()
+    invalid_argument = (
+        getattr(e, "code", None) == 400
+        or getattr(e, "status", None) == "INVALID_ARGUMENT"
+        or "invalid_argument" in text
+    )
+    return invalid_argument and "thinking" in text
 
 
 class GeminiProvider:
@@ -191,18 +203,22 @@ class GeminiProvider:
         self, system: str, history: list[Exchange], tools: list[dict[str, Any]]
     ) -> ProviderTurn:
         self.calls += 1
+        # parse_response is inside the classifying try on purpose: a response with no
+        # candidates, or a usage field that is not a number, would otherwise escape the
+        # provider as a raw traceback — the CLI only catches TransportError and ProviderError.
         try:
-            response = await self._generate(system, history, tools)
+            try:
+                response = await self._generate(system, history, tools)
+            except Exception as e:
+                if not (self.include_thoughts and _rejects_thoughts(e)):
+                    raise
+                # a model without thinking (gemini-1.5, gemini-2.0-flash): one retry without
+                # the field, and no later turn asks again. The run loses the thoughts, not
+                # itself.
+                self.include_thoughts = False
+                response = await self._generate(system, history, tools)
+            return parse_response(response)
         except ProviderError:
             raise
         except Exception as e:
-            if not (self.include_thoughts and _rejects_thoughts(e)):
-                raise ProviderError(f"gemini: {type(e).__name__}: {e}") from e
-            # a model without thinking (gemini-1.5, gemini-2.0-flash): one retry without the
-            # field, and no later turn asks again. The run loses the thoughts, not itself.
-            self.include_thoughts = False
-            try:
-                response = await self._generate(system, history, tools)
-            except Exception as again:
-                raise ProviderError(f"gemini: {type(again).__name__}: {again}") from again
-        return parse_response(response)
+            raise ProviderError(f"gemini: {type(e).__name__}: {e}") from e
