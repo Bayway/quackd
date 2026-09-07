@@ -74,6 +74,14 @@ collapsed into one line with its parameter ranges), and the result. `--no-trace`
 way, uncapped. Details and the event list: [architecture.md](architecture.md#trace),
 [ADR-0029](adr/0029-tracing.md).
 
+**Can I read a run after it finished?** Yes. `quackd trace` replays the newest run under
+`runs/` as the same lines it printed while it ran, and it takes a run name, a timestamp
+prefix, a duck name or a transcript file if you want an older one. `--from-step N` starts
+part way in, `--no-prompt` drops the system prompt, `--thinking all` shows every character
+the model thought, and `--frames` adds a line per camera frame. It reads stdout, so piping
+it to a pager or a file is the point. A flock run replays every member, each line prefixed
+with the robot that wrote it.
+
 **Why is the thinking line empty for my model?** Because that model did not return any. Only
 some do, and each in its own way: Claude returns a summary (quackd asks for one, since the
 default is to send the blocks back empty), an OpenAI-compatible server may fill

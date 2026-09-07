@@ -42,6 +42,7 @@ from quackd.safety import (
     SafetyStop,
     allow_all,
 )
+from quackd.trace import Sink, Tracer
 from quackd.verbs.registry import VerbResult, default_registry, registry_from_manifest
 
 if TYPE_CHECKING:
@@ -56,6 +57,10 @@ SIDESTEP_S = 1.5
 
 class FlockPreempted(SafetyStop):
     """The flock changed this duck's role mid-verb. Not a failure, just a redirect."""
+
+    outcome = "preempted"
+    """Its own word in the trace. Left as the base class `aborted` it would read as a kill
+    switch, and before `SafetyStop` had a branch at all every handover printed a red ERROR."""
 
 
 class FlockMember:
@@ -72,6 +77,7 @@ class FlockMember:
         hb_period_s: float = 1.0,
         frame_stride: int = 4,
         dry_run: bool = False,
+        trace: Sink | None = None,
     ) -> None:
         self.name = name
         self.transport = transport
@@ -79,6 +85,13 @@ class FlockMember:
         self.task = task
         self.hb_period_s = hb_period_s
         self._member_transcript = transcript.member(name)
+        self.tracer = Tracer(
+            record=self._member_transcript.sink,
+            observers=[trace] if trace is not None else [],
+        )
+        """This robot's narration. The record is unconditional — `ducks/<name>/transcript.jsonl`
+        is this member's record the way `runs/<ts>/transcript.jsonl` is a solo run's, and docs
+        promise it — and only the observer follows the CLI's trace switch."""
         self._frame_stride = frame_stride
         self._frame_counter = 0
         self.budget = Budget(contract.budgets, now=transport.now)
@@ -90,10 +103,13 @@ class FlockMember:
             detector=detector,
             dry_run=dry_run,
             confirm=allow_all,  # a flock has no per-duck terminal; validate enforces confirm=[]
+            # flock.jsonl, never the terminal: the trace shows the same line as a `note`, so
+            # keeping both doubles nothing on any one surface
             log=lambda m: transcript.write("member_log", duck=name, message=m),
             on_frame=self._on_frame,
+            trace=self.tracer,
         )
-        self.heartbeat = Heartbeat(transport, self.executor.abort)
+        self.heartbeat = Heartbeat(transport, self.executor.abort, trace=self.tracer)
         self.sub = bus.subscribe(name)
         transport.post_sleep = self._control_check
         self.flock_transcript = transcript
@@ -223,7 +239,9 @@ class FlockMember:
                 self._result("aborted", f"member error: {e}")
         finally:
             with contextlib.suppress(Exception):
-                await self.transport.stop()
+                # through the wrapper, so this member's record ends with its stop the way a
+                # solo run's does rather than with whatever it was doing when it was told to
+                await self.executor.traced_transport().stop()
             await self.heartbeat.stop()
             self.sub.close()
             with contextlib.suppress(Exception):
@@ -231,6 +249,8 @@ class FlockMember:
             self.flock_transcript.write(
                 "member_end", duck=self.name, status=self.final_status, steps=self.steps
             )
+            # and again on this duck's own stream: a per-duck record needs an ending too
+            self.tracer.emit("member_end", status=self.final_status, steps=self.steps)
 
     def _result(self, status: str, detail: str = "", ball_moved_m: float | None = None) -> None:
         self._publish(

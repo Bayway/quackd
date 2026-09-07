@@ -394,6 +394,8 @@ def _run_impl(
             vision=vision,
             n_override=flock,
             max_steps=max_steps,
+            trace=trace,
+            trace_prompt=trace_prompt,
         )
         return
     try:
@@ -550,12 +552,22 @@ def _run_flock_impl(
     vision: bool | None,
     n_override: int | None,
     max_steps: int | None,
+    trace: bool | None = None,
+    trace_prompt: bool | None = None,
 ) -> None:
     from quackd.agent.providers.base import ProviderError
     from quackd.agent.providers.factory import make_provider
-    from quackd.flock.runner import run_flock
+    from quackd.flock.runner import FLOCK_TRACE, run_flock
     from quackd.safety import KillSwitch
     from quackd.sim2d.recorder import FrameRecorder
+    from quackd.trace import (
+        ConsoleTrace,
+        Sink,
+        flock_caption,
+        prompt_shown_default,
+        thinking_limit_default,
+        trace_enabled_default,
+    )
 
     if any(spec.backend != "sim2d" for spec in specs):
         _fail(
@@ -585,9 +597,38 @@ def _run_flock_impl(
         _fail(str(e))
         return
 
+    if n_override is not None:
+        count = n_override
+    elif duck.frontmatter.flock is not None:
+        count = len(duck.frontmatter.flock.member_names)
+    else:
+        count = 3
+    member_names = (
+        duck.frontmatter.flock.member_names[:count]
+        if duck.frontmatter.flock is not None
+        else [f"duck-{i}" for i in range(count)]
+    )
+    prefix_width = max(len(name) for name in [*member_names, FLOCK_TRACE])
+    trace_on = trace if trace is not None else trace_enabled_default()
+
     def log(msg: str) -> None:
-        if verbose:
+        # the trace says all of this and more, so two views of one line is noise
+        if verbose and not trace_on:
             _verbose_line(msg)
+
+    views: dict[str, ConsoleTrace] = {}
+
+    def view_for(name: str) -> Sink | None:
+        """One view per robot, its name on every line. A shared view would coalesce two
+        robots' intents into one line and attribute them to whichever spoke last."""
+        if name not in views:
+            views[name] = ConsoleTrace(
+                err_console,
+                thinking_chars=thinking_limit_default(),
+                prompt=trace_prompt if trace_prompt is not None else prompt_shown_default(),
+                prefix=f"{name:<{prefix_width}}  ",
+            )
+        return views[name]
 
     holder: dict[str, Any] = {}
 
@@ -608,26 +649,15 @@ def _run_flock_impl(
                     rec.set_focus(entity[1], entity[0])
                 else:
                     rec.set_focus(names.index(data["kicker"]))
-                spotter = f", spotter {data['spotter']}" if data.get("spotter") else ""
-                rec.set_caption(f"CLAIM {data['kicker']} ({data['dist']:.2f} m){spotter}")
-            elif kind == "auction":
-                rec.set_caption(f"AUCTION first bid {data['first_bid']} {data['dist']:.2f} m")
-            elif kind == "miss":
-                rec.set_caption(f"MISS {data['duck']}, re-searching")
-            elif kind == "kick_done":
-                rec.set_caption(f"KICKED by {data['kicker']}, the spotter judges")
-            elif kind == "verdict":
-                moved = f" {data['moved_m']:.2f} m" if data.get("moved_m") is not None else ""
-                rec.set_caption(f"VERDICT {data['verdict']}{moved} by {data['spotter']}")
+            # the same function the terminal renders with, so a frame in the GIF and a
+            # line on screen say the same thing about the same moment
+            if kind in ("auction", "claim", "miss", "kick_done", "verdict"):
+                caption = flock_caption(kind, data)
+                if caption is not None:
+                    rec.set_caption(f"{caption[0]} {caption[1]}")
 
         coordinator.on_event = on_event
 
-    if n_override is not None:
-        count = n_override
-    elif duck.frontmatter.flock is not None:
-        count = len(duck.frontmatter.flock.member_names)
-    else:
-        count = 3
     console.print(
         f"🦆x{count} [bold]{duck.name}[/bold] · provider=[cyan]{llm.name}[/cyan] "
         f"({llm.model or 'model: first served'}) · flock (sim2d, EXPERIMENTAL)"
@@ -650,6 +680,7 @@ def _run_flock_impl(
                 on_recorder=on_ready,
                 log=log,
                 robots=robots,
+                trace=view_for if trace_on else None,
             )
         )
     except ValueError as e:
@@ -658,6 +689,10 @@ def _run_flock_impl(
     finally:
         if "ks" in holder:
             holder["ks"].uninstall()
+        # a member's last event is the stop it was accepted for, and a pending burst is
+        # only written by the next event that is not an intent: without this, never
+        for pending in views.values():
+            pending.flush()
     if "rec" in holder:
         result.gif_path = holder["rec"].save_gif(result.run_dir / "run.gif")
     colour = {"success": "green", "failure": "red", "budget": "yellow", "aborted": "red"}.get(
@@ -672,6 +707,13 @@ def _run_flock_impl(
     console.print(
         f"run dir: {result.run_dir}" + (f" · gif: {result.gif_path}" if result.gif_path else "")
     )
+    if result.trace_dropped:
+        err_console.print(
+            f"trace: {result.trace_dropped} event(s) could not be shown (a view raised); "
+            "every transcript has them",
+            style="yellow",
+            markup=False,
+        )
     if result.outcome != "success":
         raise typer.Exit(code=1)
 
