@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -16,6 +17,7 @@ from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 
 from quackd.mcp_server import DuckSession, build_server
+from quackd.transport.mock import MockTransport
 from quackd.transport.sim2d import Sim2DTransport
 
 TOOLS = {
@@ -273,6 +275,75 @@ async def test_two_calls_at_once_never_swap_traces() -> None:
         moved, quacked = _flat(_data(slow)["trace"]), _flat(_data(fast)["trace"])
         assert "-> move" in moved and "quack" not in moved
         assert "quack" in quacked and "-> move" not in quacked
+
+
+def _blocks(caplog: Any) -> list[list[str]]:
+    """The stderr log split into one block per tool call (each opens with a `tool` line)."""
+    blocks: list[list[str]] = []
+    for message in caplog.messages:
+        if ": tool " in message:
+            blocks.append([])
+        if blocks:
+            blocks[-1].append(message)
+    return blocks
+
+
+async def test_the_stderr_view_logs_a_call_as_one_block_at_its_end(caplog: Any) -> None:
+    caplog.set_level(logging.INFO, logger="quackd.mcp")
+    async with connected() as (client, _session, _transport):
+        await client.call_tool("robot_run_verb", {"verb": "quack", "params": {"text": "hi"}})
+    flat = " | ".join(" ".join(m.split()) for m in caplog.messages)
+    assert "duck: tool robot_run_verb" in flat
+    assert "duck: -> sound" in flat
+    assert "duck: <- quack ok" in flat
+    assert "duck: done ok" in flat
+
+
+async def test_two_calls_at_once_log_two_blocks_not_an_interleaving(caplog: Any) -> None:
+    """One coalescing view shared by concurrent calls merged their bursts and attributed one
+    call's intents to the other. Each call is logged as its own block when it ends."""
+    caplog.set_level(logging.INFO, logger="quackd.mcp")
+    async with connected() as (client, _session, _transport):
+        await asyncio.gather(
+            client.call_tool(
+                "robot_run_verb", {"verb": "move", "params": {"vx": 0.1, "duration_s": 2.0}}
+            ),
+            client.call_tool("robot_run_verb", {"verb": "quack", "params": {"text": "hi"}}),
+        )
+    for block in _blocks(caplog):
+        flat = " ".join(" ".join(m.split()) for m in block)
+        assert not ("-> move" in flat and "quack" in flat), f"two calls in one block: {flat}"
+
+
+async def test_out_of_call_events_reach_stderr_at_once(caplog: Any) -> None:
+    """The heartbeat's stop is the last event of a dying session. Buffered behind a
+    coalescing view it waited for a next event that never came."""
+    caplog.set_level(logging.INFO, logger="quackd.mcp")
+    async with connected() as (_client, session, _transport):
+        assert session.tracer is not None
+        session.tracer.emit("note", text="heartbeat failed: gone — sending stop")
+        session.tracer.emit("intent", intent="stop", params={}, accepted=True)
+    flat = " | ".join(" ".join(m.split()) for m in caplog.messages)
+    assert "duck: note heartbeat failed" in flat
+    assert "duck: -> stop" in flat
+
+
+async def test_an_aborted_sessions_refusal_says_the_heartbeat_failed() -> None:
+    """The heartbeat's task predates every capture block, so its own note reaches no call's
+    trace. Without this the pilot was told the session had aborted and never why."""
+    from quackd.mcp_server import build_server
+
+    transport = MockTransport(fail_heartbeat_after=0)
+    _server, session = build_server(transport, heartbeat_period_s=0.01)
+    await session.connect()
+    try:
+        await asyncio.wait_for(session.executor.abort.wait(), timeout=2.0)
+        refused = await session.run("walk", {"vx": 0.1})
+    finally:
+        await session.close()
+    assert refused["ok"] is False
+    assert "heartbeat" in refused["summary"]
+    assert "heartbeat" in _flat(refused["trace"])
 
 
 async def test_an_aborted_session_says_why_it_refused() -> None:

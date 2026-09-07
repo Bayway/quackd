@@ -108,6 +108,19 @@ def capture_sink(event: TraceEvent) -> None:
         buffer.append(event)
 
 
+def unless_capturing(sink: Sink) -> Sink:
+    """An observer that steps aside while a `capturing()` block is open in this context.
+
+    The MCP server logs a call's lines in one block when the call ends, so only events that
+    belong to no call — the heartbeat's note and the stop it sends — go straight through."""
+
+    def forward(event: TraceEvent) -> None:
+        if _capture.get() is None:
+            sink(event)
+
+    return forward
+
+
 @contextlib.contextmanager
 def capturing() -> Iterator[list[TraceEvent]]:
     events: list[TraceEvent] = []
@@ -567,4 +580,5 @@ __all__ = [
     "render_lines",
     "thinking_limit_default",
     "trace_enabled_default",
+    "unless_capturing",
 ]
