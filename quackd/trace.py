@@ -49,16 +49,29 @@ def trace_enabled_default() -> bool:
     return os.environ.get("QUACKD_TRACE", "1").strip().lower() not in _OFF
 
 
+def parse_thinking_limit(raw: str | None) -> int | None:
+    """`all` for everything, `0` for none, a number of characters otherwise; anything else
+    is the default. Shared with `quackd trace`, so a flag and the environment agree."""
+    text = (raw or "").strip().lower()
+    if text == "all":
+        return None
+    try:
+        return int(text) if text else 2000
+    except ValueError:
+        return 2000
+
+
 def thinking_limit_default() -> int | None:
     """How much of the model's thinking the console shows per turn: `QUACKD_TRACE_THINKING` in
     characters, `all` for everything, `0` for none. The transcript always has all of it."""
-    raw = os.environ.get("QUACKD_TRACE_THINKING", "").strip().lower()
-    if raw == "all":
-        return None
-    try:
-        return int(raw) if raw else 2000
-    except ValueError:
-        return 2000
+    return parse_thinking_limit(os.environ.get("QUACKD_TRACE_THINKING"))
+
+
+def prompt_shown_default() -> bool:
+    """Whether the console prints the system prompt once at the start: `QUACKD_TRACE_PROMPT`.
+    It is forty to sixty lines, worth reading once and tiresome on the fiftieth run of an
+    afternoon, and it is in the transcript either way."""
+    return os.environ.get("QUACKD_TRACE_PROMPT", "1").strip().lower() not in _OFF
 
 
 class Tracer:
@@ -497,11 +510,28 @@ def intent_line(events: list[TraceEvent]) -> Line:
     return (text, "dim")
 
 
+PROGRESS_S = 2.0
+"""How long a burst may build before the console shows it. A twenty second `go_to` on
+hardware becomes one line every two seconds rather than twenty seconds of silence."""
+
+MAX_BURST = 200
+"""And how many intents may build, whatever the clock says. Twenty seconds at 10 Hz, which
+is the bound that matters in a free-running simulator: it crosses that in under two wall
+seconds, so the time rule never fires there."""
+
+
 class LineTrace:
     """A sink that renders events as lines through `write(text, style)`, coalescing a burst of
     one intent kind into one line. A `go_to` sends a different twist every 100 ms, so the
     burst is collapsed by kind, not by identical parameters, and flushed when anything else
-    arrives. Refused intents are never coalesced: each one is worth a line."""
+    arrives, when the kind changes, or when it has been building for `progress_s`. Refused
+    intents are never coalesced: each one is worth a line.
+
+    That periodic flush is what makes the live view live. The only events during a twenty
+    second approach are its own `move` intents, so without it the terminal showed the verb
+    starting and then nothing at all until it ended. The wall clock is the right one to
+    measure it by, even where the burst's own span is the robot's: a person waiting at a
+    terminal waits in wall seconds."""
 
     def __init__(
         self,
@@ -509,10 +539,14 @@ class LineTrace:
         *,
         thinking_chars: int | None = 2000,
         prompt: bool = True,
+        progress_s: float | None = PROGRESS_S,
+        max_burst: int = MAX_BURST,
     ) -> None:
         self._write = write
         self.thinking_chars = thinking_chars
         self.prompt = prompt
+        self.progress_s = progress_s
+        self.max_burst = max_burst
         self._pending: list[TraceEvent] = []
 
     def __call__(self, event: TraceEvent) -> None:
@@ -520,6 +554,10 @@ class LineTrace:
             if self._pending and self._pending[0].data.get("intent") != event.data.get("intent"):
                 self.flush()
             self._pending.append(event)
+            span = event.t - self._pending[0].t
+            too_long = self.progress_s is not None and span >= self.progress_s
+            if too_long or len(self._pending) >= self.max_burst:
+                self.flush()
             return
         self.flush()
         for text, style in render_lines(
@@ -540,12 +578,24 @@ class ConsoleTrace(LineTrace):
     """The CLI view: every line to a Rich console, as plain text with a style, never markup."""
 
     def __init__(
-        self, console: Any, *, thinking_chars: int | None = 2000, prompt: bool = True
+        self,
+        console: Any,
+        *,
+        thinking_chars: int | None = 2000,
+        prompt: bool = True,
+        progress_s: float | None = PROGRESS_S,
+        max_burst: int = MAX_BURST,
     ) -> None:
         # `None` means unlimited here exactly as it does in `render_lines`: one sentinel, one
         # meaning. The environment is read by the caller, where `QUACKD_TRACE` already is,
         # because that has to happen after `.env` is loaded rather than at import.
-        super().__init__(self._print, thinking_chars=thinking_chars, prompt=prompt)
+        super().__init__(
+            self._print,
+            thinking_chars=thinking_chars,
+            prompt=prompt,
+            progress_s=progress_s,
+            max_burst=max_burst,
+        )
         self.console = console
 
     def _print(self, text: str, style: str) -> None:
@@ -579,7 +629,9 @@ def call_lines(events: list[TraceEvent]) -> list[str]:
     error here would turn a robot's refusal into an MCP internal error rather than a result.
     """
     lines: list[str] = []
-    view = LineTrace(lambda text, _style: lines.append(text), prompt=False)
+    # `progress_s=None`: this renders once the call has already ended, so splitting one
+    # `-> move x200` into ten progressive lines would only spend the model's line cap
+    view = LineTrace(lambda text, _style: lines.append(text), prompt=False, progress_s=None)
     try:
         for event in events:
             view(event)
@@ -595,7 +647,9 @@ def render_call(events: list[TraceEvent]) -> list[str]:
 
 
 __all__ = [
+    "MAX_BURST",
     "MCP_TRACE_MAX_LINES",
+    "PROGRESS_S",
     "ConsoleTrace",
     "LineTrace",
     "Sink",
@@ -609,6 +663,8 @@ __all__ = [
     "counting",
     "fmt_params",
     "intent_line",
+    "parse_thinking_limit",
+    "prompt_shown_default",
     "render_call",
     "render_lines",
     "thinking_limit_default",

@@ -53,6 +53,20 @@ def test_the_trace_is_on_by_default(tmp_path: Path, monkeypatch) -> None:
     assert "SUCCESS" in out  # and the outcome still reaches stdout
 
 
+def test_no_trace_prompt_hides_only_the_prompt(tmp_path: Path, monkeypatch) -> None:
+    """The prompt is forty to sixty lines, worth reading once and tiresome on the fiftieth
+    run of an afternoon. Hiding it must not cost the verbs and the intents."""
+    out = _trace_run(tmp_path, monkeypatch, "--no-trace-prompt")
+    assert "system prompt" not in out and "You are the brain" not in out
+    assert "-> sound" in out and "<- quack ok" in out
+
+
+def test_the_env_hides_the_prompt_and_the_flag_wins(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("QUACKD_TRACE_PROMPT", "0")
+    assert "system prompt" not in _trace_run(tmp_path, monkeypatch)
+    assert "system prompt" in _trace_run(tmp_path, monkeypatch, "--trace-prompt")
+
+
 def test_no_trace_leaves_the_header_and_the_outcome(tmp_path: Path, monkeypatch) -> None:
     out = _trace_run(tmp_path, monkeypatch, "--no-trace")
     assert "-> sound" not in out and "system prompt" not in out

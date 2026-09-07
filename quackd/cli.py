@@ -297,6 +297,7 @@ def _run_impl(
     memory: bool = True,
     memory_dir: str | None = None,
     trace: bool | None = None,
+    trace_prompt: bool | None = None,
 ) -> None:
     from quackd.adapters.factory import describe, make_adapter, registry_for
     from quackd.agent.loop import RunConfig, run_duck
@@ -306,7 +307,12 @@ def _run_impl(
     from quackd.duckfile.validate import validate_duck
     from quackd.perception import detector_for
     from quackd.safety import KillSwitch, allow_all
-    from quackd.trace import ConsoleTrace, thinking_limit_default, trace_enabled_default
+    from quackd.trace import (
+        ConsoleTrace,
+        prompt_shown_default,
+        thinking_limit_default,
+        trace_enabled_default,
+    )
     from quackd.transport.base import TransportError
 
     if (duckfile is None) == (goal is None):
@@ -401,7 +407,13 @@ def _run_impl(
     # counts (the root callback loads it after the option defaults exist).
     trace_on = trace if trace is not None else trace_enabled_default()
     console_trace = (
-        ConsoleTrace(err_console, thinking_chars=thinking_limit_default()) if trace_on else None
+        ConsoleTrace(
+            err_console,
+            thinking_chars=thinking_limit_default(),
+            prompt=trace_prompt if trace_prompt is not None else prompt_shown_default(),
+        )
+        if trace_on
+        else None
     )
 
     def log(msg: str) -> None:
@@ -742,6 +754,12 @@ _TRACE = typer.Option(
     "model thought and answered, every executor decision, every intent sent to the robot, "
     "every result, tokens and timings. On by default; QUACKD_TRACE=0 turns it off too.",
 )
+_TRACE_PROMPT = typer.Option(
+    None,
+    "--trace-prompt/--no-trace-prompt",
+    help="Print the system prompt once at the start of the trace. On by default; "
+    "QUACKD_TRACE_PROMPT=0 turns it off too. It is in the transcript either way.",
+)
 
 
 @app.command()
@@ -774,6 +792,7 @@ def run(
     memory: bool = _MEMORY,
     memory_dir: str | None = _MEMORY_DIR,
     trace: bool | None = _TRACE,
+    trace_prompt: bool | None = _TRACE_PROMPT,
 ) -> None:
     """Run a .duck file (or a --goal): the LLM picks verbs, quackd enforces the contract."""
     _run_impl(
@@ -803,6 +822,7 @@ def run(
         memory=memory,
         memory_dir=memory_dir,
         trace=trace,
+        trace_prompt=trace_prompt,
     )
 
 
@@ -822,6 +842,7 @@ def record(
     vision: bool | None = _VISION,
     flock: int | None = _FLOCK,
     trace: bool | None = _TRACE,
+    trace_prompt: bool | None = _TRACE_PROMPT,
 ) -> None:
     """Like `run` on sim2d, but always writes a GIF (for READMEs and launches)."""
     _run_impl(
@@ -848,6 +869,7 @@ def record(
         flock=flock,
         robot="microduck:sim2d",
         trace=trace,
+        trace_prompt=trace_prompt,
     )
 
 

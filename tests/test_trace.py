@@ -19,6 +19,8 @@ from quackd.trace import (
     capture_sink,
     capturing,
     counting,
+    parse_thinking_limit,
+    prompt_shown_default,
     render_call,
     render_lines,
     thinking_limit_default,
@@ -185,6 +187,44 @@ def test_a_burst_of_one_intent_kind_becomes_one_line_with_its_ranges() -> None:
     assert len(out) == 2
     assert "move x3" in out[0] and "vx 0.2" in out[0] and "wz -0.4..0.35" in out[0]
     assert out[1].split() == ["->", "stop"]  # the label column is padded
+
+
+def _burst(count: int, *, every: float) -> list[TraceEvent]:
+    return [
+        TraceEvent("intent", i * every, {"intent": "move", "params": {"vx": 0.2}, "accepted": True})
+        for i in range(count)
+    ]
+
+
+def test_a_long_burst_is_shown_as_it_happens() -> None:
+    """The only events during a twenty second approach are its own `move` intents, so a view
+    that flushed only on a different event showed the verb starting and then nothing at all
+    until it ended."""
+    out = lines(
+        [*_burst(45, every=0.1), TraceEvent("verb_end", 4.5, {"name": "go_to", "ok": True})]
+    )
+    bursts = [line for line in out if "move x" in line]
+    assert len(bursts) == 3, out
+    assert sum(int(line.split("move x")[1].split()[0]) for line in bursts) == 45
+    for line in bursts:
+        assert float(line.split("over ")[1].split(" s")[0]) <= 2.0
+    assert "go_to" in out[-1]
+
+
+def test_a_burst_that_stalls_is_not_split_by_the_count_alone() -> None:
+    """A free-running simulator crosses twenty robot seconds in under two wall ones, so the
+    count is the bound that matters there."""
+    stalled = _burst(150, every=0.0)
+    assert len(lines(stalled)) == 1
+    assert len(lines(stalled, max_burst=100)) == 2
+
+
+def test_the_mcp_result_keeps_one_line_per_burst() -> None:
+    """That view renders when the call has already ended, so progressive lines would only
+    spend the model's line cap saying the same thing ten times."""
+    rendered = render_call(_burst(45, every=0.1))
+    assert len([line for line in rendered if "move x" in line]) == 1
+    assert "move x45" in rendered[0]
 
 
 def test_a_refused_intent_is_never_folded_into_a_count() -> None:
@@ -531,3 +571,36 @@ def test_how_much_thinking_the_console_shows(
 ) -> None:
     monkeypatch.setenv("QUACKD_TRACE_THINKING", value)
     assert thinking_limit_default() == limit
+    assert parse_thinking_limit(value) == limit  # a flag and the environment agree
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [(None, True), ("", True), ("1", True), ("0", False), ("off", False), ("No", False)],
+)
+def test_the_prompt_env_switch(
+    monkeypatch: pytest.MonkeyPatch, value: str | None, shown: bool
+) -> None:
+    if value is None:
+        monkeypatch.delenv("QUACKD_TRACE_PROMPT", raising=False)
+    else:
+        monkeypatch.setenv("QUACKD_TRACE_PROMPT", value)
+    assert prompt_shown_default() is shown
+
+
+def test_none_means_unlimited_thinking_on_the_console_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`None` used to mean "read the environment" here and "unlimited" in `render_lines`."""
+    monkeypatch.setenv("QUACKD_TRACE_THINKING", "100")
+    event = TraceEvent("llm", 0.0, {"thinking": "x" * 5000, "tool_calls": [], "usage": {}})
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, width=400, force_terminal=False, no_color=True)
+    ConsoleTrace(console, thinking_chars=None)(event)
+    assert "transcript.jsonl" not in buffer.getvalue()
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, width=400, force_terminal=False, no_color=True)
+    ConsoleTrace(console, thinking_chars=thinking_limit_default())(event)
+    assert "+4900 chars in transcript.jsonl" in buffer.getvalue()
