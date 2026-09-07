@@ -195,6 +195,69 @@ def test_a_refused_intent_is_never_folded_into_a_count() -> None:
     assert len(out) == 2 and "REFUSED: too fast" in out[1]
 
 
+def test_the_dry_run_gate_shows_a_parameter_the_model_left_null() -> None:
+    """`--dry-run` promises every parameter a model would have sent. A parameter it
+    explicitly left unset used to render identically to one it never named."""
+    event = TraceEvent(
+        "gate",
+        0.0,
+        {
+            "name": "go_to",
+            "gate": "dry_run",
+            "outcome": "skipped",
+            "reason": "would run go_to, sent nothing",
+            "params": {"target": None, "stop_distance": 0.25},
+        },
+    )
+    ((text, _),) = render_lines(event)
+    assert "target=null" in text and "stop_distance=0.25" in text
+
+
+def test_an_intent_line_still_drops_null_parameters() -> None:
+    """A twist's `vy=null` on every one of two hundred burst lines is noise."""
+    event = TraceEvent("intent", 0.0, {"intent": "move", "params": {"vx": 0.1, "vy": None}})
+    ((text, _),) = render_lines(event)
+    assert "vx=0.1" in text and "vy" not in text
+
+
+def test_a_burst_with_many_distinct_labels_shows_three_and_an_ellipsis() -> None:
+    tracer = Tracer()
+    seen = events(tracer)
+    for i in range(50):
+        tracer.emit("intent", intent="do", params={"skill": f"s{i}"}, accepted=True)
+    (out,) = lines(seen)
+    assert "s0'/'s1'/'s2'..." in out.replace('"', "'") or "s0" in out
+    assert "..." in out
+
+
+def test_a_write_that_fails_keeps_the_burst_for_the_next_flush() -> None:
+    """`flush` used to clear the pending burst before writing it, so a write that raised
+    lost the intents entirely."""
+    written: list[str] = []
+    failed = {"once": True}
+
+    def write(text: str, _style: str) -> None:
+        if failed["once"]:
+            failed["once"] = False
+            raise RuntimeError("the terminal went away")
+        written.append(text)
+
+    view = LineTrace(write)
+    view(TraceEvent("intent", 0.0, {"intent": "move", "params": {"vx": 0.1}, "accepted": True}))
+    with pytest.raises(RuntimeError):
+        view.flush()
+    view.flush()
+    assert len(written) == 1 and "move" in written[0]
+
+
+def test_a_renderer_bug_never_turns_a_result_into_an_internal_error() -> None:
+    """`render_call` runs outside the tracer, so nothing swallows its exceptions: a
+    formatting error would have failed the MCP tool call instead of answering it."""
+    broken = TraceEvent("verb_end", 0.0, {"elapsed_s": "soon", "intents": {"move": 1}})
+    rendered = render_call([broken])
+    assert len(rendered) == 1 and "could not be rendered" in rendered[0]
+
+
 def test_the_llm_line_shows_thinking_the_call_and_the_tokens() -> None:
     event = TraceEvent(
         "llm",

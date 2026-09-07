@@ -226,6 +226,8 @@ def _indent(text: str) -> str:
 
 
 def fmt_value(value: Any) -> str:
+    if value is None:
+        return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, float):
@@ -236,10 +238,15 @@ def fmt_value(value: Any) -> str:
     return text if len(text) <= 120 else text[:117] + "..."
 
 
-def fmt_params(params: Mapping[str, Any] | None) -> str:
+def fmt_params(params: Mapping[str, Any] | None, *, drop_none: bool = False) -> str:
+    """`drop_none` is for intent bursts, where a twist's `vy=null` on every one of two
+    hundred lines is noise. Everywhere else a parameter the model left unset is part of what
+    it chose, and `--dry-run` promises to show every one of them."""
     if not params:
         return ""
-    return ", ".join(f"{k}={fmt_value(v)}" for k, v in params.items() if v is not None)
+    return ", ".join(
+        f"{k}={fmt_value(v)}" for k, v in params.items() if not (drop_none and v is None)
+    )
 
 
 def _ok(outcome: str) -> bool:
@@ -411,10 +418,15 @@ def _ranges(events: list[TraceEvent]) -> str:
                 f"{key} {fmt_value(lo)}" if lo == hi else f"{key} {fmt_value(lo)}..{fmt_value(hi)}"
             )
         else:
+            # only ever three are shown, so stop at four: this runs inside the console
+            # observer, on the event loop, between two deadman resends
             distinct: list[str] = []
             for v in values:
-                if fmt_value(v) not in distinct:
-                    distinct.append(fmt_value(v))
+                shown = fmt_value(v)
+                if shown not in distinct:
+                    distinct.append(shown)
+                if len(distinct) > 3:
+                    break
             parts.append(f"{key} {'/'.join(distinct[:3])}{'...' if len(distinct) > 3 else ''}")
     return ", ".join(parts)
 
@@ -425,7 +437,7 @@ def intent_line(events: list[TraceEvent]) -> Line:
     first = events[0]
     kind = first.data.get("intent")
     if len(events) == 1:
-        params = fmt_params(first.data.get("params"))
+        params = fmt_params(first.data.get("params"), drop_none=True)
         text = f"{_label('->')}{kind}({params})" if params else f"{_label('->')}{kind}"
         if not first.data.get("accepted", True):
             return (f"{text} REFUSED: {first.data.get('reason') or 'no reason given'}", "red")
@@ -471,8 +483,10 @@ class LineTrace:
     def flush(self) -> None:
         if not self._pending:
             return
-        events, self._pending = self._pending, []
-        self._write(*intent_line(events))
+        # write first, clear after: a write that fails (the Tracer swallows and counts it)
+        # should leave the burst for the next flush rather than losing it
+        self._write(*intent_line(self._pending))
+        self._pending = []
 
 
 class ConsoleTrace(LineTrace):
@@ -512,14 +526,26 @@ def cap_lines(
     ]
 
 
-def render_call(events: list[TraceEvent]) -> list[str]:
-    """One MCP tool call's events as short plain lines for the `trace` field of its result."""
+def call_lines(events: list[TraceEvent]) -> list[str]:
+    """One call's events as plain lines, uncapped.
+
+    Guarded, unlike the `Tracer`'s observers: this runs outside the tracer, so a formatting
+    error here would turn a robot's refusal into an MCP internal error rather than a result.
+    """
     lines: list[str] = []
     view = LineTrace(lambda text, _style: lines.append(text), prompt=False)
-    for event in events:
-        view(event)
-    view.flush()
-    return cap_lines(lines)
+    try:
+        for event in events:
+            view(event)
+        view.flush()
+    except Exception as e:
+        lines.append(f"(the trace could not be rendered: {type(e).__name__}: {e})")
+    return lines
+
+
+def render_call(events: list[TraceEvent]) -> list[str]:
+    """One MCP tool call's events as short plain lines for the `trace` field of its result."""
+    return cap_lines(call_lines(events))
 
 
 __all__ = [
@@ -530,6 +556,7 @@ __all__ = [
     "TraceEvent",
     "TracedTransport",
     "Tracer",
+    "call_lines",
     "cap_lines",
     "capture_sink",
     "capturing",
