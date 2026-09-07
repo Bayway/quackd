@@ -20,12 +20,17 @@ DEFAULT_ROBOT = "microduck:sim2d"
 
 # name -> (backends, status line, pip extra for the SDK backends, SDK import to probe)
 _ADAPTERS: dict[str, tuple[tuple[str, ...], str, str | None, str | None]] = {
+    # No extra and no probe, even though `mujoco` needs one: this column asks whether the
+    # *adapter* is usable here, and the Microduck's is built in. Probing for mujoco made
+    # `list-adapters` report the whole robot as missing on a machine that can still run
+    # sim2d, mock and a real duck. The extra is named in the status line, in the transports
+    # table and in `doctor`'s optional extras, which is where a per-backend answer belongs.
     "microduck": (
         ("sim2d", "mujoco", "mock", "jsonrpc", "websocket"),
-        "✅ built-in: sim2d (default), mock · ✅ mujoco (physics, needs the extra) · "
+        "✅ built-in: sim2d (default), mock · ✅ mujoco (physics, needs quackd[mujoco]) · "
         "🧪 jsonrpc · ⏳ websocket",
-        "quackd[mujoco]",
-        "mujoco",
+        None,
+        None,
     ),
     "reachy_mini": (
         ("sim2d", "mock", "sdk"),
