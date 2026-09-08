@@ -54,6 +54,11 @@ BODIES = ("puppet", "microduck")
 Posture = Literal["standing", "sitting", "fallen"]
 
 
+def _wrap(radians_: float) -> float:
+    """An angle folded back into (-pi, pi]."""
+    return math.atan2(math.sin(radians_), math.cos(radians_))
+
+
 def _finite(what: str, *values: float) -> None:
     """A non-finite command must not reach the body.
 
@@ -101,6 +106,15 @@ class Body(Protocol):
         on a kinematic body and becomes a joint target on a body with a real neck."""
         ...
 
+    walking: bool
+    """Whether the last control tick actually produced a gait.
+
+    A body may be sent a twist and legitimately not walk: `MicroduckBody` drops one below the
+    gait floor, and a duck that is down is sent nothing at all. The world reports `policy`
+    from this rather than from the twist it commanded, so the state does not say `walk` while
+    the duck stands still.
+    """
+
     def control(self, cmd: tuple[float, float, float], dt: float, rng: np.random.Generator) -> None:
         """One control step: apply a body-frame twist before the physics substeps."""
         ...
@@ -140,6 +154,7 @@ class Puppet:
 
     def __init__(self) -> None:
         self.posture: Posture = "standing"
+        self.walking = False
         self.x = self.y = self.theta = 0.0
         self.head = (0.0, 0.0)
         self._data: Any = None
@@ -163,12 +178,15 @@ class Puppet:
 
     def reset(self, x: float, y: float, theta: float) -> None:
         self.x, self.y, self.theta = x, y, theta
+        self.posture = "standing"
+        self.walking = False
         self._place()
 
     def set_head(self, head: tuple[float, float]) -> None:
         self.head = head
 
     def control(self, cmd: tuple[float, float, float], dt: float, rng: np.random.Generator) -> None:
+        self.walking = self.posture == "standing" and any(cmd)
         if self.posture != "standing":
             return
         vx, vy, wz = cmd
@@ -178,7 +196,7 @@ class Puppet:
         vx *= 1 + noise[0]
         vy *= 1 + noise[1]
         wz *= 1 + noise[2]
-        self.theta = math.atan2(math.sin(self.theta + wz * dt), math.cos(self.theta + wz * dt))
+        self.theta = _wrap(self.theta + wz * dt)
         self.x += (vx * math.cos(self.theta) - vy * math.sin(self.theta)) * dt
         self.y += (vx * math.sin(self.theta) + vy * math.cos(self.theta)) * dt
         lim = ARENA_HALF - DUCK_R
@@ -215,10 +233,16 @@ class Puppet:
     def fall(self) -> None:
         """Knock it over (tests): the world reports `fallen` and refuses to walk."""
         self.posture = "fallen"
+        self.walking = False
         self._place()
 
     def extras(self) -> dict[str, Any]:
-        return {"assumptions": ["the puppet is kinematic: it has no gait and cannot fall"]}
+        return {
+            "assumptions": [
+                "the puppet is kinematic: it moves exactly as the cartoon does, has no gait, "
+                "and goes down only when a test knocks it over"
+            ]
+        }
 
     def _place(self) -> None:
         if self._data is None:
@@ -330,8 +354,29 @@ class MujocoWorld:
         return any(abs(c) > 1e-6 for c in self.cmd)
 
     @property
+    def policy(self) -> str:
+        """What the body is actually doing, not what it was asked to do.
+
+        `moving` is the commanded twist, and a body is free to decline it: below the gait
+        floor `MicroduckBody` sends nothing and stands. Reporting the command here told the
+        pilot `policy=walk` while the duck stood still, which is the one thing the gait floor
+        exists to stop, and it reached the model while the body's own honest `extras["policy"]`
+        did not.
+        """
+        if self.posture == "sitting":
+            return "sit"
+        return "walk" if self.moving and self.body.walking else "stand"
+
+    @property
     def head_yaw(self) -> float:
-        return self.head[0]
+        """Where the head is pointing, not where it was asked to point.
+
+        On the real body the neck is a servo the policy drives, so it lags a `look` and may
+        never quite arrive. Bearings already come from the achieved pose through
+        `relative(camera=True)`, so reporting the command here made the state disagree with
+        the camera it describes. On the puppet the two are the same number.
+        """
+        return _wrap(self.body.head_pose()[3] - self.theta)
 
     @property
     def ball_x(self) -> float:

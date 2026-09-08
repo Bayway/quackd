@@ -305,6 +305,38 @@ async def test_the_recorder_draws_the_physics_panes(tmp_path: Path) -> None:
     await t.close()
 
 
+# ── what the state says the duck is doing ───────────────────────────────────────────────
+
+
+async def test_the_state_reports_the_gait_that_ran_not_the_one_that_was_asked_for() -> None:
+    """`policy` is what reaches the model; the body's own honest `extras["policy"]` does not.
+    Reporting the commanded twist here said `walk` while a duck below the gait floor stood
+    still, which is the failure the floor exists to prevent."""
+    t = MujocoTransport(seed=0, body="puppet")
+    await t.connect()
+    assert (await t.get_state()).policy == "stand"
+    assert (await t.send_intent(Intent(kind="move", params={"vx": 0.2}))).accepted
+    assert (await t.get_state()).policy == "stand", "commanded, but no tick has run yet"
+    await t.sleep(0.1)
+    assert (await t.get_state()).policy == "walk"
+    await t.send_intent(Intent(kind="stop", params={}))
+    await t.sleep(0.1)
+    assert (await t.get_state()).policy == "stand"
+    await t.close()
+
+
+def test_a_body_that_declines_a_twist_is_not_reported_as_walking() -> None:
+    """The puppet takes every twist, so this pins the wiring with a body that refuses one:
+    the world must read the body's answer, not its own command."""
+    w = MujocoWorld(seed=0, body=Puppet())
+    w.set_velocity(0.2, 0.0, 0.0)
+    w.body.fall()  # a body that is down declines whatever it is sent
+    w.step()
+    assert w.moving, "the command is still on the books"
+    assert not w.body.walking
+    assert w.policy == "stand"
+
+
 # ── what the world refuses to do ────────────────────────────────────────────────────────
 
 

@@ -110,6 +110,7 @@ class MicroduckBody:
                 f"upstream's contract is {ACTION_LEN}"
             )
         self.posture: Posture = "standing"
+        self.walking = False
         # Annotated shape-free on purpose: numpy 2.2's stubs, which the lock resolves on
         # 3.12, infer a fixed 1-D shape from `np.zeros` and then refuse the `asarray` the
         # policy's output is stored through.
@@ -119,7 +120,7 @@ class MicroduckBody:
         self.sent: tuple[float, float, float] = (0.0, 0.0, 0.0)
         self._model: Any = None
         self._data: Any = None
-        self._down_ticks = 0
+        self._posture_ticks = 0
 
     # ── the scene ───────────────────────────────────────────────────────────────────
 
@@ -182,7 +183,7 @@ class MicroduckBody:
         d.ctrl[:] = self.default_pose
         self.last_action[:] = 0.0
         self.posture = "standing"
-        self._down_ticks = 0
+        self._posture_ticks = 0
         mujoco.mj_forward(m, d)
 
     # ── one control tick ────────────────────────────────────────────────────────────
@@ -200,6 +201,7 @@ class MicroduckBody:
         self.sent = twist
         obs = self._observe(twist, self.head)
         policy = self.stand if float(np.linalg.norm(twist)) <= STAND_SWITCH else self.walk
+        self.walking = policy is self.walk
         action = policy.run(None, {"obs": obs[None]})[0][0]
         if not np.isfinite(action).all():
             # A NaN here becomes a NaN servo target, and one tick later MuJoCo gives up on the
@@ -239,11 +241,18 @@ class MicroduckBody:
             return
         d = self._data
         down = self.gravity_z > FALL_TILT or d.qpos[self.free_q + 2] < FALL_HEIGHT
-        self._down_ticks = self._down_ticks + 1 if down else 0
-        if self._down_ticks >= FALL_DEBOUNCE_TICKS:
-            self.posture = "fallen"
-        elif not down and self.posture == "fallen":
-            self.posture = "standing"
+        # Debounced both ways. Going down took ten ticks and coming back up took one, so a
+        # duck hovering at the threshold flapped between postures every other tick, and each
+        # flap is a verb refused or allowed on the strength of one noisy frame.
+        if down == (self.posture == "fallen"):
+            self._posture_ticks = 0
+            return
+        self._posture_ticks += 1
+        if self._posture_ticks >= FALL_DEBOUNCE_TICKS:
+            self.posture = "fallen" if down else "standing"
+            self._posture_ticks = 0
+            if down:
+                self.walking = False
 
     # ── what the world asks ─────────────────────────────────────────────────────────
 
@@ -286,7 +295,7 @@ class MicroduckBody:
 
     def extras(self) -> dict[str, Any]:
         return {
-            "policy": "walk" if float(np.linalg.norm(self.sent)) > STAND_SWITCH else "stand",
+            "policy": "walk" if self.walking else "stand",
             "twist_commanded": [round(v, 3) for v in self.commanded],
             "twist_sent": [round(v, 3) for v in self.sent],
             "gait_floor": {"vx": GAIT_FLOOR_VX, "vy": GAIT_FLOOR_VY, "wz": GAIT_FLOOR_WZ},

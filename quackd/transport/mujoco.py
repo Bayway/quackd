@@ -134,13 +134,12 @@ class MujocoTransport:
     async def get_state(self) -> DuckState:
         w = self.world
         battery = max(0.0, self.battery_start - BATTERY_DRAIN_PER_S * w.t)
-        policy = "sit" if w.posture == "sitting" else ("walk" if w.moving else "stand")
         return DuckState(
             t=w.t,
             x=w.x,
             y=w.y,
             theta=w.theta,
-            policy=policy,
+            policy=w.policy,
             posture=w.posture,
             fallen=w.posture == "fallen",
             battery_percent=battery,
