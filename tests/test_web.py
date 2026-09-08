@@ -460,7 +460,6 @@ def test_the_demo_says_what_it_stands_in_for() -> None:
 def test_the_upstream_licence_is_named_on_the_page_that_downloads_it() -> None:
     """The visitor's browser fetches CC BY-NC-SA meshes. The page has to say so."""
     assert "BY-SA-NC" in HTML or "BY-NC-SA" in HTML
-    assert json.dumps  # keeps the import honest if the assertion above is ever relaxed
 
 
 def test_the_browser_refuses_the_arguments_python_refuses() -> None:
