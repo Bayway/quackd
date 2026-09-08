@@ -597,3 +597,64 @@ def test_intents_are_buffered_until_the_next_event_flushes_them(tmp_path: Path) 
         assert len(Transcript.read(path)) == 21, "the verb ending must flush every intent"
     finally:
         transcript.close()
+
+
+class CapturingProvider:
+    """Records the system prompt and every observation, then declares success."""
+
+    name = "capturing"
+    model = "test"
+    supports_vision = False
+
+    def __init__(self) -> None:
+        self.systems: list[str] = []
+        self.observations: list[str] = []
+
+    async def step(
+        self, system: str, history: list[Exchange], tools: list[dict[str, Any]]
+    ) -> ProviderTurn:
+        self.systems.append(system)
+        self.observations.append(history[-1].observation.text)
+        return ProviderTurn(
+            tool_calls=[ToolCall(name="declare_success", arguments={"reason": "done"})]
+        )
+
+
+async def test_the_stand_ins_a_robot_declares_are_told_to_the_model(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    """`extras.assumptions` is what a backend says quackd is standing in for. It reached the
+    transcript and `FakeProvider`, and no further: every real provider sends `obs.text`, which
+    is built from `state.summary()`, and neither had a branch for it. So the docs said a
+    transcript never implies more than happened while the model was told nothing at all.
+    """
+    from quackd.transport.base import DuckState
+
+    stand_ins = [
+        "kick is a scripted impulse, not the robot's own kick policy",
+        "a fall is recovered by standing the model up; upstream ships no get-up policy",
+    ]
+    transport = MockTransport(
+        states=[DuckState(policy="mock", posture="standing", extras={"assumptions": stand_ins})]
+    )
+    provider = CapturingProvider()
+    await run_duck(
+        RunConfig(duck=hello_duck, provider=provider, transport=transport, runs_dir=tmp_path)
+    )
+    system = provider.systems[0]
+    assert "## What is a stand-in on this robot" in system
+    for sentence in stand_ins:
+        assert sentence in system, "verbatim, in the robot's own words"
+    # and the observation points at them, for a pilot with no system prompt at all (MCP)
+    assert "stand-ins=2-listed-in-extras.assumptions" in provider.observations[0]
+
+
+async def test_a_robot_that_claims_no_stand_ins_gets_no_such_section(
+    hello_duck: DuckFile, tmp_path: Path
+) -> None:
+    provider = CapturingProvider()
+    await run_duck(
+        RunConfig(duck=hello_duck, provider=provider, transport=MockTransport(), runs_dir=tmp_path)
+    )
+    assert "stand-in" not in provider.systems[0]
+    assert "stand-ins=" not in provider.observations[0]

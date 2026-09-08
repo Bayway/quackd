@@ -54,7 +54,7 @@ from quackd.safety import (
     deny_all,
 )
 from quackd.trace import Sink, Tracer
-from quackd.transport.base import DuckTransport
+from quackd.transport.base import DuckState, DuckTransport
 from quackd.verbs.registry import (
     VerbRegistry,
     VerbResult,
@@ -247,7 +247,9 @@ class AgentLoop:
     #: watching if the task can actually make it walk.
     _LOCOMOTION = frozenset({"move", "go_to", "search_scan", "approach_and"})
 
-    async def _fall_blind_warning(self, registry: VerbRegistry, allow: list[str]) -> str | None:
+    def _fall_blind_warning(
+        self, registry: VerbRegistry, allow: list[str], state: DuckState
+    ) -> str | None:
         """Why the human has to watch this one, or None if they do not.
 
         Deliberately a one-time gate and not a precondition. On the Open Duck's bridge
@@ -260,7 +262,6 @@ class AgentLoop:
             return None
         if "stand_up" in registry:  # it can recover; being briefly blind is survivable
             return None
-        state = await self.cfg.transport.get_state()
         if state.extras.get("fall_detection") is not False:
             return None
         return (
@@ -313,7 +314,11 @@ class AgentLoop:
         if dropped:
             allow = [n for n in allow if n in registry]
             self._note(f"this robot does not have {', '.join(dropped)}; running without")
-        if (warning := await self._fall_blind_warning(registry, allow)) is not None:
+        # One reading, before the budget starts, for two things the model has to be told at the
+        # top: whether anything on this robot can see a fall, and what quackd is standing in
+        # for on this backend. Both are the robot's own words about itself.
+        first_state = await cfg.transport.get_state()
+        if (warning := self._fall_blind_warning(registry, allow, first_state)) is not None:
             self._note(warning)
             if cfg.acknowledge is not None and not cfg.acknowledge(warning):
                 raise Aborted("nobody confirmed they were watching a robot that cannot see a fall")
@@ -328,6 +333,7 @@ class AgentLoop:
             backend_name(cfg.transport),
             manifest=manifest,
             memory_text=memory_text,
+            assumptions=first_state.extras.get("assumptions") or None,
         )
         system += getattr(cfg.provider, "prompt_hint", "") or ""  # e.g. the local JSON fallback
         self._emit(

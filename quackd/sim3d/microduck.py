@@ -66,7 +66,12 @@ ASSUMPTIONS = (
     "grab is the cartoon's 60% scoop, not upstream's ground_pick policy",
     "sit is refused: upstream's sit-stand policy put the duck on its back when tried",
     "stand_up stands the model up again; upstream ships no get-up policy",
-    f"a non-zero twist is raised to the gait floor (vx {GAIT_FLOOR_VX}, wz {GAIT_FLOOR_WZ})",
+    f"a non-zero twist is raised to the gait floor (vx {GAIT_FLOOR_VX}, wz {GAIT_FLOOR_WZ}), "
+    "and one below a third of it is dropped to zero rather than lurched",
+    f"it achieves about {ACHIEVED_FRACTION} of the twist it is sent: read `pose` after every "
+    "move and correct from it, rather than trusting the numbers you sent",
+    "the sideways floor is not measured, unlike the forward and turning ones, so any lateral "
+    "request is sent at full scale",
 )
 
 
