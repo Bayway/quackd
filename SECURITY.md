@@ -58,8 +58,11 @@ Also in scope:
   are worth naming because they are the answer: only paths in a fixed allowlist are extracted
   from the tarball, so a crafted archive cannot write outside the cache, and every file is
   checked against a recorded sha256 before MuJoCo or onnxruntime sees it, so a substituted mesh
-  or policy fails the run instead of loading. An ONNX file is data that onnxruntime parses, not
-  Python that quackd executes, so the exposure is that parser and not arbitrary code. The one
+  or policy fails the run instead of loading. Both are tested rather than merely claimed:
+  `tests/test_sim3d_assets.py` builds hostile archives — a traversal path, a sibling directory,
+  a symlink, a tampered mesh — and asserts that none of them lands. An ONNX file is data that
+  onnxruntime parses, not Python that quackd executes, so the exposure is that parser and not
+  arbitrary code. The one
   path around the hashes is deliberate: `QUACKD_MICRODUCK_ASSETS` warns rather than refuses,
   because a newer export from your own checkout is the point of it. Point it at a checkout you
   built, never at one you were sent.

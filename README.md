@@ -56,7 +56,7 @@ You do not need a robot to try it. Two simulators ship with quackd. The **physic
 
 > **"Find the ball and kick it."** · **"Find the ball, walk up to it and say where it is."** *(an Open Duck Mini v2, which cannot kick)* · **"Find the ball with your gaze and say where it is."** *(a Reachy Mini head, no legs)* · **"Split the search, the closest duck kicks."** *(a flock)* · **"The head spots, the duck kicks, the head judges."** *(two bodies, one contract)*
 
-The first of those also passes 10 of 10 on the physics simulator, with the duck on its own gait rather than a sprite on rails: that is `test_find_and_kick_on_the_real_duck`, which needs upstream's model in the cache and so runs on a developer's machine rather than in CI. The rest are cartoon only, because the other seven bodies have no physics model here.
+The first of those also passes 10 of 10 on the physics simulator, with the duck on its own gait rather than a sprite on rails: that is `test_find_and_kick_on_the_real_duck`, which needs upstream's model in the cache, so a nightly job fetches it the way your first run would and CI's own gating job runs the stand-in. The rest are cartoon only, because the other seven bodies have no physics model here.
 
 **Nothing here has run on a real robot yet, on any of the eight adapters.** Every hardware backend speaks names read from upstream source at a pinned commit and has only ever talked to fakes. For the Open Duck Mini and the ToddlerBot those fakes are the daemons quackd itself ships for the robot, exercised over loopback, so there only the body is untested. Goals like *"find my keys"* are where this is going, not what it does yet. The honest label for today is *LLM driven, goal directed control of simulated robots*, and [Which robots work](#which-robots-work) says exactly how far each one has got.
 
@@ -207,7 +207,7 @@ Version 0.7, simulator and mocks. What has been built, and how far each piece ha
 |---|---|
 | `sim2d` bundled simulator (default) | ✅ 10 of 10 seeds on `find-and-kick`, GIF and transcript per run |
 | `mujoco` physics simulator (`quackd[mujoco]`) | ✅ 10 of 10 seeds on `find-and-kick` twice over: once on the kinematic stand-in and once with the duck walking on **upstream's own trained policy**, both ground truth checked, and both named tests rather than remembered numbers. The trained-gait sweep needs the model in the cache, so it runs on a developer's machine. The model and the policy are fetched from upstream at a pinned commit and hash checked, never shipped |
-| Browser demo ([`web/`](web/)) | 🧪 the same physics, policy, verbs and contract in a static page, with the sim and the pilot exercised under Node against the real model and the real policy. Bring your own key, or point it at Ollama. The rendering, the DOM and the recording have never been run in a browser, and GitHub Pages is not enabled yet, so there is no live site |
+| Browser demo ([`web/`](web/)) | 🧪 the same physics, policy, verbs and contract in a static page. Bring your own key, or point it at Ollama. CI checks what it can without a browser (the ids the script looks up, the pins and gait numbers it shares with Python, each module's syntax, and the argument validator run under Node), but the rendering, the DOM and the recording have still never run in one, and GitHub Pages is not enabled yet, so there is no live site |
 | Manifests and core verbs (`quackd list-adapters`, `quackd list-verbs --robot`) | ✅ eight adapters, eight core verbs that appear only where the manifest meets their requirements, speed limits from the manifest, `manifest.schema.json` generated and drift tested |
 | MCP server (`quackd serve-mcp`) | ✅ Claude Code and Claude Desktop, fleets with `--robots` (eight `robot_*` tools, tested in process against the simulator and the mocks), no Claude Desktop session on record |
 | Memory between runs (`quackd memory`, `remember`) | ✅ one JSONL file per `adapter:backend`, notes and run outcomes into the next prompt, tested end to end offline, 🧪 the `remember` tool itself exercised by one local model on one machine and by no cloud model ([docs/memory.md](docs/memory.md)) |
@@ -230,7 +230,7 @@ Eight robots, and one table for how far each one has actually got. The distincti
 | How far it has got | What that means |
 |---|---|
 | ✅ **simulator** | Runs a whole task in the bundled 2D simulator, with a seeded acceptance sweep in CI that checks the simulator's ground truth, not the model's claim |
-| ✅ **physics** | Runs a whole task in MuJoCo on the robot's own trained gait, checked against the physics world's ground truth rather than the model's claim. Needs `quackd[mujoco]`, which CI does not install, so this rung is one machine's word |
+| ✅ **physics** | Runs a whole task in MuJoCo on the robot's own trained gait, checked against the physics world's ground truth rather than the model's claim. Needs `quackd[mujoco]`: CI installs it for the stand-in body on every push, and fetches upstream's model nightly for the trained gait |
 | ✅ **mock** | Every verb runs offline against a scripted double, in the test suite |
 | 🧪 **daemon** | The wire protocol runs end to end against the real on-robot daemon over loopback in CI. Everything except the robot is exercised |
 | 🧪 **names** | Every upstream name read from upstream source at a pinned commit, exercised against fakes. Never connected to anything real |
@@ -239,7 +239,7 @@ Eight robots, and one table for how far each one has actually got. The distincti
 | Robot | `--robot` | The body | How far it has got |
 |---|---|---|---|
 | **Microduck** | `microduck:sim2d`, `mock` | a 25 cm biped from Pollen Robotics | ✅ simulator, ✅ mock |
-| | `microduck:mujoco` | the same robot in MuJoCo, on its own walking policy | ✅ physics. `find-and-kick` 10 of 10 seeds while it really walks (`test_find_and_kick_on_the_real_duck`), run where the model is already cached rather than in CI ([ADR-0030](docs/adr/0030-mujoco-physics-backend.md)) |
+| | `microduck:mujoco` | the same robot in MuJoCo, on its own walking policy | ✅ physics. `find-and-kick` 10 of 10 seeds while it really walks (`test_find_and_kick_on_the_real_duck`), nightly, because the model is fetched rather than shipped ([ADR-0030](docs/adr/0030-mujoco-physics-backend.md)) |
 | | `microduck:jsonrpc` | the real one, over `robotd` | 🧪 names. Early pre-orders arrive around Christmas 2026, later orders in four to six months ([checklist](docs/microduck-hardware-checklist.md)) |
 | | `microduck:websocket` | upstream's planned agent gateway | ⏳ stub |
 | **Open Duck Mini v2** | `open_duck:sim2d`, `mock` | a 42 cm 3D printed biped you can build yourself | ✅ simulator, ✅ mock |
