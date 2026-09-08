@@ -24,6 +24,11 @@ the result is in) →
 against the abort, so a kill switch cancels the verb. A verb that times out or raises stops
 the duck and reports a failure.
 
+So does a call whose *caller* goes away: an MCP client dropping the request, or a second
+Ctrl-C. The verb is cancelled and a `stop` goes out, recorded as `gate cancelled`. That path
+used to return at once and leave the legs moving with nothing to halt them, which is the
+failure this page exists to rule out.
+
 ## Heartbeat
 
 A task pings `transport.heartbeat()` every 500 ms (`robot.health` on a Microduck, each
@@ -45,9 +50,9 @@ unset, because on a dry run the omission is what you are checking:
 ```
 gate    dry_run: would send walk_to(target='ball', max_s=null)
 ```
- Read-only verbs
-(`observe`, alias `get_frame`, and `report_state`) still run. Use it the first time you
-point a new `.duck` at hardware.
+
+Read-only verbs (`observe`, alias `get_frame`, and `report_state`) still run. Use it the
+first time you point a new `.duck` at hardware.
 
 ## On hardware
 

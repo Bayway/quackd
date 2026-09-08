@@ -174,18 +174,22 @@ name on every line, so three robots moving at once stay three readable columns r
 one interleaving, and the coordinator's own decisions print under `flock`.
 
 ```
-duck-0  verb    search_scan(sweep_deg=120) from agent
-duck-0  ->      move x18 over 1.8 s (vx 0, vy 0, wz 0.4..0.6)
-duck-1  <-      search_scan ok: ball at bearing 11 deg left ~0.62 m (1.8 s sim, 0.1 s wall, 18 intents)
-flock   auction first bid duck-1 0.62 m
-flock   claim   duck-1 (0.62 m), spotter reachy-01
-duck-1  <-      search_scan PREEMPTED: role change to kicker (0.9 s sim, 0.0 s wall, 9 intents)
-flock   verdict moved 0.51 m by reachy-01
-duck-2  end     stopped after 7 steps
+duck-2  verb    search_scan(target='ball', step_deg=45, max_steps=3)
+duck-2  ->      look(x=1, y=0, z=0)
+duck-2  <-      search_scan ok: ball found: ball at bearing 28° left ~0.81 m (after 2 turn steps) (1.8 s sim, 0.1 s wall, 19 intents)
+flock   auction first bid duck-2 0.81 m
+flock   claim   duck-2 (0.81 m)
+duck-0  <-      search_scan PREEMPTED: duck-0: role change to YIELD (2.2 s sim, 0.1 s wall, 23 intents)
+duck-2  end     stopped after 5 steps
 ```
 
-Those are the words the GIF captions use, so a line on screen and a frame in `run.gif` say
-the same thing about the same moment.
+That is a real `--seed 3` run, trimmed. The duck that wins the claim keeps searching, and the
+two that lose are preempted mid-verb and yield, which is the moment a flock is hardest to
+read from `flock.jsonl` alone. `PREEMPTED` is its own outcome rather than an error, because
+a role change is the coordinator working, not a fault.
+
+The `auction`, `claim` and `verdict` lines are the words the GIF captions use, so a line on
+screen and a frame in `run.gif` say the same thing about the same moment.
 
 Each robot's `ducks/<name>/transcript.jsonl` is its own record and gets every event whether
 or not anyone is watching, exactly as a solo run's transcript does. `flock.jsonl` keeps the

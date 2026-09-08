@@ -337,7 +337,7 @@ uvx --from "quackd[anthropic]" quackd run --goal "find the ball and kick it" --p
 uvx quackd run find-and-kick --provider fake --seed 3
 ```
 
-Every run writes `runs/<timestamp>-<name>/` (`--runs-dir` replaces `runs/`) with `transcript.jsonl` (every prompt, tool call, result and token count, plus the robot's manifest in `run_start`), every frame quackd captured, `summary.json`, and `run.gif` on the simulator.
+Every run writes `runs/<timestamp>-<name>/` (`--runs-dir` replaces `runs/`) with `transcript.jsonl` (every prompt, tool call, gate, intent, result and token count, plus the robot's manifest in `run_start`), every frame quackd captured, `summary.json`, and `run.gif` on the simulator. `quackd trace` replays any of it afterwards.
 
 Cloud or local, same command.
 
@@ -492,7 +492,7 @@ uvx quackd run reachy-spots-duck-kicks --provider fake --seed 3
 | Budgets | in the `.duck`. `--max-steps` overrides for one run |
 | Human in the loop | `verbs.confirm` in the `.duck` prompts y/N. `--yes` auto accepts. MCP refuses gated verbs unless started with `--yes` |
 | Dry run | `--dry-run` sends nothing, and the trace shows every verb it would have run, with its parameters |
-| Trace | on by default, on stderr: the prompt, what the model thought and chose, every executor decision, every intent sent to the robot, every result, tokens and timings. `--no-trace` or `QUACKD_TRACE=0` turns it off, `QUACKD_TRACE_THINKING` caps how much reasoning the terminal shows (default 2000 characters, `all` for everything). `QUACKD_TRACE_PROMPT=0` or `--no-trace-prompt` drops the system prompt and keeps the rest. A flock is traced too, one view per robot with its name on every line and the coordinator's decisions under `flock`. The transcript keeps all of it either way, and `quackd trace` replays a finished run from it. See [docs/architecture.md](docs/architecture.md#trace) |
+| Trace | on by default, on stderr: the prompt, what the model thought and chose, every executor decision, every intent sent to the robot, every result, tokens and timings. `--no-trace` or `QUACKD_TRACE=0` turns it off, `--no-trace-prompt` or `QUACKD_TRACE_PROMPT=0` drops just the system prompt, `QUACKD_TRACE_THINKING` caps the reasoning shown per turn (default 2000 characters, `all` for everything). The transcript keeps all of it either way. See [docs/architecture.md](docs/architecture.md#trace) |
 | Memory | on by default, under `~/.quackd/memory/`. `--no-memory` runs fresh, `--memory-dir` or `QUACKD_MEMORY_DIR` moves it |
 
 **Real robots.** Each needs `--robot` and `--address`, and the extra named. None has been run against its target by us, so all eight are 🧪 ([docs/adapter-status.md](docs/adapter-status.md)).
