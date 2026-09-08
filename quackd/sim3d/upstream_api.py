@@ -92,8 +92,14 @@ COMPILER = UpstreamRef(
     "VERIFIED",
     src(f"{_ROBOT}/robot_walk.xml"),
 )
+MESH_BYTES = 21_593_292
+"""The meshes on disk, in bytes, as a number rather than as prose inside a ref's name.
+
+The tarball over the wire is about a tenth of this, and saying only the smaller figure while
+writing the larger one into someone's cache is the kind of surprise a log line should not
+spring."""
 MESH_COUNT = UpstreamRef(
-    "38 STL meshes, 21,593,292 bytes",
+    f"38 STL meshes, {MESH_BYTES:,} bytes",
     "VERIFIED",
     src(f"{_ROBOT}/assets"),
     "every <mesh> the walking model references; all 75 mesh geoms are class 'visual' "
