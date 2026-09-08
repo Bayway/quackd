@@ -17,7 +17,8 @@ this order: abort flag (`stop` is exempt, so the brake still works) → **allowl
 (`verbs.allow`; `stop` always allowed) → param validation (errors are feedback to the
 model, not crashes) → **confirm gate** (`verbs.confirm` or `safety_class` ∈ {confirm,
 dangerous}; y/N in the terminal, `--yes` to auto-accept, MCP refuses unless `--yes`) →
-**budgets** (`max_steps` here; `max_llm_calls` and `max_minutes` in the loop) →
+**budgets** (`max_steps` and `max_minutes` here, which is what caps an MCP session since
+there is no loop there; `max_llm_calls` is the loop's own) →
 machine-enforced **`abort_when`** (the battery threshold here, consecutive failures once
 the result is in) →
 **preconditions** (not fallen, not sitting) → `--dry-run` → execute, racing the **timeout**

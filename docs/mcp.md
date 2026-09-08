@@ -73,9 +73,9 @@ A `gate` line appears whenever a rule fires, and says which one: `gate allowlist
 verb 'kick' is not in this duck's allowlist (quack, walk, stop)`. That is the difference
 between a refusal you can act on and an `ok: false` you cannot. The executor's gates are
 listed in [architecture.md](architecture.md). Two more belong to the server itself:
-`session_aborted` when the heartbeat has already given up on the robot and every further call
-is refused, and `no_sound_intent` when `robot_say` reaches a body with nothing to say it
-with.
+`session_aborted` when that robot's session has already aborted, either its heartbeat gave
+up or a contract's `abort_when` fired, and every further call except `stop` is refused,
+and `no_sound_intent` when `robot_say` reaches a body with nothing to say it with.
 
 Over MCP the pilot is the client, so the model's own reasoning and token counts live in
 Claude Code or Claude Desktop, not here. quackd shows what quackd can see.
@@ -227,11 +227,13 @@ against a real duck: [adapters/open_duck.md](adapters/open_duck.md) and its
 
 ## Safety in an MCP session
 
-- One heartbeat per robot runs for the whole session; if a robot's transport fails, every
-  later call to that robot returns `ok: false` and that robot has already been stopped.
-  The other robots in the fleet carry on.
+- One heartbeat per robot runs for the whole session; if a robot's transport fails, that
+  robot has already been stopped and every later call to it is refused with a
+  `session_aborted` gate. `stop` is the exception and is never refused, because an aborted
+  session is exactly when a pilot reaches for the brake. The other robots in the fleet
+  carry on.
 - Every robot connects at startup, in the order given; if one cannot, the server stops
   and disconnects the ones that did, rather than fronting a fleet with a hole in it.
 - Confirm-gated verbs are **refused** unless the server was started with `--yes`, because
   there is no terminal to ask on. The refusal text tells the model why.
-- On a Microduck the gamepad wins: upstream arbitrates authority and quackd does not fight it. On an Open Duck it does not, because quackd's own daemon replaces the gamepad the walk loop reads, so there the power switch is the only thing that always wins.
+- What stops the body when quackd goes quiet is the body's job, not the server's, and it differs per robot. Read [safety.md](safety.md) before an MCP session drives hardware.

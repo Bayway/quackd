@@ -80,7 +80,7 @@ way, uncapped. Details and the event list: [architecture.md](architecture.md#tra
 `runs/` as the same lines it printed while it ran, and it takes a run name, a timestamp
 prefix, a duck name or a transcript file if you want an older one. `--from-step N` starts
 part way in, `--no-prompt` drops the system prompt, `--thinking all` shows every character
-the model thought, and `--frames` adds a line per camera frame. It reads stdout, so piping
+the model thought, and `--frames` adds a line per camera frame. It prints to stdout, so piping
 it to a pager or a file is the point. A flock run replays every member, each line prefixed
 with the robot that wrote it.
 
