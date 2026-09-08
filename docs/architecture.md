@@ -147,7 +147,7 @@ The transcript is one *sink* of an event stream, not a thing the loop writes dir
   It shows the system prompt once, then per turn: the observation, what the model thought,
   the tool it called, tokens and latency, each gate that fired, each intent, and the result.
   A burst of intents from a steering loop is one line with its parameter ranges, because
-  `go_to` recomputes its twist every 100 ms: `-> move x26 over 0.5 s (vx 0.1..0.2, wz -0.01..0.88)`.
+  `go_to` recomputes its twist every 100 ms: `-> move x26 over 2.5 s (vx 0.1..0.2, vy 0, wz -0.01..0.88)`.
   A burst still going after two seconds is flushed as it stands and the next line continues
   it, so a long approach narrates itself instead of printing nothing until it ends.
 - **The MCP tool result**, as a `trace` list on every call that reaches an executor, capped

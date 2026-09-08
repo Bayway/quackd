@@ -63,7 +63,7 @@ cost in seconds and budget.
 tool    robot_run_verb verb='go_to', params={'target': 'ball'} on duck
 verb    go_to(target='ball') from mcp
 ->      look(x=1, y=0, z=0)
-->      move x24 over 0.1 s (vx 0.1..0.2, vy 0, wz 0..0.88)
+->      move x24 over 2.4 s (vx 0.1..0.2, vy 0, wz 0..0.88)
 ->      stop
 <-      go_to ok: reached the ball: ~0.25 m away, bearing +0° (2.6 s sim, 0.2 s wall, 26 intents)
 done    ok in 2.6 s sim, 0.2 s wall budget: step 2/40, llm calls 0/40, 0.1/5 min

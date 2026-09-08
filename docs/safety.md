@@ -43,16 +43,17 @@ always sends `stop` and closes the transport. Works on Windows (signal handler, 
 
 ## Dry run
 
-`--dry-run` sends nothing, and the trace names every verb a model *would* have run with the
-parameters it chose. The line names every parameter, including one the model left
-unset, because on a dry run the omission is what you are checking:
+`--dry-run` sends nothing, and the trace names every verb a model *would* have run, with the
+parameters it chose:
 
 ```
-gate    dry_run: would send walk_to(target='ball', max_s=null)
+gate    dry_run: skipped would run search_scan, sent nothing (target='ball', step_deg=45, max_steps=8)
 ```
 
-Read-only verbs (`observe`, alias `get_frame`, and `report_state`) still run. Use it the
-first time you point a new `.duck` at hardware.
+A parameter the model left unset shows as `null` rather than being dropped, because on a dry
+run the omission is the thing you are checking. Read-only verbs (`observe`, alias
+`get_frame`, and `report_state`) still run. Use it the first time you point a new `.duck` at
+hardware.
 
 ## On hardware
 
