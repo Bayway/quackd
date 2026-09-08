@@ -7,21 +7,36 @@ two ways of driving a robot sit a centimetre apart. It is the same idea as
 `quackd run --goal "..." --robot microduck:mujoco`, with the same physics and the same
 walking policy, in six modules of plain JavaScript with no build step instead of Python.
 
-It is meant to live at **<https://www.quackd.org>**, deployed from this directory by Vercel.
-It is not there yet: that domain currently serves the quackd-web landing page, which is a
-separate project, so read the address as where this is going rather than where it is. There
+It is meant to live at **<https://www.quackd.org/simulator>**, and it is not there yet.
+That domain is served by quackd-web, a separate Vercel project, which proxies `/simulator/*`
+through to this one; read the address as where this is going rather than where it is. There
 is no build step either way: `vercel.json` at the repository root serves `web/` as it stands,
 because everything heavy here is a CDN URL the page fetches at run time.
 
+### Why the paths are absolute
+
+Every local reference in `index.html` is `/simulator/...` rather than `style.css`. That is not
+a style choice. quackd-web sets `trailingSlash: false`, so a visitor to `/simulator/` is
+redirected to `/simulator`, and from *that* URL a relative `style.css` resolves to
+`/style.css` — the landing page's root, not this directory. The HTML would arrive and every
+asset under it would 404. `tests/test_web.py` fails if a relative path comes back.
+
+The same `vercel.json` also rewrites `/simulator/*` to `/*` here, so this project answers on
+the mount as well as at its own root and the direct deployment URL is not a broken page.
+
 ## Running it locally
 
-There is no build step and no dependencies to install. It needs a server only because
-browsers refuse ES modules over `file://`:
+There is no build step and no dependencies to install. It needs a server for two reasons:
+browsers refuse ES modules over `file://`, and the page expects to be mounted at `/simulator`.
+`web/serve.py` is that server — stdlib only, no arguments needed:
 
 ```bash
-python -m http.server 8000 --directory web
-# then open http://localhost:8000
+python web/serve.py
+# then open http://localhost:8000/simulator/
 ```
+
+A plain `python -m http.server --directory web` will serve the HTML and then 404 the
+stylesheet and the script, because nothing answers on `/simulator` at the root.
 
 ## What loads, and from where
 

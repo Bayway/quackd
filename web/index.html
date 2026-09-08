@@ -10,8 +10,8 @@
 <meta property="og:description" content="Type a sentence, watch a simulated Microduck do it. Real MuJoCo physics, upstream's own walking policy, your own API key.">
 <meta name="theme-color" content="#fffdf7">
 <meta name="color-scheme" content="light">
-<link rel="icon" type="image/png" sizes="96x96" href="assets/favicon-96.png">
-<link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="96x96" href="/simulator/assets/favicon-96.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/simulator/assets/apple-touch-icon.png">
 <!--
   Fonts as <link> rather than a CSS @import: an @import inside style.css cannot start until
   the stylesheet itself has downloaded and parsed. These sit above the onnxruntime tag so the
@@ -21,7 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Nunito+Sans:wght@400;600;700;800&display=swap">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="/simulator/style.css">
 <!--
   Classic, non-deferred, in <head>, and deliberately NOT a module: boot() fails fast on
   !globalThis.ort, and microduck.js points ort.env.wasm.wasmPaths at this same 1.29.0 dist
@@ -35,7 +35,7 @@
 
 <header class="nav-shell">
   <h1>
-    <img src="assets/duck-mark.png" alt="" width="30" height="30" decoding="async" class="mark">
+    <img src="/simulator/assets/duck-mark.png" alt="" width="30" height="30" decoding="async" class="mark">
     quackd <small>a Microduck with a brain</small>
   </h1>
   <span class="status-pill">MuJoCo · WASM · your key stays in this tab</span>
@@ -61,7 +61,7 @@
       <!-- No `hidden` attribute here, ever: boot() sets loading.hidden = true, and fail()
            writes its message into #loading-phase only while the overlay is still showing. -->
       <div id="loading" class="overlay">
-        <img src="assets/duck-mark.png" alt="" width="64" height="64" class="boot-mark">
+        <img src="/simulator/assets/duck-mark.png" alt="" width="64" height="64" class="boot-mark">
         <h2>Fetching a duck</h2>
         <p id="loading-phase">starting</p>
         <div class="bar"><div id="loading-bar"></div></div>
@@ -213,6 +213,6 @@
   </p>
 </footer>
 
-<script type="module" src="src/app.js"></script>
+<script type="module" src="/simulator/src/app.js"></script>
 </body>
 </html>

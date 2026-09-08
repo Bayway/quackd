@@ -3,5 +3,9 @@
   "framework": null,
   "installCommand": "echo 'nothing to install: web/ is static'",
   "buildCommand": "echo 'nothing to build: web/ loads its dependencies from a CDN at run time'",
-  "outputDirectory": "web"
+  "outputDirectory": "web",
+  "rewrites": [
+    { "source": "/simulator", "destination": "/index.html" },
+    { "source": "/simulator/:path*", "destination": "/:path*" }
+  ]
 }
