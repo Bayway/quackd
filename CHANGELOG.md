@@ -180,8 +180,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run for six hours three times and named nothing; with it, the same hang failed in five
   minutes with the frame in the log.
 
+- **CI runs the physics backend, and the browser demo has a floor under it.** A `physics` job
+  installs `quackd[mujoco]` and runs the two sim3d modules against a software rasteriser, so
+  about 1,200 lines that skipped on all six runners now execute somewhere. It sets
+  `QUACKD_REQUIRE_GL=1`, because a job whose purpose is to run tests that skip has to fail
+  when they skip. A nightly `microduck-assets` job fetches upstream's real model the way a
+  user's first run does, into a runner that is then destroyed, and runs the trained-gait
+  sweep; it caches nothing, because `docs/licenses.md` says no CI fixture carries a byte of
+  those meshes. `tests/test_web.py` checks the browser demo without a browser: the ids the
+  script looks up, the rule that was hiding nothing, static CDN imports, key storage, the pins
+  and gait numbers shared with Python, and `node --check` on each module.
+- **The 10 of 10 claim has a test.** `test_find_and_kick_on_the_real_duck` runs the same ten
+  seeds on upstream's trained gait rather than the stand-in, and asserts the body really is
+  the trained one first, because a silent fall back to the puppet passing it is the point.
+  Measured: 10 of 10, so the claim was true and simply unbacked. `assets.py` has eighteen
+  tests where it had none, including the tarball allowlist `SECURITY.md` makes a claim about,
+  and the gait floor moved into a module that imports no `mujoco`, so the arithmetic deciding
+  whether a duck moves or only reports moving is checked on every runner.
+
 ### Fixed
 
+- **The physics backend crashed, hung and misreported, on paths its tests never reached.**
+  Reading the state of a duck lying on its back raised a `ValueError` out of every
+  `get_state()`, because the tilt's `acos` was clamped on one side only: the reading a fall is
+  exactly when a pilot needs it. A world that could not step killed the clock advancer, which
+  is a task nobody awaits, so every parked verb waited on a future that would never resolve
+  and the reason was collected by the garbage collector; the failure is now raised into every
+  sleeper and out of the heartbeat. A subscription running beside a verb deadlocked both,
+  because the clock keeps one parked waiter per participant and the second silently overwrote
+  the first; that collision is an error naming the id now. A non-finite twist walked through
+  `np.clip` and the gait floor's dead zone to arrive at the servos, and MuJoCo answers a
+  non-finite state by resetting the world rather than raising, so a run could carry on
+  reporting poses from a world that had quietly restarted. And a headless machine got an
+  OpenGL traceback where `docs/faq.md` promises a sentence naming `MUJOCO_GL`.
+- **The state said `walk` while the duck stood still.** `policy` was read from the twist quackd
+  commanded rather than from what the body did with it, and a body is free to decline one:
+  below the gait floor it sends nothing and stands. That is the exact failure the gait floor
+  exists to prevent, and it reached the model while the body's own truthful `extras["policy"]`
+  did not. `head_yaw` reported the angle a `look` asked for, on a body whose neck is a servo
+  that lags, while bearings already came from the achieved pose.
+- **`stand_up` stood the duck up facing backwards.** The heading came from the trunk
+  quaternion, which is arbitrary at the gimbal degeneracy where a face-down duck lies:
+  measured on the real model, a duck facing +x that goes onto its nose reads as yaw 3.14. It
+  now comes from the trunk's own forward axis, the duck is pushed clear of anything it landed
+  on, and the twist that put it down is cleared rather than resumed.
+- **The stand-ins were told to the transcript and not to the model.** `extras.assumptions` is
+  what a backend says quackd stands in for, and only `FakeProvider` ever read it: every real
+  provider sends `obs.text`, built from `DuckState.summary()`, and neither had a branch for it.
+  ADR-0030's claim that a transcript never implies more than happened was true of the
+  transcript and false of the model. The list now goes into the system prompt in the robot's
+  own words, and a pointer into `summary()`, because the MCP server has no system prompt at all
+  and a Claude Desktop pilot reads tool results only.
+- **An interrupted download left a cache the next run blamed upstream for.** `assets.py` wrote
+  extracted files straight to their final path with no lock, so a Ctrl-C or a second terminal
+  left a half-written model that the next run reported as a pin mismatch, asking the user to
+  report that upstream had moved the archive. Files now land in a scratch directory, are
+  verified there and renamed into place under a lock. `fetch` caught `OSError` only, so a
+  truncated body and a captive portal's HTML both escaped as bare tracebacks; the cache
+  variable never expanded a tilde, though `.env.example` suggests one; and the licence notice,
+  the file that makes the licence claim true on disk, was written only on a fresh fetch.
+- **A square was four legs and a hope.** `square_strategy` declared success on the leg count
+  alone, and that outcome is what `docs/assets/hero3d.py` publishes the README hero on. It
+  measures the distance back to where it started now and says it either way. Both shape
+  strategies also sampled the heading once per move and accumulated it with `abs(wrap(...))`,
+  so a long turn discarded whole revolutions.
+- **The browser demo could not load, and a stale key could leave the machine.** A CSS rule kept
+  the loading panel over the canvas for good, a blocked CDN or a machine without WebGL left a
+  dead page with no message, any physics error stopped the loop silently and hung every verb,
+  and Space stopped activating every button on the page. Every verb reported success, including
+  a kick that missed; nothing validated a model's arguments, so `duration_s: 1e6` hung the tab
+  and `duration_s: "soon"` reported success having done nothing; and `stand_up` restarted the
+  whole episode, which made the time budget permanently negative. Switching the provider to a
+  local server disabled the key field without clearing it, and a disabled input's value is
+  still readable, so a key pasted for one vendor went out as a bearer token to whatever host
+  was typed in the free-text box.
 - **Two calls at once no longer report each other's work.** The per verb intent tally was one
   stack on the executor, so an MCP `quack` that overlapped a `move` reported the move's intents
   as its own and the move reported neither its resends nor its stop. Each verb now counts in a

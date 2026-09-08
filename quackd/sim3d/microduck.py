@@ -85,7 +85,35 @@ def _session(path: Any) -> Any:
     options = ort.SessionOptions()
     options.intra_op_num_threads = 1  # one duck, 200k parameters: threads only add latency
     options.log_severity_level = 3
-    return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
+    try:
+        return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
+    except Exception as e:
+        raise PolicyError(f"could not load {path}: {e}") from e
+
+
+def _check_io(session: Any, path: Any) -> str:
+    """Check a policy is the shape upstream documents, and return the input's real name.
+
+    `OBS_LEN` was a number in a comment: nothing compared it to the model, and the input name
+    and output index were written in by hand. A re-export with one more observation would have
+    failed somewhere inside onnxruntime on the first tick rather than here, where the file
+    that is wrong can be named.
+    """
+    inputs, outputs = session.get_inputs(), session.get_outputs()
+    if len(inputs) != 1 or len(outputs) != 1:
+        raise PolicyError(
+            f"{path}: {len(inputs)} inputs and {len(outputs)} outputs; upstream's contract "
+            f"is one of each ({up.WALK_POLICY.note})"
+        )
+    if list(inputs[0].shape)[-1:] != [OBS_LEN]:
+        raise PolicyError(
+            f"{path}: takes {inputs[0].shape}, and quackd builds {OBS_LEN} observations"
+        )
+    if list(outputs[0].shape)[-1:] != [ACTION_LEN]:
+        raise PolicyError(
+            f"{path}: returns {outputs[0].shape}, and this body has {ACTION_LEN} actuators"
+        )
+    return str(inputs[0].name)
 
 
 class MicroduckBody:
@@ -101,14 +129,24 @@ class MicroduckBody:
                 "the Microduck body needs the physics extra: uv pip install 'quackd[mujoco]'"
             ) from e
         self.assets = assets if assets is not None else ensure_microduck()
-        self.walk = _session(self.assets.policies_dir / up.WALK_POLICY.name)
-        self.stand = _session(self.assets.policies_dir / up.STAND_POLICY.name)
+        walk_path = self.assets.policies_dir / up.WALK_POLICY.name
+        stand_path = self.assets.policies_dir / up.STAND_POLICY.name
+        self.walk = _session(walk_path)
+        self.stand = _session(stand_path)
+        self.obs_name = _check_io(self.walk, walk_path)
+        _check_io(self.stand, stand_path)
         meta = self.walk.get_modelmeta().custom_metadata_map
-        self.joint_names = [n.strip() for n in meta["joint_names"].split(",")]
-        self.default_pose = np.array(
-            [float(v) for v in meta["default_joint_pos"].split(",")], dtype=np.float64
-        )
-        self.action_scale = float(meta.get("action_scale", "1.0"))
+        try:
+            self.joint_names = [n.strip() for n in meta["joint_names"].split(",")]
+            self.default_pose = np.array(
+                [float(v) for v in meta["default_joint_pos"].split(",")], dtype=np.float64
+            )
+            self.action_scale = float(meta.get("action_scale", "1.0"))
+        except (KeyError, ValueError) as e:
+            raise PolicyError(
+                f"{walk_path}: bad or missing ONNX metadata ({e!r}). Upstream writes "
+                "joint_names, default_joint_pos and action_scale when it exports"
+            ) from e
         if len(self.joint_names) != ACTION_LEN or self.default_pose.shape != (ACTION_LEN,):
             raise PolicyError(
                 f"{up.WALK_POLICY.name} declares {len(self.joint_names)} joints; "
@@ -207,7 +245,7 @@ class MicroduckBody:
         obs = self._observe(twist, self.head)
         policy = self.stand if float(np.linalg.norm(twist)) <= STAND_SWITCH else self.walk
         self.walking = policy is self.walk
-        action = policy.run(None, {"obs": obs[None]})[0][0]
+        action = policy.run(None, {self.obs_name: obs[None]})[0][0]
         if not np.isfinite(action).all():
             # A NaN here becomes a NaN servo target, and one tick later MuJoCo gives up on the
             # state and silently resets the world. Stop at the policy, where the cause is
@@ -226,8 +264,9 @@ class MicroduckBody:
         command = np.zeros(13, dtype=np.float64)
         command[0:3] = twist
         # [3] neck pitch, [4] head pitch, [5] head yaw, [6] head roll — deltas from home.
-        # Measured: a positive head-pitch command tilts the camera down, so quackd's
-        # "look up" (a positive z) is a negative command.
+        # The sign is `up.HEAD_PITCH_SIGN`: measured here rather than read anywhere, and
+        # tagged UNVERIFIED for that reason, so `quackd doctor` and adapter-status.md say so.
+        # [3] and [6] stay zero because quackd's gaze has one pitch and no roll.
         command[4] = -head[1]
         command[5] = head[0]
         return np.concatenate(

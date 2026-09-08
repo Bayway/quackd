@@ -302,6 +302,15 @@ GAIT_THRESHOLD = UpstreamRef(
     "deploys with the BAM actuator model, so the real robot may track commands directly. "
     "quackd scales a non-zero twist up so the gait starts, and says so in the state",
 )
+HEAD_PITCH_SIGN = UpstreamRef(
+    "a positive head_pitch in the command vector tilts the camera down",
+    "UNVERIFIED",
+    src(_INFER),
+    "measured 2026-09-07 by driving the command and watching the rendered head camera, not "
+    "read anywhere: quackd negates its own pitch so that looking up is a positive number. "
+    "neck_pitch (command[3]) and head_roll (command[6]) are left at zero, because quackd's "
+    "gaze has one pitch and no roll, so nothing here has ever exercised them",
+)
 KICK_STANDIN = UpstreamRef(
     "ball_kick_left.onnx, ball_kick_right.onnx, alpha_ground_pick.onnx, alpha_sitstand.onnx",
     "UNVERIFIED",

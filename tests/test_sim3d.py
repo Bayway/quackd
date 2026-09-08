@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -501,6 +502,37 @@ def test_a_world_that_mujoco_has_reset_under_us_refuses_to_carry_on() -> None:
     with pytest.raises(TransportError, match="diverged"):
         for _ in range(5):
             w.step()
+
+
+# ── what a wrong policy file does ───────────────────────────────────────────────────────
+
+
+def test_a_policy_of_the_wrong_shape_is_refused_by_name() -> None:
+    """`OBS_LEN` was a number in a comment: nothing compared it to the model, and the input
+    name and output index were written in by hand. A re-export with one more observation
+    would have failed inside onnxruntime on the first tick, with nothing naming the file."""
+    from types import SimpleNamespace
+
+    from quackd.sim3d.microduck import ACTION_LEN, OBS_LEN, PolicyError, _check_io
+
+    def session(inputs: list[Any], outputs: list[Any]) -> Any:
+        return SimpleNamespace(get_inputs=lambda: inputs, get_outputs=lambda: outputs)
+
+    good_in = SimpleNamespace(name="obs", shape=[1, OBS_LEN])
+    good_out = SimpleNamespace(name="actions", shape=[1, ACTION_LEN])
+    assert _check_io(session([good_in], [good_out]), "walk.onnx") == "obs"
+    # whatever upstream calls it, quackd asks by the name the file declares
+    renamed = SimpleNamespace(name="observation", shape=[1, OBS_LEN])
+    assert _check_io(session([renamed], [good_out]), "walk.onnx") == "observation"
+
+    short = SimpleNamespace(name="obs", shape=[1, OBS_LEN - 1])
+    with pytest.raises(PolicyError, match=re.escape("walk.onnx")):
+        _check_io(session([short], [good_out]), "walk.onnx")
+    wide = SimpleNamespace(name="actions", shape=[1, ACTION_LEN + 2])
+    with pytest.raises(PolicyError, match="actuators"):
+        _check_io(session([good_in], [wide]), "walk.onnx")
+    with pytest.raises(PolicyError, match="one of each"):
+        _check_io(session([good_in, good_in], [good_out]), "walk.onnx")
 
 
 # ── the real duck ───────────────────────────────────────────────────────────────────────
