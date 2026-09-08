@@ -118,9 +118,10 @@ is refused at runtime and the LLM is told so.
 
 ## Runtime semantics
 
-- The loop ends with one of `success`, `failure` (the LLM's declaration), `budget`, or
-  `aborted` (heartbeat, kill switch, enforced `abort_when`). The robot is stopped in every
-  case and its adapter closed.
+- The loop ends with one of `success`, `failure` (the LLM's declaration), `budget`,
+  `aborted` (heartbeat, kill switch, enforced `abort_when`), or `error` (a provider or
+  transport that failed, or a bug). The robot is stopped in every case and its adapter
+  closed.
 - `--max-steps` on the CLI overrides `budgets.max_steps` for one run.
 - `--dry-run` executes read-only verbs (`observe`, alias `get_frame`, and `report_state`) and logs everything else without
   sending an intent.

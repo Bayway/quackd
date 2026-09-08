@@ -67,9 +67,10 @@ local models sometimes answer with JSON in plain text instead of a native tool c
 call a verb that is not allowed, or add chatter. Three things make that workable:
 
 1. **Text fallback.** If a reply has no native tool call, quackd looks for a JSON object
-   like `{"name": "walk_to", "arguments": {"target": "ball"}}` in the text and uses it. The
-   transcript marks those turns with `stop_reason: "text_fallback"` so you can see how often
-   it happened. The system prompt tells local models this shape exists.
+   like `{"name": "walk_to", "arguments": {"target": "ball"}}` in the text and uses it. Only
+   the answer is read: an inline `<think>...</think>` block is split off first, so a verb the
+   model weighed inside its reasoning and dropped is never executed. The transcript marks a
+   rescued turn with `stop_reason: "text_fallback"` so you can see how often it happened. The system prompt tells local models this shape exists.
 2. **One retry.** A turn with no usable call is re-prompted once, then counts as a failure.
    Budgets still apply.
 3. **The executor never trusts the model.** A disallowed verb or bad parameters come back

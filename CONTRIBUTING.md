@@ -14,6 +14,11 @@ uv run pytest                  # the whole suite, a few minutes, no network, no 
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run quackd validate ducks/*.duck
 ```
 
+`uv run mypy` checks with whatever interpreter your venv has. CI runs it twice,
+under 3.11 and 3.12, and `[tool.mypy]` pins no `python_version` on purpose (pinning 3.11
+made mypy reject numpy's stubs under 3.12), so a clean local run is half of that gate.
+`uv sync --python 3.12 --extra dev` and run it again for the other half.
+
 Windows, macOS and Linux are all first-class. Tests must never touch the network. About a
 third of that is the seeded acceptance sweeps, which CI holds at 10 of 10 by setting
 `QUACKD_STRICT_SEEDS=1`; locally they pass at 8 of 10 so a slow machine does not block you.
@@ -104,7 +109,11 @@ Renaming a verb is not a rename: add the new name and keep the old one in
 
 ## Add a provider
 
-A provider is one file under `quackd/agent/providers/` and one line in `factory.py`. Four
+A provider is one file under `quackd/agent/providers/` and five entries that have to
+agree: the name in `CLOUD_NAMES` or `LOCAL_NAMES`, rows in `DEFAULT_MODELS` and
+`KEY_ENV`, a branch in `make_provider`, and a row in `EXTRAS` in `quackd/doctor.py`.
+Nothing counts them, and `quackd doctor` indexes `KEY_ENV` and `EXTRAS` by name, so a
+missing row is a `KeyError` in the command people run when something is already wrong. Four
 things the tracing depends on, none of them optional:
 
 1. Fill `ProviderTurn.thinking` with the model's own reasoning when the API returns it, and

@@ -92,8 +92,11 @@ Four things were missing rather than merely hidden:
   each proves the default is on and that both switches turn it off.
 - **Flock mode is unchanged.** It builds its own executors with no tracer, keeps its own
   `flock.jsonl` and its own `--verbose`. Tracing a many-robot run is future work.
-  *Superseded in part by the amendment above: each member now records into its own transcript
-  and every terminal line names its robot. `flock.jsonl` is unchanged, and so is `--verbose`.*
+  *Superseded in part by the amendment above: each member now records into its own
+  transcript, every terminal line names its robot, and `flock.jsonl` also carries the
+  planner's `llm_request` and `llm`, because that one model call belongs to no member.
+  `--verbose` stands down under the trace here exactly as it does in a solo run, and
+  `--no-trace` is what brings it back.*
 - **The trace shows quackd's layer, not the wire.** An adapter's keepalive, a deadman resend
   inside a daemon and an adapter's own stop-on-close are its business and appear only in its
   logs.

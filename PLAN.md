@@ -49,18 +49,16 @@ not before.
 - ⬜ **Enable GitHub Pages** (Settings → Pages → Source: GitHub Actions). The README and
   `web/README.md` both point at `rokbenko.github.io/quackd`, `.github/workflows/pages.yml` is
   in place, and until this is switched on the workflow fails and there is no live demo.
-- 🔨 **Somebody has to open `web/` in a browser.** `tests/test_web.py` now checks what can be
-  checked without one — the ids, the classes, the rule that was hiding nothing, static CDN
-  imports, key storage, the pins and gait numbers shared with Python, `node --check` on each
-  module, and the argument validator run under Node. The rendering, the DOM and the recording
-  still need a person with a browser, and the four measured claims in `web/README.md` still
-  come from a scratch harness that is not in the repository.
+- 🔨 **Somebody has to open `web/` in a browser.** `tests/test_web.py` checks what can be
+  checked without one, and that is not the same as opening the page. The rendering, the DOM
+  and the recording still need a person with a browser, and the four measured claims in
+  `web/README.md` still come from a scratch harness that is not in the repository.
 - ⬜ Flock mode does not know `open_duck` yet (`flock/runner.py` knows two adapters), and a
   hardware flock waits on Microducks shipping.
 - ⏸ **A real model recording**, in either simulator, to replace a scripted-pilot asset and drop
   the label (see [docs/assets](docs/assets/README.md)). Needs a key.
 - ⬜ **The browser demo is not at parity with the backend.** It has seven of the manifest's
-  fifteen verbs and none of the four composites, which is what Python's own prompt tells a
+  fifteen verbs and none of the three composites, which is what Python's own prompt tells a
   model to prefer; perception is geometric rather than the colour detector over a rendered
   frame; nothing it fetches is hash-checked, where Python checks all 41 files; and there is no
   scripted pilot, so the pre-filled goal still needs a key before anything happens. All four

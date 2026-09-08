@@ -194,9 +194,12 @@ screen and a frame in `run.gif` say the same thing about the same moment.
 Each robot's `ducks/<name>/transcript.jsonl` is its own record and gets every event whether
 or not anyone is watching, exactly as a solo run's transcript does. `flock.jsonl` keeps the
 coordinator's story as it always has, under its own names, so nothing is written twice.
+`quackd trace <run>` replays those records afterwards, one member's transcript in full
+after another rather than interleaved, and it does not read `flock.jsonl`, so no `flock`
+line appears in a replay.
 
-When the flock's task file has a planner, the model call that plans it is traced under
-`flock` and recorded in `flock.jsonl` as `llm_request` and `llm`. With `--provider fake`
+With a real provider the planner's one model call is traced under `flock` and recorded
+in `flock.jsonl` as `llm_request` and `llm`. With `--provider fake`
 there is no call to trace: the planner short circuits before it reaches a model.
 
 `--no-trace` or `QUACKD_TRACE=0` removes the views and leaves every record intact.

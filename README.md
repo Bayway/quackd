@@ -132,15 +132,9 @@ Low level skills and high level goals are different layers. The robot knows the 
 
 **The first robot.** The Microduck is a 25 cm, 800 g biped shaped like a duck: fifteen small servos, a camera in its head, a depth sensor, a speaker, an onboard computer, and a set of learned behaviours (walk, kick, sit and stand, ground pick, roll, roller skate with clip on wheels) that run at 50 Hz on the robot itself. It is open source, costs about $399, and is deliberately small and friendly, the opposite of an intimidating humanoid. The bet behind projects like this one is that *useful* robots at home or in an office will be small ones people actually enjoy having around.
 
-**This project.** quackd is an independent, unofficial brain for it, and for any small robot that has an adapter. It is a Python program that
+**This project.** quackd is an independent, unofficial brain for it, and for any small robot that has an adapter. It takes a goal in human language, from a chat, a command line or a `.duck` task file, and enforces a contract the model cannot talk its way out of: which skills are allowed, how many steps, when a human must say yes, when to abort.
 
-- takes a goal in human language, from a chat, a command line, or a `.duck` task file,
-- reads what a robot can do from its adapter's manifest, so the model only ever sees the verbs that manifest declares,
-- asks an LLM, cloud or local, one step at a time, which of the robot's skills to use next,
-- runs that skill on the robot (or the simulator), looks at the camera, and asks again,
-- enforces a contract the model cannot talk its way out of: which skills are allowed, how many steps, when a human must say yes, when to abort.
-
-It ships with two simulators, a cartoon that starts in a second and a MuJoCo one where the Microduck walks on the policy Pollen trained for it, so all of this can be developed and demoed before the hardware exists, and with an [MCP](https://modelcontextprotocol.io) server so Claude Code or Claude Desktop can drive one robot or a fleet interactively.
+It ships with two simulators, so all of this can be developed and demoed before the hardware exists, and with an [MCP](https://modelcontextprotocol.io) server so Claude Code or Claude Desktop can drive one robot or a fleet interactively.
 
 <br>
 

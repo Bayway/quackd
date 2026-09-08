@@ -101,10 +101,7 @@ sequenceDiagram
 4. **Act.** The verb runs; composites loop on the camera at 10 Hz; `move` re-sends its
    velocity every 100 ms to feed the robot's deadman.
 5. **Record.** Every step above is a `TraceEvent`, and `transcript.jsonl` is the sink that
-   never turns off: `observation`, `llm_request`, `llm` (usage, latency, what the model
-   thought), `verb_start`, a `gate` per rule that fired, an `intent` per command sent to the
-   robot, `verb_end`, `verb` (`name` as called plus `canonical`) and a `memory` event for
-   every `remember`; `summary.json` at the end; `run.gif` from the recorder in either simulator. With
+   never turns off (every kind it writes is in the table below); `summary.json` at the end; `run.gif` from the recorder in either simulator. With
    memory on, the run ends by appending one episode line to the robot's memory file
    ([memory.md](memory.md)). The terminal and the MCP tool results are views of the same
    stream (see [Trace](#trace)).
