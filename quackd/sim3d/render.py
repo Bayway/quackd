@@ -46,11 +46,23 @@ def _free_camera(
     return cam
 
 
-def _hide_robot() -> Any:
+def _head_camera_view() -> Any:
+    """What the robot's own camera is allowed to see.
+
+    The shell goes, because a camera bolted to the head does not see the head, and because it
+    is the difference between 3 ms and 400 ms a frame. The floor is swapped for the colourless
+    copy of itself: upstream's blue-grey checker is what every human view shows, and it is
+    also, to an HSV detector hunting a blue person marker, a person in every frame. See
+    `scene.FLOOR_GROUP`.
+    """
     import mujoco
+
+    from quackd.sim3d.scene import FLOOR_CAM_GROUP, FLOOR_GROUP
 
     option = mujoco.MjvOption()
     option.geomgroup[ROBOT_VISUAL_GROUP] = 0
+    option.geomgroup[FLOOR_GROUP] = 0
+    option.geomgroup[FLOOR_CAM_GROUP] = 1
     return option
 
 
@@ -70,7 +82,11 @@ def render_headcam(world: MujocoWorld, size: int = 256) -> Image.Image:
     )
     lookat = (x + ahead * forward[0], y + ahead * forward[1], z + ahead * forward[2])
     cam = _free_camera(lookat, ahead, math.degrees(yaw), math.degrees(pitch))
-    return _render(world, size, cam, _hide_robot())
+    # No skybox. Upstream's gradient is a saturated blue at the horizon, and above a 8 cm
+    # wall it fills the top half of this frame, where the detector reads it as a person for
+    # the same reason the floor was one. What is left is the model's flat background, which
+    # is what a camera in a 2 m arena has any business seeing.
+    return _render(world, size, cam, _head_camera_view(), skybox=False)
 
 
 def render_overview(world: MujocoWorld, size: int = 256) -> Image.Image:
@@ -94,11 +110,17 @@ def render_overview(world: MujocoWorld, size: int = 256) -> Image.Image:
         world.model.vis.global_.fovy = was
 
 
-def _render(world: MujocoWorld, size: int, cam: Any, option: Any) -> Image.Image:
+def _render(
+    world: MujocoWorld, size: int, cam: Any, option: Any, *, skybox: bool = True
+) -> Image.Image:
+    import mujoco
+
     renderer = world.renderer(size)
     if option is None:
         renderer.update_scene(world.data, camera=cam)
     else:
         renderer.update_scene(world.data, camera=cam, scene_option=option)
+    # After `update_scene`, which resets the scene's own flags from the model.
+    renderer.scene.flags[mujoco.mjtRndFlag.mjRND_SKYBOX] = 1 if skybox else 0
     pixels = np.asarray(renderer.render())
     return Image.fromarray(pixels, "RGB")

@@ -93,6 +93,18 @@ Apple Silicon, and no GPU. There is no Intel Mac wheel.
 - Rendering is the cost. On an Intel iGPU a head-camera frame is 4 ms with the shell hidden
   and the over-the-shoulder view about 110 ms with 431k triangles in it, so shadows are off,
   the recorder samples half as often as the cartoon's, and `--live` uses MuJoCo's own viewer.
+
+  *Since:* the arena is upstream's own scene, from the `scene*.xml` wrappers in `microduck_rl`
+  — the blue-grey checker with edge marks, the gradient skybox, the haze, the headlight, the
+  directional light and the viewer's azimuth and elevation. Shadows stay off by default and
+  `QUACKD_MUJOCO_SHADOWS=1` turns them on for a recording. What the scene cost is the head
+  camera: that floor and that sky are the same blue as quackd's person marker, at hue 105 and
+  114 with saturation and value overlapping too, so the detector read a person 0.12 m ahead in
+  every frame of every heading. The head camera therefore renders a colourless copy of the
+  same checker and no skybox, in a geom group MuJoCo hides everywhere else. It is a stand-in
+  and it is in `extras.assumptions` with the rest. The defence of it is that upstream's blue
+  tiles are a viewer texture and upstream's policies are blind: nothing in `microduck_rl` ever
+  looks at its own floor, and a real Microduck's camera sees a room rather than a scene file.
 - CI never fetches the model, so the `microduck:mujoco` row's ✅ rests on the puppet's sweep
   plus tests that skip where the cache is empty. The real duck's numbers in this ADR were
   measured on one machine, and `GAIT_THRESHOLD` is tagged UNVERIFIED for that reason.
