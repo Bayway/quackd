@@ -227,9 +227,11 @@ against a real duck: [adapters/open_duck.md](adapters/open_duck.md) and its
 
 ## Safety in an MCP session
 
-- One heartbeat per robot runs for the whole session; if a robot's transport fails, every
-  later call to that robot returns `ok: false` and that robot has already been stopped.
-  The other robots in the fleet carry on.
+- One heartbeat per robot runs for the whole session; if a robot's transport fails, that
+  robot has already been stopped and every later call to it is refused with a
+  `session_aborted` gate. `stop` is the exception and is never refused, because an aborted
+  session is exactly when a pilot reaches for the brake. The other robots in the fleet
+  carry on.
 - Every robot connects at startup, in the order given; if one cannot, the server stops
   and disconnects the ones that did, rather than fronting a fleet with a hole in it.
 - Confirm-gated verbs are **refused** unless the server was started with `--yes`, because

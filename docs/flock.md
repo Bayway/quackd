@@ -49,9 +49,9 @@ releases the claim and the failed duck sits out a cooldown, during which it may 
 searching but cannot bid. A lost heartbeat also releases the claim, but that duck is
 presumed dead and excluded for good. Either way everyone re-scans the full circle (the
 ball has moved) and the auction runs again. Ducks cannot fall in the 2D
-simulator, which is the only place a flock runs, so fall handling is untested. It no
-longer waits for hardware: a duck can fall in `microduck:mujoco`, so the first thing to
-exercise it need not be a robot.
+simulator, which is the only place a flock runs, so fall handling is untested. A duck can fall in
+`microduck:mujoco`, but every flock member has to be a `sim2d` robot, so nothing exercises
+that path yet.
 
 ## Roles
 
