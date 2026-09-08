@@ -12,9 +12,9 @@ do, and the verbs the model is offered are built from that and nothing else.
 trained policy in real MuJoCo physics, with a switch that turns quackd off and hands you the
 keyboard so you can see what the layer is worth.
 
-> **Blocked:** GitHub Pages is not enabled, so every link to the demo 404s. Settings → Pages →
-> Source: GitHub Actions, and `.github/workflows/pages.yml` does the rest. Nothing below ships
-> until that is on.
+> The demo is at <https://www.quackd.org>, deployed from `web/` by Vercel. Open it once
+> before any of this goes out: its rendering, DOM and recording have been read and never run
+> in a browser, and the first person to load the page is the test.
 
 ## Positioning per channel
 

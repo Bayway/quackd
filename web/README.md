@@ -6,8 +6,9 @@ it is allowed to do. It is the same idea as `quackd run --goal "..." --robot mic
 with the same physics and the same walking policy, in six modules of plain JavaScript with no
 build step instead of Python.
 
-Live at **https://rokbenko.github.io/quackd/** once Pages is enabled on the repository
-(Settings → Pages → Source: GitHub Actions; `.github/workflows/pages.yml` does the rest).
+Live at **<https://www.quackd.org>**, deployed from this directory by Vercel. There is no
+build step: `vercel.json` at the repository root serves `web/` as it stands, because every
+dependency here is a CDN URL the page fetches at run time.
 
 ## Running it locally
 

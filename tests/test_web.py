@@ -205,13 +205,15 @@ def test_the_page_loads_every_module_it_ships() -> None:
     assert not orphans, f"web/src holds modules the page never loads: {orphans}"
 
 
-def test_the_pages_workflow_publishes_the_directory_and_does_not_cancel_a_deploy() -> None:
-    workflow = (REPO / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
-    assert "path: web" in workflow
-    assert "cancel-in-progress: false" in workflow, (
-        "that concurrency group guards a deployment: cancelling one halfway leaves the site "
-        "on a half-uploaded version"
-    )
+def test_the_deploy_config_serves_this_directory_and_builds_nothing() -> None:
+    """`web/` has no build step on purpose: every dependency is a CDN URL fetched at run time,
+    so the deploy is a copy. A host that guessed a framework from the Python at the repo root
+    would try to build quackd instead."""
+    config = json.loads((REPO / "vercel.json").read_text(encoding="utf-8"))
+    assert config["outputDirectory"] == "web"
+    assert config["framework"] is None, "no framework: this is a folder, not an app to build"
+    for step in ("buildCommand", "installCommand"):
+        assert config.get(step), f"{step} must be stubbed out, or the host builds the repo root"
 
 
 def test_the_demo_says_what_it_stands_in_for() -> None:
