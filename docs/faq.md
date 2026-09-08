@@ -22,7 +22,7 @@ different file fails rather than continues, and the licence notice is written be
 because the model files are CC BY-NC-SA and quackd ships none of them ([licenses.md](licenses.md)).
 `QUACKD_MICRODUCK_ASSETS` points at a `microduck_rl` checkout of your own instead,
 `QUACKD_CACHE_DIR` moves the cache, and `QUACKD_MUJOCO_BODY=puppet` runs a kinematic stand-in
-that downloads nothing and is what the tests use.
+that downloads nothing and is the body the tests build directly.
 
 **Why does the duck in the physics simulator not go the speed I asked for?** Because the walking
 policy has a floor and quackd will not hide it. Under the model's own actuators the gait does

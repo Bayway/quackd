@@ -14,7 +14,7 @@
  * back at the speed it happened.
  */
 
-import { CONTROL_DT, GAIT_FLOOR, HEAD_YAW_LIMIT } from "./microduck.js";
+import { ACHIEVED_FRACTION, CONTROL_DT, GAIT_FLOOR, HEAD_YAW_LIMIT } from "./microduck.js";
 
 const MOVE_RESEND_S = 0.1; // the twist is re-sent at 10 Hz or the deadman zeroes it
 
@@ -77,7 +77,7 @@ export const VERBS = {
     description:
       "Walk with a velocity for a duration. Use small values; the robot is 25 cm tall. " +
       `This body does not step below ${GAIT_FLOOR.vx} m/s or ${GAIT_FLOOR.wz} rad/s, and ` +
-      "achieves roughly half of what it is asked, so read the pose afterwards.",
+      `achieves about ${ACHIEVED_FRACTION} of what it is asked, so read the pose afterwards.`,
     params: {
       type: "object",
       properties: {
@@ -229,7 +229,7 @@ that rolls when it is kicked, and a blue person marker. Distances are metres.
 
 ## This body
 It walks on a learned policy, not on arithmetic. It does not step at all below about
-${GAIT_FLOOR.vx} m/s or ${GAIT_FLOOR.wz} rad/s, and it achieves roughly half of what it is asked. Every
+${GAIT_FLOOR.vx} m/s or ${GAIT_FLOOR.wz} rad/s, and it achieves about ${ACHIEVED_FRACTION} of what it is asked. Every
 observation carries the pose it actually reached: steer from that, not from the numbers you
 sent. To walk a shape, walk a leg, read the pose, correct, and repeat.
 

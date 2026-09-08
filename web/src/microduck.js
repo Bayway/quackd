@@ -44,6 +44,9 @@ const STAND_SWITCH = 0.05;        // upstream's --switch-threshold
 
 // ── measured here, not read from upstream (quackd/sim3d/upstream_api.py GAIT_THRESHOLD) ──
 export const GAIT_FLOOR = { vx: 0.22, vy: 0.30, wz: 1.0 };
+// What fraction of a commanded twist the body actually delivers. Python holds the same
+// number in quackd/sim3d/gait.py; the prompt quotes it rather than rounding it to "half".
+export const ACHIEVED_FRACTION = 0.42;
 const CMD_MAX = { vx: 0.40, vy: 0.30, wz: 1.50 };
 const DEAD_FRACTION = 1 / 3;
 

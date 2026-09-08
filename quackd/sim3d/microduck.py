@@ -319,13 +319,17 @@ class MicroduckBody:
         return list(ASSUMPTIONS)
 
     def close(self) -> None:
-        """Drop the two inference sessions and the model handles.
+        """Drop the two inference sessions.
 
         `MujocoWorld.close()` used to close renderers only, so a process that built several
         worlds — `docs/assets/hero3d.py` builds two — kept every onnxruntime session alive
-        until the interpreter exited."""
+        until the interpreter exited.
+
+        The model and data handles deliberately stay. They are plain memory that goes when the
+        world does, and reading the final pose after a run is ordinary: the loop closes the
+        transport before its caller looks at where the duck ended up.
+        """
         self.walk = self.stand = None
-        self._model = self._data = None
 
     def extras(self) -> dict[str, Any]:
         return {

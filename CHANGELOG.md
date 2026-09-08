@@ -17,16 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Hugging Face Hub at a pinned revision, and upstream's own 50 Hz loop around them. quackd
   supplies a twist and a head pose, which is what a gamepad supplies on the real robot, and
   writes no gait at all. `find-and-kick` succeeds on 10 of 10 seeds with the scripted pilot
-  while the duck walks on its trained policy, ground truth checked, measured here on one machine
-  because the sweep CI runs uses the stand-in body. Design:
+  while the duck walks on its trained policy, ground truth checked, and on the same ten seeds
+  with the kinematic stand-in. Both are named tests; the trained-gait one needs the model in
+  the cache, and CI installs no physics extra, so it runs neither. Design:
   `docs/adr/0030-mujoco-physics-backend.md`.
 - **Nothing of upstream's is shipped.** The 3D model files are CC BY-NC-SA, so the first run
   downloads them into `~/.quackd/cache`, checks every file against the sha256 it was read at,
   and writes the licence notice beside them. `QUACKD_MICRODUCK_ASSETS` points at your own
   checkout instead, and `QUACKD_MUJOCO_BODY=puppet` runs a kinematic stand-in that needs no
-  download and is what CI uses.
+  download and is the body the tests build. CI installs no physics extra, so it runs
+  neither body; a new `physics` job is what changes that.
 - **The gait floor is in the open.** Under the model's own actuators the walking policy does
-  not step below about 0.22 m/s or 1.0 rad/s and achieves roughly half of what it is asked,
+  not step below about 0.22 m/s or 1.0 rad/s and achieves about 0.42 of what it is asked,
   while `move` defaults to 0.15 m/s. A twist that would produce nothing is scaled up bodily,
   keeping the ratio between its axes so an arc stays an arc; one below a third of the floor is
   dropped rather than amplified into a lurch; and the floor, what was asked and what was sent

@@ -19,7 +19,7 @@ and step 8 is where you find out what happens when that socket is not there.
 the two tasks you will run on the robot run against it unchanged:
 
 ```bash
-uv pip install 'quackd[mujoco]'
+uv pip install 'quackd[mujoco,anthropic]'
 quackd run microduck-lookout --robot microduck:mujoco --provider anthropic
 quackd run find-and-kick --robot microduck:mujoco --provider anthropic
 ```
