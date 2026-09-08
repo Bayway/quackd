@@ -37,12 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused, and a fall is recovered by standing the model up, because upstream's episodic
   policies did nothing from a standing pose and it ships no get-up policy.
 - **A browser demo, so trying quackd costs nobody an install** (`web/`, a static page with no
-  build step, deployed from that directory by Vercel; www.quackd.org is where it is headed and
-  today serves the separate landing page). The same physics and the same policy through
-  MuJoCo's official WebAssembly build and onnxruntime-web, with the verbs, the contract and the
-  one-tool-per-turn loop in six modules of plain JavaScript. Bring your own key for Anthropic,
-  OpenAI or Gemini, or point it at Ollama and keep everything on your machine. Both ways of
-  driving a robot are live at once, and neither takes turns with the other: the keyboard writes
+  build step, served by Vercel under the `/simulator` mount that `vercel.json` rewrites;
+  `www.quackd.org/simulator` is where it is headed, and it is not there until quackd-web, the
+  separate project that owns that domain, fetches this directory into its build). Locally it is
+  `python web/serve.py`, then <http://localhost:8000/simulator/> — a stdlib server that mounts
+  the directory the way the deploy does. `python -m http.server --directory web` no longer
+  serves it: every local reference in `index.html` is absolute under the mount, so a root server
+  hands over the HTML and 404s the stylesheet and the script. The same physics and the same two
+  policies through MuJoCo's official WebAssembly build and onnxruntime-web, with seven of the
+  verbs, a contract of its own and the one-tool-per-turn loop in six modules of plain JavaScript.
+  Bring your own key for Anthropic, OpenAI or Gemini, or point it at Ollama and keep everything
+  on your machine. Both ways of driving a robot are live at once, and neither takes turns with
+  the other: the keyboard writes
   the twist the hardware actually takes — `W`/`S` walk, `A`/`D` turn, `Shift` strafes, `Q`/`E`
   look, `Space` stops, `K` kicks, `R` stands it up — while the box above it hands the same
   robot to a model. A drive key pressed during a run takes the duck back at once, aborts the

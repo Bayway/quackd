@@ -103,20 +103,30 @@ The duck then walks on upstream's own trained policy instead of sliding around a
 also undershoots what it is asked for, which is a harder task for a small model and which the
 run states in `report_state` ([ADR-0030](adr/0030-mujoco-physics-backend.md)).
 
-## The same duck in a browser, no Python
+## The same duck in a browser, with no quackd installed
 
 [`web/`](../web/README.md) is a static page that runs the physics simulator through MuJoCo's
 WebAssembly build and drives it from any OpenAI compatible server, so a local model can pilot
-the duck with no key and nothing installed:
+the duck with no key and no `pip install`. It still wants a server in front of it, for two
+reasons: browsers refuse ES modules over `file://`, and the page expects to be mounted at
+`/simulator`, so every local reference in it is absolute. `web/serve.py` is that server —
+stdlib only, so it is Python but not quackd:
 
 ```bash
-python -m http.server 8000 --directory web    # browsers refuse ES modules over file://
+python web/serve.py            # then open http://localhost:8000/simulator/
 ```
+
+`python -m http.server --directory web` will not do: it serves the HTML and then 404s
+`/simulator/style.css` and `/simulator/src/app.js`, because nothing answers on the mount at
+the root. If port 8000 is already a vLLM, which the table above assumes it is, then
+`python web/serve.py 8001` moves the page rather than the model server.
 
 Pick Local in the page and give it your base URL. Ollama has to be told to accept the page
 (`OLLAMA_ORIGINS=* ollama serve`), and llama.cpp, vLLM and LM Studio need the same CORS
 permission. Browsers treat `http://localhost` as trustworthy, so an https page may still call
-it. What the page has and has not been run against is in [web/README.md](../web/README.md).
+it. The keyboard beside the sentence box is live at the same time as the model, so you can take
+the duck off a stalled local model mid-run with `W` and the transcript records the handover.
+What the page has and has not been run against is in [web/README.md](../web/README.md).
 
 ## Honest notes
 

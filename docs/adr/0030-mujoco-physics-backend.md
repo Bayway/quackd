@@ -79,6 +79,25 @@ Apple Silicon, and no GPU. There is no Intel Mac wheel.
   six modules of plain JavaScript with no build step, and the model and the policy fetched from
   the same pinned upstreams. It exists so that trying quackd costs nobody an install, and it carries a
   switch that removes the quackd layer and hands the visitor the keyboard instead.
+
+  *Since 0.8:* the last clause is not how it works any more. The switch still removes the quackd
+  layer, and only that layer — with it off, a typed sentence gets the honest answer the page
+  prints, that this robot understands a twist, three numbers, and a walking policy that turns
+  them into steps, and has never seen the words. What the switch
+  never removed, and does not gate now, is the keyboard: the cockpit is permanent, and
+  `tests/test_web.py` fails if the keydown handler reads the toggle at all. `runtime.manual`
+  is a lease on the twist rather than a mode, re-asserted by `Runtime.start` every 50 Hz
+  control tick immediately before the physics reads it, which is what lets a key take the
+  robot mid-run without cancelling anything first. A key that would *move* the robot aborts
+  the run and the model request in flight — the signal reaches `fetch`, so no answer arrives
+  after the duck was taken back; what the abort cannot promise is the bill, because these are
+  plain non-streaming POSTs and a vendor may already have generated the turn — and
+  the transcript records the handover naming the key; a key that only reads, `O` and the two
+  camera keys, does not interrupt. There is deliberately no key for `say`, which is the
+  argument: a key carries a command, and a sentence needs something to read it. The claim to
+  read into the bullet above is therefore both hands on the same duck rather than either/or.
+  Underneath, either way, are two learned policies — `alpha_walking` and `alpha_stand` — with
+  the kick a scripted impulse of quackd's own, and none of the three reads English.
 - **`sim2d` stays the default.** It starts in a second, needs no network, and is what eight
   adapters share. The physics backend is an extra, `quackd[mujoco]`, imported only inside
   `connect()`.
@@ -132,5 +151,27 @@ Apple Silicon, and no GPU. There is no Intel Mac wheel.
   Node. The page is deployed from `web/` by Vercel at www.quackd.org rather than by Pages, and
   `vercel.json` serves the directory with no build step. The sentence that still stands is the
   last one: nobody has opened it.
+
+  *Since 0.8 — this supersedes the note above on all three counts, the address, the test list
+  and the last sentence:* that address and that list have both moved on. The page is mounted at `/simulator`
+  rather than at a domain root — `vercel.json` rewrites `/simulator/*` into `web/`, still with
+  no build step, and quackd-web *would* serve the mount from its own build, which fetches this
+  directory at a pinned commit, once the pull request that adds that step lands — so every
+  local reference in `index.html` is absolute, because a relative one resolves off the mount
+  and 404s. It is headed for www.quackd.org/simulator and it is not there: that pull request
+  against quackd-web is what would make it so. Locally it runs under `python web/serve.py`,
+  which serves `web/` under the same prefix the deploy uses; `python -m http.server --directory
+  web` no longer works, because nothing answers on the mount. `tests/test_web.py` has grown
+  with the page and now also holds the mount and the deploy that answers on it, that every
+  asset the page asks for is a file in this repository, that the header wears the vendored mark
+  rather than an emoji, that the keydown handler reads nothing about the switch, that a motor
+  key barges in while a read-only key does not, that a focused control keeps its own keys, that
+  the abort reaches the request in flight, that the person marker is neither the old blue nor
+  renamed, and that the page claims no more policies than it downloads. The last sentence no
+  longer stands as written: the page was opened in a real browser while this work was done, and
+  it boots clean, wears its fonts and its mark, and walks the duck under a held `W`. What has
+  still never been watched is a model driving a whole run, a key barging in out of one, and the
+  recording — so the bullet's claim survives for everything downstream of a model answering,
+  and not for the page itself.
 - None of this makes a hardware claim. It is a better simulator, not a robot: the Microduck
   rows in `docs/adapter-status.md` that say "never run on a duck" still say it.

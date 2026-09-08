@@ -39,6 +39,29 @@ hardware through its `--fake` mode and a pure core the tests drive directly. The
 ToddlerBot daemon is the largest of the three, because it owns that robot's control
 loop rather than feeding one, so it carries the most of its own safety machinery.
 
+Touching `web/`? That is the browser demo, and the only quackd code that is not Python: six
+modules of plain JavaScript, no build step, nothing to install. Run it with the server in the
+directory itself, not with `http.server`:
+
+```bash
+python web/serve.py            # then open http://localhost:8000/simulator/
+```
+
+The page is mounted at `/simulator` in production — www.quackd.org belongs to quackd-web, a
+separate project whose build fetches this directory into its own `/simulator` — so every local
+reference in `index.html` is absolute under that prefix, and a plain `python -m http.server --directory web`
+serves the HTML and then 404s the stylesheet and the script. `web/serve.py` is stdlib only and
+mounts the directory the way the deploy does, so what you test is what ships.
+
+`tests/test_web.py` gates the directory from the ordinary suite with no browser: the ids the
+script looks up, the mount, the assets, the key that is stored nowhere, the rule that a key
+barges into a run if and only if it would move the robot, `node --check` on each module and the
+argument validator executed under Node (those last two need node on your machine and skip
+without it; CI's runners all have it — everything else is Python and always runs). It is the
+floor, not the test: the page has been booted in a browser twice and a held `W` walks the duck,
+but no model-driven run, no barge-in out of one and no recording has ever been watched. If you
+open it, say what you saw in the PR. See [web/README.md](web/README.md).
+
 Touching `quackd/lan/` or `quackd/flock/mqtt_bus.py`? Neither imports its library at module
 level and neither is in the default install, so the tests run them on fakes: a fake zeroconf
 registrar and a synchronous fake MQTT broker, no sockets. Keep it that way, and see

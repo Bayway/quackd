@@ -78,6 +78,7 @@ The first of those also passes 10 of 10 on the physics simulator, with the duck 
   * [What it remembers](#what-it-remembers)
 - [Any small robot](#any-small-robot)
 - [Flock mode (simulator)](#flock-mode-simulator)
+- [The browser demo](#the-browser-demo)
 - [Configuration](#configuration)
 - [Performance](#performance)
 - [Limitations](#limitations)
@@ -103,11 +104,13 @@ uvx --from "quackd[openai]" quackd run find-and-kick --provider ollama --model q
 open runs/*/run.gif                                                                 # a GIF in either simulator, a transcript every time
 ```
 
-**Or run the browser demo and install nothing but a static server** ([`web/`](web/), then
-`python -m http.server 8000 --directory web`). Same physics, same walking policy, same
-contract, in a page. Type a sentence, paste your own API key or point it at Ollama, and watch
-what the model chose. There is a switch that turns quackd off, which leaves you the robot, its
-policy and a keyboard. It is live at <https://www.quackd.org>.
+**Or run the browser demo and install no quackd at all** ([`web/`](web/): clone this repository,
+run `python web/serve.py` and open <http://localhost:8000/simulator/>. That server is one stdlib
+file, Python but not quackd). Same physics, the same two upstream policies, seven of the same
+verbs and a contract of its own, in a page. Type a sentence, paste your own API key or point it
+at Ollama, and watch what the model chose. The keyboard beside the box is live at the same time,
+so a key can take the duck off the model mid-run. It is headed for `www.quackd.org/simulator` and
+is not there yet: [The browser demo](#the-browser-demo).
 
 Put keys in the environment or in a `.env` file (copy [`.env.example`](.env.example)). `quackd doctor` tells you what is missing. Needs Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/), nothing else.
 
@@ -199,7 +202,7 @@ Version 0.7, simulator and mocks. What has been built, and how far each piece ha
 |---|---|
 | `sim2d` bundled simulator (default) | ✅ 10 of 10 seeds on `find-and-kick`, GIF and transcript per run |
 | `mujoco` physics simulator (`quackd[mujoco]`) | ✅ 10 of 10 seeds on `find-and-kick` twice over: once on the kinematic stand-in and once with the duck walking on **upstream's own trained policy**, both ground truth checked, and both named tests rather than remembered numbers. The trained-gait sweep needs upstream's model in the cache, so a nightly job runs it and the gating job on every push runs the stand-in. The model and the policy are fetched from upstream at a pinned commit and hash checked, never shipped |
-| Browser demo ([`web/`](web/)) | 🧪 the same physics, policy, verbs and contract in a static page. Bring your own key, or point it at Ollama. CI checks what it can without a browser (the ids the script looks up, the pins and gait numbers it shares with Python, each module's syntax, and the argument validator run under Node), but the rendering, the DOM and the recording have still never run in one. Live at [www.quackd.org](https://www.quackd.org) |
+| Browser demo ([`web/`](web/)) | 🧪 the same physics, the same two upstream policies, seven of the same verbs and the same allowlist-and-budget machinery in a static page, with the sentence box and the keyboard live on one duck at the same time. Bring your own key, or point it at Ollama. CI checks what it can without a browser (the ids the script looks up, the pins and gait numbers it shares with Python, each module's syntax, the argument validator run under Node, the `/simulator` mount and the assets the page asks for, the vendored mark in the header, the rule that a key barges in only if it would move the robot, and that the abort reaches the request in flight). The page has been booted in a browser twice and a held `W` walks the duck, but a full model-driven run, a barge-in out of one and the recording have never been watched. Headed for `www.quackd.org/simulator`, and not there yet |
 | Manifests and core verbs (`quackd list-adapters`, `quackd list-verbs --robot`) | ✅ eight adapters, eight core verbs that appear only where the manifest meets their requirements, speed limits from the manifest, `manifest.schema.json` generated and drift tested |
 | MCP server (`quackd serve-mcp`) | ✅ Claude Code and Claude Desktop, fleets with `--robots` (eight `robot_*` tools, tested in process against the simulator and the mocks), no Claude Desktop session on record |
 | Memory between runs (`quackd memory`, `remember`) | ✅ one JSONL file per `adapter:backend`, notes and run outcomes into the next prompt, tested end to end offline, 🧪 the `remember` tool itself exercised by one local model on one machine and by no cloud model ([docs/memory.md](docs/memory.md)) |
@@ -472,6 +475,76 @@ uvx quackd run reachy-spots-duck-kicks --provider fake --seed 3
 
 <br>
 
+## The browser demo
+
+[`web/`](web/) is the same duck with no quackd to install: a static page that loads MuJoCo compiled
+to WebAssembly, the Microduck's own model and two of the policies Pollen trained, and re-implements
+this repository's loop, verbs and executor in six modules of plain JavaScript with no build step.
+You bring the key, or point it at Ollama and bring none. About 45 MB arrives the first time, the
+libraries from jsDelivr and the model and the policies from upstream's own repositories at the same
+pins Python uses, and the browser caches it afterwards. Nothing upstream is vendored here.
+
+```bash
+python web/serve.py                 # stdlib only, no dependencies, no build step
+# then open http://localhost:8000/simulator/
+```
+
+The page is mounted at `/simulator` rather than at a root, so every local reference in
+`index.html` is absolute and `python -m http.server --directory web` no longer works: it serves
+the HTML and then 404s the stylesheet and the script. `web/serve.py` is that missing mount, and
+[`web/README.md`](web/README.md) explains why the mount is not a style choice. The address this
+is headed for is `www.quackd.org/simulator`, which a separate repository serves and a pull
+request there has still to land. It is written as text and not as a link, because nothing
+answers there.
+
+**Both ways of driving are live at once.** The sentence box and the keyboard hold the same duck at
+the same time, and neither takes turns with the other: there is no mode to flip before you can
+drive. A key that would move the robot takes it mid-run, at once. The run aborts and the request
+in flight to the model aborts with it, so nothing keeps running against your key and no answer
+arrives after you took the duck back, and the transcript records the handover and names the key
+that did it. A key that only reads never barges in, so you can print the state or change camera
+without stopping a run. That is the whole rule: a key takes control if and only if it would move
+the robot.
+
+| Keys | What they do |
+|---|---|
+| `W` `S` | walk forward and back |
+| `A` `D` | turn, or strafe with `Shift` held |
+| `Q` `E` | look left and right, `G` centres the head |
+| `Space` | stop. A latch, not a term in the twist: a key you are holding is dropped and has to be pressed again |
+| `K` `R` | kick, and stand the duck up after a fall |
+| `O` | print the raw state the observation is built from, as JSON, without interrupting a run |
+| `1` `2` | over the shoulder camera or duck cam, also without interrupting |
+| `Esc` | hand the keyboard back to the arena from wherever focus is |
+
+There is deliberately **no key for `say`**. A key carries a command, a sentence needs something to
+read it, and that absence is the argument the page is making. The switch marked *quackd is on*
+removes that reading layer and only that layer: the physics, the robot and its policies are
+identical either way, and a sentence typed with the switch off gets the honest answer that this
+robot takes a twist, three numbers, and has never seen your words. What the switch does not decide
+is whether you may drive.
+
+The transcript is the demo's output surface: the goal and the contract, each verb the model chose
+with its arguments, each result with the honest outcome, every refusal, the handover line, and how
+the run ended.
+
+Underneath there are exactly two learned policies, `alpha_walking` and `alpha_stand`. The kick is
+quackd's own scripted impulse rather than a policy, as it is in `sim3d`, because upstream's
+episodic one did nothing from a standing pose. Seven verbs are implemented and none of the
+composites, so the model steers with `move` and reads the pose it actually reached. Where else
+this differs from the Python backend (the arena, perception, the person marker, the missing hash
+check, what a seed means, the absent scripted pilot) is one list in
+[`web/README.md`](web/README.md), with the API key handling. That list is the canonical one, and
+this section deliberately does not keep a second copy of it.
+
+**It has been booted, and that is all.** The page opened clean in a browser twice while it was
+being built, and a held `W` walked the duck. Nobody has yet watched a full model-driven run, a
+barge-in out of one, or the recording, on that machine or any other. `tests/test_web.py` holds
+what can be checked without a browser and runs in the ordinary suite, which is a floor and not a
+browser test.
+
+<br>
+
 ## Configuration
 
 | What | How |
@@ -543,7 +616,7 @@ Why a task can refuse a body, whether two robots can share a task, and more: [do
 - **v1:** a starter task on a real duck, on video. An Open Duck Mini can get there first, and a Microduck once it ships.
 - **v2, learned verbs.** LLM written rewards ([Eureka](https://eureka-research.github.io/) and [DrEureka](https://eureka-research.github.io/dr-eureka/) style) train new policies in `microduck_rl` that register as one more verb. The registry hook exists today. The training loop does not.
 
-**Help wanted:** a browser session with [`web/`](web/), because its rendering, DOM and recording have only been read and the first person to open the page is the test, a real model recording in either simulator (see [docs/assets](docs/assets/README.md)), a transcript from a local model run on any server, a run against any real hardware (an Open Duck Mini is the most reachable, see its [checklist](docs/open-duck-hardware-checklist.md)), verified default model IDs, and new `.duck` files.
+**Help wanted:** a recorded browser session with [`web/`](web/), because the page boots and a held `W` walks the duck but nobody has watched a model drive a whole run, a key barge in out of one, or the Record button work, on any machine but the one that wrote it, a real model recording in either simulator (see [docs/assets](docs/assets/README.md)), a transcript from a local model run on any server, a run against any real hardware (an Open Duck Mini is the most reachable, see its [checklist](docs/open-duck-hardware-checklist.md)), verified default model IDs, and new `.duck` files.
 
 <br>
 

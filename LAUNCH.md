@@ -9,12 +9,24 @@ walking.**
 do, and the verbs the model is offered are built from that and nothing else.
 
 **The 0.8 sentence:** open a link, type a sentence, and a Microduck walks on Pollen's own
-trained policy in real MuJoCo physics, with a switch that turns quackd off and hands you the
-keyboard so you can see what the layer is worth.
+trained policy in real MuJoCo physics — with the keyboard live the whole time, a centimetre
+from the box you type in, so you can take the duck back mid-sentence and see for yourself
+what the layer is worth.
 
-> The demo is at <https://www.quackd.org>, deployed from `web/` by Vercel. Open it once
-> before any of this goes out: its rendering, DOM and recording have been read and never run
-> in a browser, and the first person to load the page is the test.
+The keyboard is not something the switch hands over, because it was never taken away. Both
+ways of driving are live at once and neither takes turns with the other; a drive key pressed
+during a run takes the duck at once and aborts the run and the request to the model with it.
+The switch decides one thing only: whether anything on the page reads English. The sharpest
+version of that argument is an absence — **there is no key for `say`**. A key carries a
+command; a sentence needs something to read it.
+
+> The demo is headed for `www.quackd.org/simulator`, served from `web/` with no build step and
+> fetched onto that path at build time by quackd-web, a separate Vercel project. The pull request
+> that would make it so has not landed, so there is no link to give out yet. Sit with it locally before any
+> of this goes out — `python web/serve.py`, then <http://localhost:8000/simulator/>. The page has
+> been opened in a browser twice while it was built: it boots clean and a held `W` walks the
+> duck. Nobody has yet watched a model drive a whole run, a key barge in out of one, or the
+> Record button work, which is exactly the material every asset below needs.
 
 ## Positioning per channel
 
@@ -22,7 +34,7 @@ keyboard so you can see what the layer is worth.
 |---|---|
 | GitHub | Pilot a small robot with any LLM through `.duck` skill files and MCP. Eight robots supported, three of them open hardware you can build, a physics simulator, a browser demo and no hardware needed. |
 | Hacker News | A `.duck` file is a SKILL.md for a robot: the frontmatter is enforced, the body is the prompt, the executor never trusts the model. Point it at the wrong robot and it refuses before anything moves. |
-| X / Twitter | Give your Microduck a brain. Type *walk in a square* and watch it happen in your browser, on the robot's own trained gait. Or one of seven other small robots, from a Reachy Mini head to a ToddlerBot humanoid. Any LLM, one `.duck` file. 🦆🧠 |
+| X / Twitter | Give your Microduck a brain. Type *walk in a square* and watch it happen in your browser, on the robot's own trained gait — then hit `W` mid-run and take the duck off the model, no mode to flip first. Or one of seven other small robots, from a Reachy Mini head to a ToddlerBot humanoid. Any LLM, one `.duck` file. 🦆🧠 |
 | Pollen Discord | We built the brain daemon that was missing from `robotd / mediad / padd / tofd`, and it now drives the Reachy Mini too. We'd like you to tell us what we got wrong about both SDKs. |
 | Open Duck Mini builders (the apirrone Discord, the BDX droid crowd) | You printed a duck that walks. quackd is the layer that decides where it walks, from a plain-language goal. It ships the daemon for your Pi, it knows your duck cannot kick and cannot get up, and nobody has run it on real hardware yet, so the first person who does gets a row in the table. |
 | Reachy Mini owners (Pollen + HF communities) | Your head already knows how to look and emote. quackd is the layer that decides *when*, from a plain-language goal, and it will never offer it `kick` because its manifest does not have one. |
@@ -42,15 +54,16 @@ in the manifest does not exist), the three-loop table, the honesty paragraph (si
 mocks now, every hardware backend experimental and never run), and the ask ("add a `.duck` to
 `ducks/`, or an adapter for the robot on your desk").
 
-## X thread (7 posts)
+## X thread (8 posts)
 
 1. **Hook + GIF.** "A robot head spots a ball. A robot duck kicks it. Neither could do the other's half, and they're both following the same contract. Simulator, runs in 60 seconds. 🧵" *(hetero.gif)*
 2. **What.** quackd: pilot a small robot with any LLM. One `.duck` file per task, any provider, MCP so Claude Code/Desktop can drive it. Eight robots today: Microduck, an Open Duck Mini v2 you can print and build, Reachy Mini, an SO-101 class arm via LeRobot, any base over rosbridge, an XLeRobot dual-arm cart, an AlohaMini with two arms on a lift and a ToddlerBot humanoid. Apache-2.0.
-3. **The manifest.** "Every robot hands over a manifest: this is my body, these are my intents, these are my verbs. The model is only ever offered what's in it. A head is never offered `kick`. An arm is never offered `move`." *(the eight-body table from the README's Which robots work)*
-4. **The `.duck` file.** Screenshot of `find-and-kick.duck` plus the refusal: `quackd validate find-and-kick --robot reachy_mini:sim2d` → `requires kick, but reachy-01 (reachy-mini) does not provide it`, exit 1, before anything connects.
-5. **MCP demo.** Short screen capture: `claude mcp add quackd -- uvx quackd serve-mcp --robots duck=microduck:sim2d,reachy=reachy_mini:mock`, then "list my robots and make the duck find the ball". One executor, budget and heartbeat per robot.
-6. **Roadmap tease.** "v2: learned verbs. An LLM writes a reward (DrEureka-style), the training stack produces a policy, and it registers as one more verb. The hook exists today; the loop doesn't. Yet." Plus: an HTTP transport so the MCP server is a remote connector and you can poke the robot from your phone.
-7. **CTA.** "Simulator-first and honest about it: nothing here has run on hardware, on any of the eight bodies, and the README says so in a table. The Open Duck Mini is the one you can build, so it is the one most likely to change that. If you write a `.duck`, PR it to `ducks/`. If you own a robot we don't support, an adapter is a manifest and a mock. Repo: github.com/rokbenko/quackd"
+3. **Both hands on the same duck.** "The demo puts a sentence box and a live keyboard on one robot, a centimetre apart, and neither takes turns with the other. Press `W` mid-run and you have the duck: the run aborts, the request to the model aborts with it so no answer arrives after you took it back, and the transcript names the key that did it. `O` and the camera keys read without interrupting anything. There is no key for `say` — a key carries a command, a sentence needs something to read it." *(browser session, shot 2)*
+4. **The manifest.** "Every robot hands over a manifest: this is my body, these are my intents, these are my verbs. The model is only ever offered what's in it. A head is never offered `kick`. An arm is never offered `move`." *(the eight-body table from the README's Which robots work)*
+5. **The `.duck` file.** Screenshot of `find-and-kick.duck` plus the refusal: `quackd validate find-and-kick --robot reachy_mini:sim2d` → `requires kick, but reachy-01 (reachy-mini) does not provide it`, exit 1, before anything connects.
+6. **MCP demo.** Short screen capture: `claude mcp add quackd -- uvx quackd serve-mcp --robots duck=microduck:sim2d,reachy=reachy_mini:mock`, then "list my robots and make the duck find the ball". One executor, budget and heartbeat per robot.
+7. **Roadmap tease.** "v2: learned verbs. An LLM writes a reward (DrEureka-style), the training stack produces a policy, and it registers as one more verb. The hook exists today; the loop doesn't. Yet." Plus: an HTTP transport so the MCP server is a remote connector and you can poke the robot from your phone.
+8. **CTA.** "Simulator-first and honest about it: nothing here has run on hardware, on any of the eight bodies, and the README says so in a table. The Open Duck Mini is the one you can build, so it is the one most likely to change that. If you write a `.duck`, PR it to `ducks/`. If you own a robot we don't support, an adapter is a manifest and a mock. Repo: github.com/rokbenko/quackd"
 
 ## Pollen Discord post (draft)
 
@@ -89,8 +102,13 @@ please correct it" framing.
    right standing still because nothing in it reads English. This is the whole pitch in one
    loop, and it is the README hero.
 2. **A browser session**, which the demo's own Record button produces. Type the goal, let it
-   walk, flip the quackd switch mid-clip as the second beat, then Share on X, which the page
-   writes the post for. Not recorded: nobody has opened the page yet.
+   walk, then take the duck mid-run with `W` as the second beat: the run and the request in
+   flight both abort and the transcript prints the handover line naming the key. That is the
+   beat, not flipping the switch. The switch does change the page — the label, the note, the
+   accent colour, the key bay, Run becoming Send — but nothing in the arena moves when you flip
+   it, and a clip whose second beat is a recolour is a clip about a checkbox. Then Share on X,
+   which the page writes the post for. Not recorded: the page boots and the keyboard works, but
+   nobody has run the Record button.
 3. **hetero (sim).** ✅ `docs/assets/hetero.gif`, from
    `quackd run reachy-spots-duck-kicks --provider fake --seed 3 --gif-size 320`. The head is
    the slate square on the wall; the duck does the walking.
@@ -108,6 +126,9 @@ please correct it" framing.
 
 ## Timing
 
+- **Before any of it: the quackd-web pull request.** Every line above that invites somebody to
+  open a link needs one, and nothing answers at www.quackd.org/simulator until quackd-web's build
+  fetches `web/` into its own `/simulator`. Land that, open the page, then post.
 - **Now: simulator-first launch.** Discord post → 24 h → Show HN (Tue–Thu, 8–10 am ET) → X
   thread the same hour.
 - **Second beat, and it no longer waits for Christmas.** Reachy Mini hardware, SO-101 arms and

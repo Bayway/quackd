@@ -58,7 +58,11 @@ export const MAX_VX = 0.3, MAX_VY = 0.2, MAX_WZ = 1.5;
 const CMD_MAX = { vx: 0.40, vy: 0.30, wz: 1.50 };
 const DEAD_FRACTION = 1 / 3;
 
-// ── the arena, the same as quackd/sim3d/scene.py ───────────────────────────────────────
+// ── the arena: quackd/sim3d/scene.py's dimensions, not its scene ───────────────────────
+// Same half-width, same walls, same ball, same person body. Not the same look: sim3d builds
+// upstream's own scene*.xml palette, a blue-grey edge-marked checker under a gradient
+// skybox, and this fetches robot_walk.xml alone and draws a flat plane under a headlight.
+// web/README.md carries that as a deliberate divergence.
 export const ARENA_HALF = 1.0;
 const BALL_R = 0.05, PERSON_R = 0.12, PERSON_H = 0.5, WALL_H = 0.08;
 /**
