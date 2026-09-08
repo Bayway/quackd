@@ -305,6 +305,45 @@ async def test_the_recorder_draws_the_physics_panes(tmp_path: Path) -> None:
     await t.close()
 
 
+# ── what the world refuses to do ────────────────────────────────────────────────────────
+
+
+def test_a_twist_that_is_not_a_number_never_reaches_the_body() -> None:
+    """`np.clip` passes NaN through and every comparison against it is False, so without a
+    guard a NaN twist arrives at the servos as a NaN target and the physics quietly resets."""
+    w = MujocoWorld(seed=0, body=Puppet())
+    for bad in ((math.nan, 0.0, 0.0), (0.0, math.inf, 0.0), (0.0, 0.0, math.nan)):
+        with pytest.raises(ValueError, match="finite"):
+            w.set_velocity(*bad)
+    assert w.cmd == (0.0, 0.0, 0.0), "and nothing was commanded on the way out"
+    with pytest.raises(ValueError, match="finite"):
+        w.look(math.nan, 0.0)
+
+
+async def test_a_non_finite_intent_is_refused_rather_than_ending_the_run() -> None:
+    """A refusal is an answer the pilot can read and correct; an exception out of
+    `send_intent` would end the run over one bad number."""
+    t = MujocoTransport(seed=0, body="puppet")
+    await t.connect()
+    ack = await t.send_intent(Intent(kind="move", params={"vx": math.nan}))
+    assert not ack.accepted
+    assert "finite" in (ack.reason or "")
+    assert (await t.get_state()).policy != "walk", "and the duck was not left walking"
+    assert (await t.send_intent(Intent(kind="move", params={"vx": 0.2}))).accepted
+    await t.close()
+
+
+def test_a_world_that_mujoco_has_reset_under_us_refuses_to_carry_on() -> None:
+    """MuJoCo answers a non-finite state by resetting the world and logging a warning, not by
+    raising. A run that kept going would report poses from a world that had quietly restarted:
+    an ordinary-looking transcript that is fiction."""
+    w = MujocoWorld(seed=0, body=Puppet())
+    w.data.qvel[w._ball_dof] = math.inf
+    with pytest.raises(TransportError, match="diverged"):
+        for _ in range(5):
+            w.step()
+
+
 # ── the real duck ───────────────────────────────────────────────────────────────────────
 
 

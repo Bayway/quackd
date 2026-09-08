@@ -151,6 +151,14 @@ class MujocoTransport:
     async def send_intent(self, intent: Intent) -> Ack:
         w = self.world
         p = intent.params
+        try:
+            return self._dispatch(w, intent, p)
+        except ValueError as e:
+            # the world refuses a non-finite twist or gaze. A refused intent is an answer the
+            # pilot can read and correct; letting it out of here would end the run instead.
+            return Ack(accepted=False, reason=str(e))
+
+    def _dispatch(self, w: Any, intent: Intent, p: dict[str, Any]) -> Ack:
         match intent.kind:
             case "move":
                 w.set_velocity(p.get("vx", 0.0), p.get("vy", 0.0), p.get("wz", 0.0))

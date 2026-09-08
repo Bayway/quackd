@@ -39,6 +39,7 @@ from quackd.sim3d.gait import (
     GAIT_FLOOR_VX,
     GAIT_FLOOR_VY,
     GAIT_FLOOR_WZ,
+    tilt_deg,
     usable_twist,
 )
 from quackd.sim3d.world import NotSupported, Posture
@@ -200,6 +201,14 @@ class MicroduckBody:
         obs = self._observe(twist, self.head)
         policy = self.stand if float(np.linalg.norm(twist)) <= STAND_SWITCH else self.walk
         action = policy.run(None, {"obs": obs[None]})[0][0]
+        if not np.isfinite(action).all():
+            # A NaN here becomes a NaN servo target, and one tick later MuJoCo gives up on the
+            # state and silently resets the world. Stop at the policy, where the cause is
+            # still legible, rather than at the physics, where it is not.
+            raise PolicyError(
+                f"{up.WALK_POLICY.name if policy is self.walk else up.STAND_POLICY.name} "
+                f"returned a non-finite action at t={self._data.time:.2f}s"
+            )
         self.last_action = np.asarray(action, dtype=np.float32)
         self._data.ctrl[:] = self.default_pose + self.last_action * self.action_scale
         self._update_posture()
@@ -282,7 +291,7 @@ class MicroduckBody:
             "twist_sent": [round(v, 3) for v in self.sent],
             "gait_floor": {"vx": GAIT_FLOOR_VX, "vy": GAIT_FLOOR_VY, "wz": GAIT_FLOOR_WZ},
             "achieved_fraction": ACHIEVED_FRACTION,
-            "tilt_deg": round(math.degrees(math.acos(min(1.0, -self.gravity_z))), 1),
+            "tilt_deg": round(tilt_deg(self.gravity_z), 1),
             "trunk_z": round(float(self._data.qpos[self.free_q + 2]), 3),
             "assumptions": self.assumptions(),
             "model_pinned": self.assets.pinned,

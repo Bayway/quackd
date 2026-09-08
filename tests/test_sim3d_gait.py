@@ -14,7 +14,7 @@ import math
 
 import pytest
 
-from quackd.sim3d.gait import GAIT_FLOOR_VX, GAIT_FLOOR_WZ, usable_twist
+from quackd.sim3d.gait import GAIT_FLOOR_VX, GAIT_FLOOR_WZ, tilt_deg, usable_twist
 
 
 def test_the_gait_floor_scales_a_twist_instead_of_dropping_or_lurching() -> None:
@@ -47,3 +47,16 @@ def test_a_twist_that_is_not_a_number_is_refused_rather_than_sent() -> None:
     # and it is refused before the posture gate, so a fallen duck reports the real fault
     with pytest.raises(ValueError, match="finite"):
         usable_twist((math.nan, 0.0, 0.0), standing=False)
+
+
+def test_reading_the_tilt_of_an_upside_down_duck_does_not_raise() -> None:
+    """`gravity_z` is a matrix element, so it leaves [-1, 1] by about 1e-10 at either pole and
+    `acos` raises rather than saturating. Only the upper bound was clamped, so `extras()`,
+    `snapshot()` and every `get_state()` raised while the duck was on its back: the reading a
+    fall is exactly when a pilot needs it."""
+    assert tilt_deg(-1.0) == pytest.approx(0.0)
+    assert tilt_deg(0.0) == pytest.approx(90.0)
+    assert tilt_deg(1.0) == pytest.approx(180.0)
+    # the two that used to raise, one of them on every observation of a fallen duck
+    assert tilt_deg(1.0000000002) == pytest.approx(180.0)
+    assert tilt_deg(-1.0000000002) == pytest.approx(0.0)

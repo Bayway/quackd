@@ -54,6 +54,18 @@ BODIES = ("puppet", "microduck")
 Posture = Literal["standing", "sitting", "fallen"]
 
 
+def _finite(what: str, *values: float) -> None:
+    """A non-finite command must not reach the body.
+
+    `np.clip` passes NaN straight through, and so does every comparison against it, so an
+    unguarded NaN twist would arrive at the servos as a NaN target. The verb layer's pydantic
+    bounds already reject one, but this is the public API a flock runner or a notebook calls
+    directly, and the refusal belongs where the world is rather than in one caller's habits.
+    """
+    if not all(math.isfinite(v) for v in values):
+        raise ValueError(f"{what} must be finite, got {values}")
+
+
 class NotSupported(TransportError):
     """This body cannot do that, and quackd will not pretend otherwise."""
 
@@ -362,6 +374,7 @@ class MujocoWorld:
     # ── intents ─────────────────────────────────────────────────────────────────────
 
     def set_velocity(self, vx: float, vy: float, wz: float) -> None:
+        _finite("a twist", vx, vy, wz)
         self.cmd = (
             float(np.clip(vx, -MAX_VX, MAX_VX)),
             float(np.clip(vy, -MAX_VY, MAX_VY)),
@@ -375,6 +388,7 @@ class MujocoWorld:
 
     def look(self, x: float, y: float, z: float = 0.0) -> bool:
         """Point the camera at a trunk-frame point. Returns True if clamped."""
+        _finite("a gaze target", x, y, z)
         yaw = math.atan2(y, x)
         pitch = math.atan2(z, math.hypot(x, y))
         clamped = abs(yaw) > HEAD_YAW_LIMIT or abs(pitch) > HEAD_PITCH_LIMIT
@@ -435,10 +449,31 @@ class MujocoWorld:
         self.body.control(self.cmd, dt, self.rng)
         for _ in range(max(1, round(dt / self.model.opt.timestep))):
             mujoco.mj_step(self.model, self.data)
+        self._check_diverged()
         if not self.ball_present:
             self._park_ball()
         self.t += dt
         self.steps += 1
+
+    def _check_diverged(self) -> None:
+        """Refuse to keep simulating a state MuJoCo has already given up on.
+
+        MuJoCo does not raise when the physics goes non-finite. `mj_checkPos`, `mj_checkVel`
+        and `mj_checkAcc` log a warning and call `mj_resetData`, which silently teleports
+        every body to `qpos0` and sets the clock back to zero. Without this the run would
+        carry on reporting poses and distances from a world that had quietly restarted, which
+        is worse than a crash: the transcript would look ordinary and be fiction.
+        """
+        for flag in (
+            mujoco.mjtWarning.mjWARN_BADQPOS,
+            mujoco.mjtWarning.mjWARN_BADQVEL,
+            mujoco.mjtWarning.mjWARN_BADQACC,
+        ):
+            if self.data.warning[flag].number:
+                raise TransportError(
+                    f"the physics diverged at t={self.t:.2f}s ({flag.name}) and MuJoCo reset "
+                    "the world; nothing after this point would be true"
+                )
 
     def _push_ball(self, vx: float, vy: float) -> None:
         self.data.qvel[self._ball_dof : self._ball_dof + 3] = (vx, vy, 0.0)

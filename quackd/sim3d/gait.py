@@ -1,9 +1,11 @@
-"""What the walking policy can actually do, and the arithmetic that maps a twist onto it.
+"""What the walking policy can actually do, and the arithmetic around it.
 
-This is the one part of the physics backend that decides whether a duck moves or only says
-it did, so it lives in the one module of `sim3d` that imports no `mujoco` and needs no
-downloaded model. Everything here is pure arithmetic over floats, and it is tested on every
-runner rather than only where the physics extra and a filled asset cache happen to meet.
+The gait envelope here is the part of the physics backend that decides whether a duck moves
+or only says it did, so it lives in the one module of `sim3d` that imports no `mujoco` and
+needs no downloaded model. Everything here is pure arithmetic over floats, and it is tested
+on every runner rather than only where the physics extra and a filled asset cache happen to
+meet. The posture geometry keeps it company for the same reason: it is read on every single
+observation, so it is the last place that should be able to raise.
 
 The numbers are measurements, not upstream's: see `upstream_api.GAIT_THRESHOLD`, which is
 tagged UNVERIFIED and records the machine and the day they were taken on.
@@ -65,3 +67,16 @@ def usable_twist(
         for v, ceiling in zip(cmd, CEILINGS, strict=True)
     ]
     return (scaled[0], scaled[1], scaled[2])
+
+
+def tilt_deg(gravity_z: float) -> float:
+    """How far off vertical the trunk is, from projected gravity's z. 0 upright, 180 inverted.
+
+    The clamp is both-sided on purpose. `gravity_z` is a matrix element, so floating point
+    leaves it outside [-1, 1] by about 1e-10 at either pole, and `acos` raises a `ValueError`
+    rather than saturating. Only the upper bound used to be clamped, which meant that reading
+    the state of a duck lying on its back raised out of `extras()`, out of `snapshot()`, and
+    out of every `get_state()` the pilot made while it was down: the observation a fall is
+    exactly when you need it.
+    """
+    return math.degrees(math.acos(max(-1.0, min(1.0, -gravity_z))))
