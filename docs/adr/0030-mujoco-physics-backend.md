@@ -95,10 +95,15 @@ Apple Silicon, and no GPU. There is no Intel Mac wheel.
   the recorder samples half as often as the cartoon's, and `--live` uses MuJoCo's own viewer.
 - CI never fetches the model, so the `microduck:mujoco` row's ✅ rests on the puppet's sweep
   plus tests that skip where the cache is empty. The real duck's numbers in this ADR were
-  measured on one machine, and `GAIT_THRESHOLD` is tagged UNVERIFIED for that reason. What
-  changed since this was written is that the trained-gait number is a test rather than a
-  memory: it is reproducible by anyone with the cache filled, and it fails loudly if the body
-  silently falls back to the puppet.
+  measured on one machine, and `GAIT_THRESHOLD` is tagged UNVERIFIED for that reason.
+
+  *Since:* both halves of that changed. A `physics` job installs the extra and runs the
+  stand-in's sweep against OSMesa on every push, failing rather than skipping when it cannot
+  make a context. A nightly job fetches the model into a runner it then destroys — no cache
+  entry, because a keyed one is restorable by any run including a fork's, and `licenses.md`
+  says no CI fixture carries a byte of these meshes — and runs the trained gait's sweep there.
+  The 10 of 10 is a named test now rather than a memory, and it asserts the body really is the
+  trained one, because a silent fall back to the puppet passing it is the point.
 - Two upstreams now have to be tracked rather than one, both pinned, both in
   `quackd/sim3d/upstream_api.py`. A new export from either is a new pin and a new sha256.
 - Flock mode stays `sim2d` only. `FlockClock` was generalised to any world with a `t` and a

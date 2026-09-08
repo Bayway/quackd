@@ -19,11 +19,12 @@ third of that is the seeded acceptance sweeps, which CI holds at 10 of 10 by set
 `QUACKD_STRICT_SEEDS=1`; locally they pass at 8 of 10 so a slow machine does not block you.
 
 Touching `quackd/sim3d/` or `quackd/transport/mujoco.py`? Install `--extra mujoco` or your work
-is untested: both test modules start with `pytest.importorskip("mujoco")` and vanish without it,
-and CI does not install the extra either, so the physics sweep runs nowhere but a developer's
-machine. The tests use the kinematic stand-in body, so they still touch no network. A real run
-does: the first `--robot microduck:mujoco` fetches about 10 MB of upstream model into
-`~/.quackd/cache`.
+is untested locally: both test modules start with `pytest.importorskip("mujoco")` and vanish
+without it. CI's `physics` job installs the extra and runs them on the kinematic stand-in, which
+touches no network. The tests marked `real_duck` need upstream's model in `~/.quackd/cache`, so
+they skip until you have run `--robot microduck:mujoco` once, and a nightly job runs them there.
+The gait arithmetic itself lives in `quackd/sim3d/gait.py`, which imports no `mujoco`, so
+`tests/test_sim3d_gait.py` runs whether you installed the extra or not.
 
 Touching anything under `bridge/`? That is the code that runs on a robot, and there are
 three lots of it now (`open_duck/`, `alohamini/`, `toddlerbot/`). It plays by different

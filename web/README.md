@@ -77,7 +77,7 @@ every id the JavaScript looks up exists in the page, nothing it hides is pinned 
 rule, no module reached from the page imports a CDN statically, the key is stored nowhere, and
 each module parses under `node --check`. It is not the same as opening the page.
 
-Two things here are deliberately not what the Python backend does, and neither is a bug:
+Three things here are deliberately not what the Python backend does, and none is a bug:
 
 - **Perception is geometric.** The bearing and distance in each observation are read from the
   simulator's ground truth inside a 90 degree cone out to 1.6 m, with no occlusion, so a ball
@@ -85,6 +85,9 @@ Two things here are deliberately not what the Python backend does, and neither i
   over the pixels. The page says so in the transcript as well as here.
 - **Nothing fetched is hash-checked.** Python verifies all 41 files against a recorded sha256
   before MuJoCo or onnxruntime sees a byte. The browser trusts the two hosts and the transport.
+- **A seed means the same distributions, not the same layout.** The arena here is laid out by a
+  xorshift and in Python by numpy's PCG64. The spawn ranges and the rejection rules match; the
+  stream does not, so seed 3 is a different arena in each.
 
 ## Layout
 
