@@ -6,7 +6,7 @@ name: microduck assets
 # Separate from `ci` for two reasons. It reaches the network, so putting it on the required
 # path would let an upstream outage block a merge on a project that depends on neither host at
 # build time. And it downloads upstream's meshes, which are CC BY-NC-SA: `docs/licenses.md`
-# says that neither the wheel, the repository, a CI fixture nor the Pages site carries a byte
+# says that neither the wheel, the repository, a CI fixture nor the deployed site carries a byte
 # of them, so this job takes them into a runner that is then destroyed and caches nothing. An
 # `actions/cache` entry keyed on the pin would be restorable by any run, including a fork's,
 # which is a CI fixture in the sense a reader of that sentence would mean.

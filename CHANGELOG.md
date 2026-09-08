@@ -37,8 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused, and a fall is recovered by standing the model up, because upstream's episodic
   policies did nothing from a standing pose and it ships no get-up policy.
 - **A browser demo, so trying quackd costs nobody an install** (`web/`, a static page with a
-  GitHub Pages workflow ready, though Pages is not enabled on the repository yet so it is not
-  live). The same physics and the same policy through MuJoCo's official WebAssembly build and
+  deployed from `web/` by Vercel at www.quackd.org, with no build step). The same physics and the same policy through MuJoCo's official WebAssembly build and
   onnxruntime-web, with the verbs, the contract and the one-tool-per-turn loop in six modules of
   plain JavaScript and no build step. Bring your own key for Anthropic, OpenAI or Gemini, or point it at
   Ollama and keep everything on your machine. A switch turns quackd off, which removes the

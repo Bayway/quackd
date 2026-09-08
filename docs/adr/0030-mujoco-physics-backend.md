@@ -125,5 +125,12 @@ Apple Silicon, and no GPU. There is no Intel Mac wheel.
   recording were read rather than run. No CI job touches `web/`, and GitHub Pages was not enabled
   on the repository when this was written, so the page is not live. The first person to open it
   is the test.
+
+  *Since:* `tests/test_web.py` runs in the ordinary suite and holds what can be held without a
+  browser — the ids, the classes, the rule that was hiding nothing, the pins and gait numbers
+  shared with Python, `node --check` on each module, and the argument validator executed under
+  Node. The page is deployed from `web/` by Vercel at www.quackd.org rather than by Pages, and
+  `vercel.json` serves the directory with no build step. The sentence that still stands is the
+  last one: nobody has opened it.
 - None of this makes a hardware claim. It is a better simulator, not a robot: the Microduck
   rows in `docs/adapter-status.md` that say "never run on a duck" still say it.

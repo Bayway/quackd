@@ -107,8 +107,7 @@ open runs/*/run.gif                                                             
 `python -m http.server 8000 --directory web`). Same physics, same walking policy, same
 contract, in a page. Type a sentence, paste your own API key or point it at Ollama, and watch
 what the model chose. There is a switch that turns quackd off, which leaves you the robot, its
-policy and a keyboard. It goes live at `rokbenko.github.io/quackd` once Pages is enabled on the
-repository.
+policy and a keyboard. It is live at <https://www.quackd.org>.
 
 Put keys in the environment or in a `.env` file (copy [`.env.example`](.env.example)). `quackd doctor` tells you what is missing. Needs Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/), nothing else.
 
@@ -200,7 +199,7 @@ Version 0.7, simulator and mocks. What has been built, and how far each piece ha
 |---|---|
 | `sim2d` bundled simulator (default) | ✅ 10 of 10 seeds on `find-and-kick`, GIF and transcript per run |
 | `mujoco` physics simulator (`quackd[mujoco]`) | ✅ 10 of 10 seeds on `find-and-kick` twice over: once on the kinematic stand-in and once with the duck walking on **upstream's own trained policy**, both ground truth checked, and both named tests rather than remembered numbers. The trained-gait sweep needs upstream's model in the cache, so a nightly job runs it and the gating job on every push runs the stand-in. The model and the policy are fetched from upstream at a pinned commit and hash checked, never shipped |
-| Browser demo ([`web/`](web/)) | 🧪 the same physics, policy, verbs and contract in a static page. Bring your own key, or point it at Ollama. CI checks what it can without a browser (the ids the script looks up, the pins and gait numbers it shares with Python, each module's syntax, and the argument validator run under Node), but the rendering, the DOM and the recording have still never run in one, and GitHub Pages is not enabled yet, so there is no live site |
+| Browser demo ([`web/`](web/)) | 🧪 the same physics, policy, verbs and contract in a static page. Bring your own key, or point it at Ollama. CI checks what it can without a browser (the ids the script looks up, the pins and gait numbers it shares with Python, each module's syntax, and the argument validator run under Node), but the rendering, the DOM and the recording have still never run in one. Live at [www.quackd.org](https://www.quackd.org) |
 | Manifests and core verbs (`quackd list-adapters`, `quackd list-verbs --robot`) | ✅ eight adapters, eight core verbs that appear only where the manifest meets their requirements, speed limits from the manifest, `manifest.schema.json` generated and drift tested |
 | MCP server (`quackd serve-mcp`) | ✅ Claude Code and Claude Desktop, fleets with `--robots` (eight `robot_*` tools, tested in process against the simulator and the mocks), no Claude Desktop session on record |
 | Memory between runs (`quackd memory`, `remember`) | ✅ one JSONL file per `adapter:backend`, notes and run outcomes into the next prompt, tested end to end offline, 🧪 the `remember` tool itself exercised by one local model on one machine and by no cloud model ([docs/memory.md](docs/memory.md)) |

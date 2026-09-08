@@ -46,9 +46,6 @@ not before.
 
 ## Open here
 
-- ⬜ **Enable GitHub Pages** (Settings → Pages → Source: GitHub Actions). The README and
-  `web/README.md` both point at `rokbenko.github.io/quackd`, `.github/workflows/pages.yml` is
-  in place, and until this is switched on the workflow fails and there is no live demo.
 - 🔨 **Somebody has to open `web/` in a browser.** `tests/test_web.py` checks what can be
   checked without one, and that is not the same as opening the page. The rendering, the DOM
   and the recording still need a person with a browser, and the four measured claims in
