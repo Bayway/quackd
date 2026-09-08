@@ -222,7 +222,32 @@ export function makeProvider({ provider, key, model, baseUrl }) {
   return openaiCompatible({
     key: key || "",
     model: chosen,
-    baseUrl: baseUrl || spec.baseUrl,
+    baseUrl: localBaseUrl(baseUrl || spec.baseUrl),
     label: "your local server",
   });
+}
+
+/**
+ * A base URL a key may safely be sent to.
+ *
+ * This box is free text, and whatever is in the key field goes to it as a bearer token. https
+ * is fine anywhere; plain http only to this machine, where nothing leaves it. Anything else is
+ * refused by name, so a typo or a paste cannot quietly forward a key to a stranger. The same
+ * rule is what a `connect-src` policy could express if the host were knowable in advance.
+ */
+export function localBaseUrl(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ProviderError(`"${raw}" is not a URL. Try http://localhost:11434/v1`);
+  }
+  const loopback = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(url.hostname);
+  if (url.protocol === "https:" || (url.protocol === "http:" && loopback)) {
+    return raw;
+  }
+  throw new ProviderError(
+    `refusing to send a key to ${url.host} over ${url.protocol.replace(":", "")}. ` +
+      "Use https, or http only for a server on this machine."
+  );
 }

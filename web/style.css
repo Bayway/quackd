@@ -44,6 +44,12 @@ main {
 canvas { display: block; width: 100%; height: min(62vh, 40rem); touch-action: none; cursor: grab; }
 canvas:active { cursor: grabbing; }
 
+/* The user-agent rule for [hidden] is `display: none`, and it loses to any author rule that
+   sets `display` at equal specificity. `.overlay` sets `display: grid`, so `loading.hidden =
+   true` left the loading panel covering the canvas and the whole stage bar for good. Anything
+   the JS hides with `.hidden` needs this to actually go away. */
+[hidden] { display: none !important; }
+
 .overlay {
   position: absolute; inset: 0; display: grid; place-content: center; gap: 0.6rem;
   text-align: center; background: #0e1013; padding: 2rem;

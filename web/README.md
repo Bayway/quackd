@@ -69,9 +69,22 @@ model and the real policy: the duck walks, the gait floor maps a twist the way t
 backend does, a scripted pilot walks a square and closes it to 10 cm, and an unallowed verb
 is refused while the run continues. That harness is a scratch script and is not in this
 repository, so those four results are one measurement on one machine rather than something you
-or CI can re-run, and nothing in CI reads `web/` at all. The rendering, the DOM and the
-recording have only been read, not run: they need a browser, and the first person to open the
-page is the test.
+or CI can re-run. The rendering, the DOM and the recording have only been read, not run: they
+need a browser, and the first person to open the page is the test.
+
+`tests/test_web.py` is the floor under that. It runs in the ordinary suite, with no browser:
+every id the JavaScript looks up exists in the page, nothing it hides is pinned visible by a
+rule, no module reached from the page imports a CDN statically, the key is stored nowhere, and
+each module parses under `node --check`. It is not the same as opening the page.
+
+Two things here are deliberately not what the Python backend does, and neither is a bug:
+
+- **Perception is geometric.** The bearing and distance in each observation are read from the
+  simulator's ground truth inside a 90 degree cone out to 1.6 m, with no occlusion, so a ball
+  behind the person is still seen. Python renders the head camera and runs a colour detector
+  over the pixels. The page says so in the transcript as well as here.
+- **Nothing fetched is hash-checked.** Python verifies all 41 files against a recorded sha256
+  before MuJoCo or onnxruntime sees a byte. The browser trusts the two hosts and the transport.
 
 ## Layout
 

@@ -19,13 +19,15 @@ import { ACHIEVED_FRACTION, CONTROL_DT, GAIT_FLOOR, HEAD_YAW_LIMIT } from "./mic
 const MOVE_RESEND_S = 0.1; // the twist is re-sent at 10 Hz or the deadman zeroes it
 
 export class Runtime {
-  constructor(duck) {
+  constructor(duck, { onError = null } = {}) {
     this.duck = duck;
     this.running = false;
     this.manualTwist = [0, 0, 0];
     this.manual = false;
+    this.error = null;
     this._waiters = [];
     this._onFrame = null;
+    this._onError = onError;
   }
 
   start(onFrame) {
@@ -38,13 +40,20 @@ export class Runtime {
       if (!this.running) return;
       carry += Math.min(0.1, (now - previous) / 1000); // never simulate a lost tab
       previous = now;
-      while (carry >= CONTROL_DT) {
-        carry -= CONTROL_DT;
-        if (this.manual) this.duck.setTwist(...this.manualTwist);
-        await this.duck.step();
-        this._wake(CONTROL_DT);
+      try {
+        while (carry >= CONTROL_DT) {
+          carry -= CONTROL_DT;
+          if (this.manual) this.duck.setTwist(...this.manualTwist);
+          await this.duck.step();
+          this._wake(CONTROL_DT);
+        }
+        this._onFrame?.();
+      } catch (error) {
+        // Without this the loop simply stopped: no more frames, and every verb waiting on
+        // simulated time hung for good, with nothing on the page to say why.
+        this._die(error);
+        return;
       }
-      this._onFrame?.();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -52,10 +61,35 @@ export class Runtime {
 
   stop() { this.running = false; }
 
+  /** Stop the world and refuse every waiter, so nothing is left hanging on a dead clock. */
+  _die(error) {
+    this.running = false;
+    this.error = error;
+    const waiting = this._waiters;
+    this._waiters = [];
+    for (const waiter of waiting) waiter.reject(error);
+    this._onError?.(error);
+  }
+
   /** Let `seconds` of simulated time pass. Verbs never touch the clock directly. */
-  sleep(seconds) {
+  sleep(seconds, signal = null) {
+    if (this.error) return Promise.reject(this.error);
+    if (signal?.aborted) return Promise.reject(signal.reason);
     if (seconds <= 0) return Promise.resolve();
-    return new Promise((resolve) => this._waiters.push({ left: seconds, resolve }));
+    return new Promise((resolve, reject) => {
+      const waiter = { left: seconds, resolve, reject };
+      this._waiters.push(waiter);
+      // Stop has to reach a move that is already running. Without this a ten second move ran
+      // to completion after the button, and the duck kept walking the whole time.
+      signal?.addEventListener(
+        "abort",
+        () => {
+          this._waiters = this._waiters.filter((w) => w !== waiter);
+          reject(signal.reason);
+        },
+        { once: true }
+      );
+    });
   }
 
   _wake(dt) {
