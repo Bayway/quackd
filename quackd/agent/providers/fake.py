@@ -244,6 +244,20 @@ SHAPE_VX = 0.25
 SHAPE_WZ = 0.9
 SHAPE_SIDE_M = 0.5
 _TURN_TOLERANCE = math.radians(10)
+#: How near the start a square has to finish to count as closed.
+#:
+#: One full side, which is loose on purpose. Measured on seed 0: the trained gait ends 0.30 m
+#: from where it started and the kinematic stand-in 0.44 m, because each corner is accepted
+#: within ten degrees and four of those compound. What this bound separates is a loop from a
+#: drift: four legs walked in a straight line finish two metres out and fail. The distance
+#: itself goes in the reason either way, so a run says how square it was rather than only
+#: that it declared success, and `docs/assets/hero3d.py` prints it.
+SHAPE_CLOSURE_M = SHAPE_SIDE_M
+#: One `move` is one sample of the heading: the strategy reads the pose before and after and
+#: nothing in between, so a turn past +/-pi is indistinguishable from its complement and a
+#: whole revolution from standing still. Bounded by the fastest twist a body here accepts
+#: rather than the rate asked for, because the gait floor scales a small twist up.
+SHAPE_MAX_TURN_S = 2.0
 
 
 def _pose(obs: Observation) -> tuple[float, float, float] | None:
@@ -292,7 +306,11 @@ class _Gait:
 
     def seconds(self, kind: str, remaining: float, rate: float) -> float:
         gain = self.walk if kind == "walk" else self.turn
-        return min(10.0, max(0.4, abs(remaining) / (rate * max(gain, 0.15))))
+        # A turn is capped so one move can never carry the heading past half a circle. The
+        # strategy samples the pose once per move, so a longer turn is indistinguishable from
+        # its complement, and the accumulated total quietly loses whole revolutions.
+        cap = SHAPE_MAX_TURN_S if kind == "turn" else 10.0
+        return min(cap, max(0.4, abs(remaining) / (rate * max(gain, 0.15))))
 
 
 def square_strategy(side: float = SHAPE_SIDE_M) -> Strategy:
@@ -306,6 +324,7 @@ def square_strategy(side: float = SHAPE_SIDE_M) -> Strategy:
         "leg": 0,
         "turning": False,
         "anchor": None,
+        "start": None,  # where leg 0 began, which is what "a square" has to come back to
         "target": None,
         "gait": _Gait(),
         "walked": 0.0,
@@ -322,17 +341,32 @@ def square_strategy(side: float = SHAPE_SIDE_M) -> Strategy:
         if state["last"] is not None:
             px, py, pt = state["last"]
             state["walked"] += math.dist((x, y), (px, py))
-            state["turned"] += abs(_wrap(theta - pt))
+            state["turned"] += _wrap(theta - pt)  # signed: a stride's wag must cancel
             gait.observe(state["walked"], state["turned"])
         state["last"] = (x, y, theta)
         if state["anchor"] is None:
             state["anchor"] = (x, y)
+            state["start"] = (x, y)
         if state["leg"] >= 4:
+            # Four legs is a count, not a shape. Each leg ends when the pose says it has gone
+            # far enough, so an overshoot or a corner short of ninety degrees gives four legs
+            # that finish somewhere else entirely. Say how far off, first, because
+            # `docs/assets/hero3d.py` prints the first sixty characters of this and then
+            # decides whether to publish the GIF.
+            closed = math.dist((x, y), state["start"])
+            if closed <= SHAPE_CLOSURE_M:
+                return ToolCall(
+                    name="declare_success",
+                    arguments={
+                        "reason": f"closed the square {closed:.2f} m from where it started, "
+                        f"after four {side:.2f} m legs with a 90 degree turn between each"
+                    },
+                )
             return ToolCall(
-                name="declare_success",
+                name="declare_failure",
                 arguments={
-                    "reason": f"walked four {side:.2f} m legs with a 90 degree turn between "
-                    f"each; back at ({x:.2f}, {y:.2f})"
+                    "reason": f"finished {closed:.2f} m from where it started, after four "
+                    f"{side:.2f} m legs: that is not a square"
                 },
             )
         if state["turning"]:
@@ -382,19 +416,21 @@ def circle_strategy(turns: float = 1.0) -> Strategy:
         theta = pose[2]
         gait: _Gait = state["gait"]
         if state["last"] is not None:
-            state["turned"] += abs(_wrap(theta - float(state["last"])))
+            # Signed. A real gait wags the trunk every stride, which an absolute total counts
+            # as turning: `tests/test_sim3d.py` says exactly that about the same measurement.
+            state["turned"] += _wrap(theta - float(state["last"]))
             gait.observe(0.0, state["turned"])
         state["last"] = theta
         target = turns * 2 * math.pi
-        if state["turned"] >= target:
+        if abs(state["turned"]) >= target:
             return ToolCall(
                 name="declare_success",
                 arguments={
                     "reason": f"walked a circle: the heading came round "
-                    f"{math.degrees(state['turned']):.0f} degrees while walking forward"
+                    f"{abs(math.degrees(state['turned'])):.0f} degrees while walking forward"
                 },
             )
-        seconds = gait.seconds("turn", target - state["turned"], SHAPE_WZ)
+        seconds = gait.seconds("turn", target - abs(state["turned"]), SHAPE_WZ)
         gait.expect("turn", SHAPE_WZ * seconds, state["turned"])
         return ToolCall(
             name="move",
