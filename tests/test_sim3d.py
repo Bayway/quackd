@@ -306,6 +306,67 @@ async def test_the_recorder_draws_the_physics_panes(tmp_path: Path) -> None:
     await t.close()
 
 
+# ── rendering, and what happens without a screen ────────────────────────────────────────
+
+
+def test_a_frame_bigger_than_the_offscreen_buffer_is_refused_by_name() -> None:
+    """The buffer is compiled into the model, so a larger frame fails inside MuJoCo. Refuse it
+    where the number lives, and bound `--gif-size` to the same figure."""
+    from quackd.sim3d.scene import OFFSCREEN_PX
+    from quackd.sim3d.world import RenderError
+
+    w = MujocoWorld(seed=0, body=Puppet())
+    with pytest.raises(RenderError, match="OFFSCREEN_PX"):
+        w.renderer(OFFSCREEN_PX + 1)
+    with pytest.raises(RenderError, match="OFFSCREEN_PX"):
+        w.renderer(0)
+
+
+def test_the_cli_caps_a_gif_pane_at_the_size_the_model_can_actually_render() -> None:
+    """`cli.py` spells 1024 rather than importing it, because importing `sim3d` on the default
+    path would drag in the physics extra. This is the thread between the two numbers."""
+    from quackd.cli import _GIFSIZE
+    from quackd.sim3d.scene import OFFSCREEN_PX
+
+    assert _GIFSIZE.max == OFFSCREEN_PX
+
+
+def test_a_machine_with_no_opengl_is_told_which_variable_to_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """docs/faq.md promises this sentence. A bare OpenGL traceback is the least useful thing
+    to hand someone on a server."""
+    from quackd.sim3d.world import RenderError
+
+    w = MujocoWorld(seed=0, body=Puppet())
+
+    def no_display(*_a: object, **_k: object) -> None:
+        raise RuntimeError("could not create an OpenGL context")
+
+    monkeypatch.setattr(mujoco, "Renderer", no_display)
+    with pytest.raises(RenderError, match="MUJOCO_GL=osmesa"):
+        w.renderer(64)
+
+
+def test_a_world_can_be_closed_twice_and_refuses_to_render_after() -> None:
+    w = MujocoWorld(seed=0, body=Puppet())
+    from quackd.sim3d.world import RenderError
+
+    w.close()
+    w.close()
+    with pytest.raises(RenderError, match="closed"):
+        w.renderer(64)
+
+
+async def test_the_transport_says_it_is_not_connected_rather_than_dereferencing_nothing() -> None:
+    t = MujocoTransport(seed=0, body="puppet")
+    for call in (t.get_state(), t.get_frame()):
+        with pytest.raises(TransportError, match="not connected"):
+            await call
+    with pytest.raises(TransportError, match="not connected"):
+        t.render_panes(64)
+
+
 # ── when time stops ─────────────────────────────────────────────────────────────────────
 
 

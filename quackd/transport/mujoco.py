@@ -77,11 +77,23 @@ class MujocoTransport:
         else:
             self.clock.add_tick_hook(hook)
 
+    def _connected(self) -> Any:
+        """The world, or a refusal that names the reason.
+
+        Every one of these used to reach through `self.world` while it was still None, so
+        calling them before `connect()` gave an AttributeError about NoneType rather than a
+        transport error saying what was wrong.
+        """
+        if self.world is None:
+            raise TransportError("the mujoco transport is not connected")
+        return self.world
+
     def render_panes(self, size: int) -> tuple[Image.Image, Image.Image, str]:
         """What the recorder draws: the arena from a corner, and the head's own view."""
         from quackd.sim3d.render import render_headcam, render_overview
 
-        return render_overview(self.world, size), render_headcam(self.world, size), "duck cam"
+        w = self._connected()
+        return render_overview(w, size), render_headcam(w, size), "duck cam"
 
     # ── protocol ────────────────────────────────────────────────────────────────────
 
@@ -129,10 +141,10 @@ class MujocoTransport:
     async def get_frame(self) -> Image.Image | None:
         from quackd.sim3d.render import render_headcam
 
-        return render_headcam(self.world, self.frame_size)
+        return render_headcam(self._connected(), self.frame_size)
 
     async def get_state(self) -> DuckState:
-        w = self.world
+        w = self._connected()
         battery = max(0.0, self.battery_start - BATTERY_DRAIN_PER_S * w.t)
         return DuckState(
             t=w.t,
@@ -148,7 +160,7 @@ class MujocoTransport:
         )
 
     async def send_intent(self, intent: Intent) -> Ack:
-        w = self.world
+        w = self._connected()
         p = intent.params
         try:
             return self._dispatch(w, intent, p)

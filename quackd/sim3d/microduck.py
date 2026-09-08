@@ -293,6 +293,15 @@ class MicroduckBody:
     def assumptions(self) -> list[str]:
         return list(ASSUMPTIONS)
 
+    def close(self) -> None:
+        """Drop the two inference sessions and the model handles.
+
+        `MujocoWorld.close()` used to close renderers only, so a process that built several
+        worlds — `docs/assets/hero3d.py` builds two — kept every onnxruntime session alive
+        until the interpreter exited."""
+        self.walk = self.stand = None
+        self._model = self._data = None
+
     def extras(self) -> dict[str, Any]:
         return {
             "policy": "walk" if self.walking else "stand",

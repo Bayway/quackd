@@ -24,6 +24,7 @@ import numpy as np
 from quackd.sim3d.scene import (
     ARENA_HALF,
     BALL_PARK,
+    OFFSCREEN_PX,
     PUPPET_BODY_Z,
     PUPPET_HEAD_AHEAD,
     PUPPET_HEAD_Z,
@@ -69,6 +70,10 @@ def _finite(what: str, *values: float) -> None:
     """
     if not all(math.isfinite(v) for v in values):
         raise ValueError(f"{what} must be finite, got {values}")
+
+
+class RenderError(TransportError):
+    """No offscreen context, or a frame size the model's buffer cannot hold."""
 
 
 class NotSupported(TransportError):
@@ -134,6 +139,9 @@ class Body(Protocol):
     def enable(self) -> None:
         """Recover from a fall, however this body can."""
         ...
+
+    def close(self) -> None:
+        """Release whatever the body holds: inference sessions, handles, buffers."""
 
     def extras(self) -> dict[str, Any]:
         """Body-specific telemetry, merged into the state the pilot reads."""
@@ -236,6 +244,9 @@ class Puppet:
         self.walking = False
         self._place()
 
+    def close(self) -> None:
+        """Nothing to release: it is a mocap body in the world's own model."""
+
     def extras(self) -> dict[str, Any]:
         return {
             "assumptions": [
@@ -326,6 +337,7 @@ class MujocoWorld:
         self.t = 0.0
         self.steps = 0
         self._renderers: dict[int, Any] = {}
+        self.closed = False
         self.body.attach(self.model, self.data)
         self.body.set_head(self.head)
         self.body.reset(x, y, theta)
@@ -561,11 +573,29 @@ class MujocoWorld:
     def renderer(self, size: int) -> Any:
         """One offscreen renderer per frame size, kept for the world's lifetime: creating
         one is a GL context, which costs hundreds of milliseconds; rendering costs a few."""
+        if self.closed:
+            raise RenderError("this world is closed")
+        if not 0 < size <= OFFSCREEN_PX:
+            raise RenderError(
+                f"a {size} px frame does not fit the model's offscreen buffer "
+                f"({OFFSCREEN_PX} px, `sim3d.scene.OFFSCREEN_PX`)"
+            )
         if size not in self._renderers:
-            self._renderers[size] = mujoco.Renderer(self.model, height=size, width=size)
+            try:
+                self._renderers[size] = mujoco.Renderer(self.model, height=size, width=size)
+            except Exception as e:
+                # A bare OpenGL traceback is the least useful thing to hand someone on a
+                # server. docs/faq.md promises this sentence; say it here so it is true.
+                raise RenderError(
+                    f"no OpenGL context for offscreen rendering ({type(e).__name__}: {e}). "
+                    "On a headless Linux box install libosmesa6 and set MUJOCO_GL=osmesa, "
+                    "or MUJOCO_GL=egl where there is a GPU"
+                ) from e
         return self._renderers[size]
 
     def close(self) -> None:
         for renderer in self._renderers.values():
             renderer.close()
         self._renderers.clear()
+        self.body.close()
+        self.closed = True
