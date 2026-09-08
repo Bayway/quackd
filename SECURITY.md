@@ -44,8 +44,12 @@ Also in scope:
   is read from an input, sent from the browser straight to the vendor, and never stored, never
   logged and never proxied: there is no server here to proxy it through, and nothing in
   `web/src` writes to browser storage. What that leaves is the page itself. It loads three
-  payloads from `cdn.jsdelivr.net` at pinned versions with no subresource integrity and no
-  content security policy, and any script running in the page can read that input. So the risk
+  payloads from `cdn.jsdelivr.net` at pinned versions, plus a stylesheet from
+  `fonts.googleapis.com` and the two webfonts it names from `fonts.gstatic.com`, all with no
+  subresource integrity and no content security policy, and any script running in the page can
+  read that input. Google Fonts serves CSS and font files rather than script, so it cannot
+  execute in the document the way the jsDelivr tags can — but it is still an origin that sees
+  every visit. So the risk
   is not quackd holding your key, it is a third party executing in the same document as it: a
   bad CDN response, an injected script, or a copy of the page served from somewhere you do not
   control. Anthropic's `anthropic-dangerous-direct-browser-access` header, which the page sends,

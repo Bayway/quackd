@@ -37,6 +37,15 @@ def _js(name: str) -> str:
     return (SRC / name).read_text(encoding="utf-8")
 
 
+def _keydown() -> str:
+    """The window-level keydown listener, from its opening line to the `});` that closes it in
+    column zero. The goal box has a keydown of its own for Escape, but that one is indented
+    behind `ui.goal.`, so anchoring both ends to column zero picks out the page's handler."""
+    found = re.search(r'^addEventListener\("keydown".*?^\}\);', _js("app.js"), re.S | re.M)
+    assert found, "app.js registers no window-level keydown listener"
+    return found.group(0)
+
+
 ALL_JS = "\n".join(p.read_text(encoding="utf-8") for p in MODULES)
 
 
@@ -88,6 +97,140 @@ def test_the_goal_form_cannot_navigate_away_with_what_was_typed_in_it() -> None:
     form = re.search(r"<form[^>]*id=\"goal-form\"[^>]*>", HTML)
     assert form and 'method="dialog"' in form.group(0)
     assert not re.search(r'<input id="goal"[^>]*\bname=', HTML)
+
+
+# ── the brand on the page is the one this repository holds ──────────────────────────────
+
+
+def test_the_header_wears_the_vendored_duck_mark_and_not_an_emoji() -> None:
+    """The header and the favicon were both a 🦆: the emoji in a `<span aria-hidden>`, and the
+    same emoji drawn into an inline-SVG data URI for the tab. A logo rendered out of the
+    visitor's emoji font is a different logo on every machine that opens the page, and quackd
+    has a mark of its own. It is in `web/assets` now, with the two icon sizes beside it."""
+    chrome = HTML.split("</header>")[0]
+    assert "🦆" not in chrome, (
+        "the duck emoji is back in the head or the header. The mark is "
+        "web/assets/duck-mark.png and the icons are the two PNGs beside it"
+    )
+    header = re.search(r"<header\b.*?</header>", HTML, re.S)
+    assert header, "index.html has no <header>, so this test cannot see what it wears"
+    assert re.search(r'<img[^>]+src="assets/duck-mark\.png"', header.group(0)), (
+        "the header does not carry web/assets/duck-mark.png"
+    )
+    icon = re.search(r'<link[^>]*rel="icon"[^>]*>', HTML)
+    assert icon and "assets/favicon-96.png" in icon.group(0), (
+        "the tab icon is not the vendored PNG favicon"
+    )
+    assert 'href="assets/apple-touch-icon.png"' in HTML, "nothing links the home-screen icon"
+
+
+def test_every_asset_the_page_asks_for_is_a_file_in_this_directory() -> None:
+    """The deploy is a copy of `web/` and nothing reads the HTML on the way out, so a mistyped
+    `src` is a broken mark in production and a green build here. Every local reference the page
+    makes has to resolve on disk, relative to this directory."""
+    referenced = set(re.findall(r'(?:src|href)="(?!https?:|data:|mailto:|#)([^"]+)"', HTML))
+    assert referenced, "the regex found no local references, so this test is not testing anything"
+    missing = sorted(ref for ref in referenced if not (WEB / ref.split("?")[0]).is_file())
+    assert not missing, f"index.html points at files that web/ does not hold: {missing}"
+
+
+# ── two ways to drive, and both of them always live ─────────────────────────────────────
+
+
+def test_the_keyboard_is_not_gated_behind_the_quackd_switch() -> None:
+    """The switch used to be exclusive: `runtime.manual = !on` inside applyToggle, an early
+    return on `ui.toggle.checked` at the top of the keydown handler, and the cockpit hidden
+    while quackd was on. So the page's own argument arrived as an either/or, and a visitor had
+    to flip a mode before a key did anything at all. The switch decides one thing now — whether
+    anything here reads English — and the keyboard was never that layer."""
+    app = _js("app.js")
+    body = _keydown()
+    for gate in ("toggle", "checked", "quackd-on"):
+        assert gate not in body, (
+            f"the keydown handler reads `{gate}`: driving must not depend on the switch, which "
+            f"is the whole of the dual-control claim the page makes"
+        )
+    apply_toggle = re.search(r"^function applyToggle\(\).*?^\}", app, re.S | re.M)
+    assert apply_toggle, "app.js has no applyToggle(), which is where the old gate lived"
+    assert not re.search(r"runtime\.manual\s*=", apply_toggle.group(0)), (
+        "applyToggle() takes the twist lease again; the lease belongs to the run, not the switch"
+    )
+    assert not re.search(r"manual\w*\.hidden\s*=", app), (
+        "something hides the cockpit again. It is permanent, and its adjacency to the goal box "
+        "is the argument the page makes by proximity instead of by copy"
+    )
+    assert not re.search(r'id="manual"[^>]*\bhidden\b', HTML), "#manual ships hidden"
+
+
+def test_a_key_that_moves_the_robot_takes_it_and_a_key_that_only_reads_does_not() -> None:
+    """Barge-in is what makes the two controls live rather than merely both present: a drive
+    key pressed during a run takes the robot at once and the transcript says which key did it,
+    while `O` and the camera keys leave the run alone. The rule is exactly that — a key barges
+    in if and only if it would move the robot."""
+    app = _js("app.js")
+    body = _keydown()
+
+    def keyset(name: str) -> set[str]:
+        found = re.search(rf"{name} = new Set\(\[([^\]]*)\]", app)
+        assert found, f"app.js no longer declares {name}"
+        return set(re.findall(r'"(\w+)"', found.group(1)))
+
+    motor, read = keyset("MOTOR"), keyset("READ")
+    assert {"KeyW", "KeyA", "KeyS", "KeyD", "Space"} <= motor, (
+        "the drive keys are not all in MOTOR, so pressing one mid-run takes the robot from nobody"
+    )
+    assert not motor & read, "a key cannot both take the robot and leave the run alone"
+    assert re.search(r"if \(motor\).*bargeIn\(", body), (
+        "the keydown handler no longer barges in on a motor key"
+    )
+    assert "bargeIn" not in body.split("if (motor)")[0], (
+        "something barges in before the motor test, so a read-only key would stop a run"
+    )
+    barge = re.search(r"^function bargeIn\(.*?^\}", app, re.S | re.M)
+    assert barge, "app.js has no bargeIn()"
+    for piece, why in (
+        (".abort(", "cancel the run, which would otherwise race the hand for the twist"),
+        ('giveTwistTo("hand")', "hand the twist over, which is the handover itself"),
+        ('"handover"', "tell the transcript a key took the controls"),
+    ):
+        assert piece in barge.group(0), f"bargeIn() does not {why}"
+
+
+def test_a_focused_control_keeps_the_keys_that_are_its_own() -> None:
+    """WCAG 2.1.1: Space activates a focused button or `<summary>`, and W typed into the goal
+    box is a letter. `preventDefault` ran before this guard once, and the drive keys took both.
+    Now that the keyboard never sleeps, the guard is the only thing separating typing a
+    sentence from driving."""
+    app = _js("app.js")
+    typing = re.search(r'TYPING = "([^"]+)"', app)
+    assert typing, "app.js no longer declares the TYPING selector the guard reads"
+    for control in ("input", "textarea", "button", "summary"):
+        assert control in typing.group(1), f"{control} is not in TYPING, so it loses its own keys"
+    # comments stripped: the handler's own comment names `preventDefault` while explaining
+    # why the guard has to come first, and reading that as code inverts the order it describes
+    body = re.sub(r"^\s*//.*$", "", _keydown(), flags=re.M)
+    assert "TYPING" in body, "the keydown handler no longer defers to a focused control"
+    assert body.index("TYPING") < body.index("preventDefault"), (
+        "preventDefault runs before the TYPING guard, which is exactly how Space stopped "
+        "activating focused buttons the first time"
+    )
+
+
+def test_an_abandoned_turn_stops_being_billed_for() -> None:
+    """Barge-in and Stop abort the run, and the run's signal has to reach both the sleep inside
+    a verb and the request in flight. It reached neither: a ten second `move` ran to completion
+    after Stop, and the answer nobody wanted arrived seconds later against the visitor's key."""
+    providers = _js("providers.js")
+    calls = providers.count("await fetch(")
+    assert calls, "providers.js makes no fetch, so this test is not testing anything"
+    assert providers.count("signal,") == calls, (
+        f"web/src/providers.js makes {calls} requests and passes the AbortSignal to "
+        f"{providers.count('signal,')} of them"
+    )
+    assert re.search(r"verb\.run\([^)]*signal", _js("pilot.js")), (
+        "pilot.js does not pass the signal into the verb, so Runtime.sleep's abort listener is "
+        "dead code and an aborted verb runs to the end"
+    )
 
 
 # ── failures have somewhere to go ───────────────────────────────────────────────────────
@@ -163,6 +306,57 @@ def test_the_browser_uses_the_same_gait_numbers_python_does() -> None:
     )
     achieved = re.search(r"ACHIEVED_FRACTION\s*=\s*([\d.]+)", js)
     assert achieved and float(achieved.group(1)) == gait.ACHIEVED_FRACTION
+
+
+# ── the arena is quackd's, and still the arena the verbs aim at ─────────────────────────
+
+
+def test_the_person_marker_is_no_longer_a_blue_tube_and_is_still_the_target() -> None:
+    """It was one cylinder in `0.24 0.35 0.86` — Python's blue, which over there is
+    load-bearing: `quackd/sim3d/render.py` finds a person by that exact hue, so `scene.py` has
+    to paint one. Nothing in the browser reads a pixel, `observe()` measures against the body's
+    own position, and so the only thing that blue did here was read as a stray tube. It is a
+    plinth, a post and a head in the brand's purple now — and every handle the rest of the demo
+    holds it by is untouched: the body's name, and the `person` label observe() publishes for
+    the "Walk to the person and quack" example to aim at."""
+    js = _js("microduck.js")
+    assert "0.24 0.35 0.86" not in js, (
+        "the person marker is Python's detector blue again. That hue is load-bearing in "
+        "quackd/sim3d/scene.py and decorative here, so here it can be quackd's own"
+    )
+    marker = re.search(r'<body name="person".*?</body>', js, re.S)
+    assert marker, (
+        'the arena XML defines no static body named "person"; observe() reports that name and '
+        "the example chip on the page walks to it"
+    )
+    named = re.findall(r'rgba="\$\{(\w+)\}"', marker.group(0))
+    assert named, "the person marker's geoms carry no colour of their own"
+    palette = dict(re.findall(r'(\w+)\s*=\s*"([\d.]+ [\d.]+ [\d.]+ [\d.]+)"', js))
+    for name in named:
+        assert name in palette, f"{name} is used in the arena XML and defined nowhere"
+        red, green, blue, _alpha = (float(value) for value in palette[name].split())
+        assert blue > green and red > green, (
+            f"{name} is {palette[name]}, which is not on quackd's purple axis: green at or "
+            f"above red and blue is some other colour's marker"
+        )
+    assert 'label: "person"' in js, "observe() no longer labels the marker `person`"
+
+
+def test_the_demo_claims_no_more_policies_than_it_downloads() -> None:
+    """Two ONNX files load: one stands the duck up and one walks it. The kick is quackd's own
+    scripted impulse, as the comment above it says, and copy promising a shelf of learned
+    skills is a claim the download does not support."""
+    # what is fetched, not what is named: the comment above `kick` names a third file,
+    # `ball_kick_left.onnx`, precisely to say that it did nothing and is not used
+    policies = set(re.findall(r"POLICIES\}/(\w+)\.onnx", _js("microduck.js")))
+    assert policies == {"alpha_walking", "alpha_stand"}, (
+        f"web/src/microduck.js loads {sorted(policies)}; the page and web/README.md say two"
+    )
+    readme = (WEB / "README.md").read_text(encoding="utf-8")
+    for text, where in ((HTML, "index.html"), (readme, "web/README.md")):
+        assert not re.search(r"nine[^.]{0,40}polic", text, re.I), (
+            f"{where} promises nine policies, and this demo fetches {len(policies)}"
+        )
 
 
 # ── it parses ───────────────────────────────────────────────────────────────────────────

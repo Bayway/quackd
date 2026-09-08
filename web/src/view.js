@@ -136,8 +136,15 @@ export class View {
       );
     }
     this.placeCamera();
+    // The backing store is CSS pixels × the pixel ratio, so comparing canvas.width to
+    // clientWidth was true on every frame of every retina display: setSize() — and with it a
+    // full reallocation of the WebGL drawing buffer — ran 60×/s whether or not the box moved.
     const width = this.canvas.clientWidth, height = this.canvas.clientHeight;
-    if (this.canvas.width !== width || this.canvas.height !== height) {
+    const ratio = this.renderer.getPixelRatio();
+    if (
+      this.canvas.width !== Math.floor(width * ratio) ||
+      this.canvas.height !== Math.floor(height * ratio)
+    ) {
       this.renderer.setSize(width, height, false);
       this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();

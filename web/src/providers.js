@@ -74,7 +74,7 @@ function anthropic({ key, model }) {
   return {
     name: "anthropic",
     model,
-    async step({ system, history, observation, tools }) {
+    async step({ system, history, observation, tools, signal = null }) {
       const messages = [];
       for (const turn of history) {
         messages.push({ role: "user", content: turn.observation });
@@ -90,6 +90,7 @@ function anthropic({ key, model }) {
       messages.push({ role: "user", content: observation });
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
+        signal,   // an aborted run must not keep a request alive, or keep billing for it
         headers: {
           "content-type": "application/json",
           "x-api-key": key,
@@ -120,7 +121,7 @@ function openaiCompatible({ key, model, baseUrl, label }) {
   return {
     name: label,
     model,
-    async step({ system, history, observation, tools }) {
+    async step({ system, history, observation, tools, signal = null }) {
       const messages = [{ role: "system", content: system }];
       for (const turn of history) {
         messages.push({ role: "user", content: turn.observation });
@@ -140,6 +141,7 @@ function openaiCompatible({ key, model, baseUrl, label }) {
       if (key) headers.authorization = `Bearer ${key}`;
       const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
+        signal,   // an aborted run must not keep a request alive, or keep billing for it
         headers,
         body: JSON.stringify({
           model,
@@ -180,7 +182,7 @@ function gemini({ key, model }) {
   return {
     name: "gemini",
     model,
-    async step({ system, history, observation, tools }) {
+    async step({ system, history, observation, tools, signal = null }) {
       const contents = [];
       for (const turn of history) {
         contents.push({ role: "user", parts: [{ text: turn.observation }] });
@@ -191,6 +193,7 @@ function gemini({ key, model }) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
       const response = await fetch(url, {
         method: "POST",
+        signal,   // an aborted run must not keep a request alive, or keep billing for it
         headers: { "content-type": "application/json", "x-goog-api-key": key },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
