@@ -49,16 +49,27 @@ not before.
 - ⬜ **Enable GitHub Pages** (Settings → Pages → Source: GitHub Actions). The README and
   `web/README.md` both point at `rokbenko.github.io/quackd`, `.github/workflows/pages.yml` is
   in place, and until this is switched on the workflow fails and there is no live demo.
-- ⬜ **Nothing checks `web/`.** Its rendering, DOM and recording have never run in a browser,
-  the Node harness behind its four measured claims is not in the repository, and no CI job
-  reads the directory. The cheapest fix is somebody opening the page.
-- ⬜ **CI installs no `quackd[mujoco]`**, so `tests/test_sim3d.py` and
-  `tests/test_acceptance_mujoco.py` skip on every runner and the physics sweep runs nowhere but
-  a developer's machine. Adding the extra to the matrix would cost a wheel download per job.
+- 🔨 **Somebody has to open `web/` in a browser.** `tests/test_web.py` now checks what can be
+  checked without one — the ids, the classes, the rule that was hiding nothing, static CDN
+  imports, key storage, the pins and gait numbers shared with Python, `node --check` on each
+  module, and the argument validator run under Node. The rendering, the DOM and the recording
+  still need a person with a browser, and the four measured claims in `web/README.md` still
+  come from a scratch harness that is not in the repository.
 - ⬜ Flock mode does not know `open_duck` yet (`flock/runner.py` knows two adapters), and a
   hardware flock waits on Microducks shipping.
 - ⏸ **A real model recording**, in either simulator, to replace a scripted-pilot asset and drop
   the label (see [docs/assets](docs/assets/README.md)). Needs a key.
+- ⬜ **The browser demo is not at parity with the backend.** It has seven of the manifest's
+  fifteen verbs and none of the four composites, which is what Python's own prompt tells a
+  model to prefer; perception is geometric rather than the colour detector over a rendered
+  frame; nothing it fetches is hash-checked, where Python checks all 41 files; and there is no
+  scripted pilot, so the pre-filled goal still needs a key before anything happens. All four
+  are disclosed in `web/README.md` and in the page's own observations rather than left to be
+  discovered.
+- ⬜ **`GAIT_FLOOR_VY` was never measured.** The forward and turning floors were; the sideways
+  one is assumed equal to the training maximum, so every lateral request is sent at full
+  scale. The assumption is in `GAIT_THRESHOLD`'s note and in the state's `assumptions`, and
+  the fix is the same script that produced the other two.
 - 🔨 **A transcript from a live local server** (Ollama, vLLM, llama.cpp). None on the dev
   machine. PR #5's contributor reports `find-and-kick` against Qwen 2.5 Coder 14B through LM
   Studio on seeds 5 and 6, both successes with memory read and written, but no transcript from
