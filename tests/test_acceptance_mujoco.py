@@ -28,6 +28,7 @@ from quackd.perception.color_blob import ColorBlobDetector
 from quackd.sim2d.recorder import FrameRecorder
 from quackd.sim3d.world import MujocoWorld
 from quackd.transport.mujoco import MujocoTransport
+from tests.gl import require_render
 
 SEEDS = range(10)
 MIN_SUCCESSES = 10 if os.environ.get("QUACKD_STRICT_SEEDS") == "1" else 8
@@ -40,13 +41,7 @@ MAX_SWEEP_S = 600.0
 
 
 async def test_find_and_kick_acceptance_in_mujoco(tmp_path: Path) -> None:
-    probe = MujocoWorld(seed=0)
-    try:
-        probe.renderer(64)
-    except Exception:
-        pytest.skip("no OpenGL context for offscreen rendering")
-    finally:
-        probe.close()
+    _opengl_or_skip()
     duck = load_duck("find-and-kick")
     successes = 0
     report = []
@@ -74,7 +69,6 @@ async def test_find_and_kick_acceptance_in_mujoco(tmp_path: Path) -> None:
         report.append(
             f"seed {seed}: {result.outcome} truth={truth:.2f} m steps={result.steps} {wall:.1f}s"
         )
-        walls.append(wall)
         assert (result.run_dir / "transcript.jsonl").exists()
         if recorder is not None:
             gif = recorder.save_gif(result.run_dir / "run.gif")
@@ -127,9 +121,7 @@ async def test_find_and_kick_on_the_real_duck(tmp_path: Path) -> None:
 def _opengl_or_skip() -> None:
     probe = MujocoWorld(seed=0)
     try:
-        probe.renderer(64)
-    except Exception as e:
-        pytest.skip(f"no OpenGL context for offscreen rendering: {e!r}")
+        require_render(probe)
     finally:
         probe.close()
 

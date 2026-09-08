@@ -18,7 +18,10 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # False, not true: this group guards a deployment. Cancelling one halfway leaves the site
+  # on whichever version the interrupted run had partly uploaded, and the queued run that
+  # replaces it starts from scratch anyway. GitHub's own Pages guidance says the same.
+  cancel-in-progress: false
 
 jobs:
   deploy:

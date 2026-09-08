@@ -24,6 +24,7 @@ from quackd.sim3d.scene import BALL_PARK  # noqa: E402
 from quackd.sim3d.world import CONTROL_DT, DEADMAN_S, MujocoWorld, Puppet  # noqa: E402
 from quackd.transport.base import Intent, TransportError  # noqa: E402
 from quackd.transport.mujoco import MujocoTransport  # noqa: E402
+from tests.gl import require_render  # noqa: E402
 
 
 def _run(world: MujocoWorld, seconds: float) -> None:
@@ -40,14 +41,6 @@ def _place_ball(world: MujocoWorld, dist: float, bearing_deg: float) -> None:
     world.data.qvel[world._ball_dof : world._ball_dof + 6] = 0.0
     mujoco.mj_forward(world.model, world.data)
     world.ball_start = (world.ball_x, world.ball_y)
-
-
-def _can_render(world: MujocoWorld) -> bool:
-    try:
-        world.renderer(64)
-    except Exception:
-        return False
-    return True
 
 
 # ── the world ───────────────────────────────────────────────────────────────────────────
@@ -255,8 +248,7 @@ async def test_a_fallen_duck_refuses_skills_until_enabled() -> None:
 
 def test_the_head_camera_shows_the_detector_what_the_cartoon_would() -> None:
     w = MujocoWorld(seed=3)
-    if not _can_render(w):
-        pytest.skip("no OpenGL context for offscreen rendering")
+    require_render(w)
     w.body.reset(0.0, 0.0, 0.3)
     _place_ball(w, 0.5, 20.0)
     w.step()
@@ -281,8 +273,7 @@ def test_the_head_camera_shows_the_detector_what_the_cartoon_would() -> None:
 
 def test_the_person_is_blue_enough_to_be_seen() -> None:
     w = MujocoWorld(seed=0)
-    if not _can_render(w):
-        pytest.skip("no OpenGL context for offscreen rendering")
+    require_render(w)
     px, py = w.people[0]
     w.body.reset(px - 0.8, py, 0.0)  # 0.8 m west of the person, facing it
     w.step()
@@ -295,8 +286,7 @@ async def test_the_recorder_draws_the_physics_panes(tmp_path: Path) -> None:
     t = MujocoTransport(seed=0, body="puppet")
     rec = FrameRecorder(t, size=64)  # before connect, as the CLI does
     await t.connect()
-    if not _can_render(t.world):
-        pytest.skip("no OpenGL context for offscreen rendering")
+    require_render(t.world)
     await t.send_intent(Intent.move(0.2, 0.0, 0.3))
     await t.sleep(0.6)
     rec.capture(await t.get_frame(), "observe")
