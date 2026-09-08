@@ -1,13 +1,17 @@
 """The arena as MJCF text: floor, walls, a ball, a person, and a body dropped in.
 
 The arena is the cartoon's, 2 m across with the same orange ball and the same blue person,
-so the colour detector that reads `sim2d`'s frames reads these unchanged. The floor is a
-grey checker rather than MuJoCo's usual blue one for the same reason: a blue floor is a
-person-sized blue blob in every frame.
+so the colour detector that reads `sim2d`'s frames reads these unchanged. The floor, the sky
+and the lighting are upstream's, taken from the `scene*.xml` wrappers in `microduck_rl`, so a
+Microduck here stands in the scene a Microduck stands in there.
 
-Shadows are off on purpose. They are the single biggest render cost once a real robot is in
-the scene (366 ms per frame against 112 ms with `shadowsize="0"`, measured at 256 px on an
-Intel iGPU with the Microduck's 431k triangles), and a GIF of a run needs tens of frames.
+That palette and that detector cannot both have the head camera, which is why there are two
+floors and why the head camera renders no sky: see `FLOOR_GROUP`.
+
+Shadows are off unless `QUACKD_MUJOCO_SHADOWS` asks for them. They are upstream's default and
+the single biggest render cost once a real robot is in the scene (366 ms per frame against
+112 ms with `shadowsize="0"`, measured at 256 px on an Intel iGPU with the Microduck's 431k
+triangles), and a GIF of a run needs tens of frames.
 
 Bodies are strings the caller supplies, not files this module knows: the stand-in puppet
 below is ours (a kinematic block, for tests and for anyone without the upstream meshes),
@@ -18,6 +22,8 @@ an included robot brings its own names into the same document.
 
 from __future__ import annotations
 
+import os
+
 ARENA_HALF = 1.0  # metres; the arena is [-1, 1]², as in sim2d
 BALL_R = 0.05
 PERSON_R = 0.12
@@ -25,6 +31,34 @@ PERSON_H = 0.5  # half-height of the cylinder: a metre-tall marker, as tall as a
 WALL_H = 0.08
 HEADCAM_FOV_DEG = 90.0  # the cartoon's, and the detector's default
 OFFSCREEN_PX = 1024  # the largest --gif-size the offscreen buffer allows
+
+#: The free camera upstream's own `scene*.xml` opens on, so `--live` and the recorded
+#: overview frame it from the same side the Microduck's own scenes do.
+VIEWER_AZIMUTH = 160.0
+VIEWER_ELEVATION = -20.0
+#: Shadows are upstream's default and they are the single biggest render cost once a real
+#: robot is in the scene, so they are a choice rather than a constant. `QUACKD_MUJOCO_SHADOWS`
+#: turns them on for a recording; a run that steers on rendered frames wants them off.
+SHADOWS_ENV = "QUACKD_MUJOCO_SHADOWS"
+SHADOWSIZE = 4096  # what upstream's viewer uses when shadows are on
+
+#: There are two floors, and which one you see depends on who is looking.
+#:
+#: Upstream's blue-grey checker is the scene every human view shows, because it is what a
+#: Microduck's own `scene*.xml` looks like. It is also, to an HSV detector hunting a blue
+#: person marker, a person: measured off a rendered frame, the floor sits at hue 105 with
+#: saturation up to 185 and value up to 229, against the person's hue 114, saturation 185,
+#: value 197. They overlap on all three, so with only the pretty floor the detector reported
+#: somebody standing 0.12 m ahead in every frame of every heading.
+#:
+#: So the head camera renders the same checker with the colour taken out, and nothing else
+#: changes. It is a stand-in and it is listed as one. The honest defence of it is that
+#: upstream's blue tiles are a *viewer* texture: the policies that ship with this robot are
+#: blind, they never look at the floor, and a real Microduck's camera sees a room rather than
+#: a scene file. Group 3 is hidden by MuJoCo everywhere by default, the live viewer included,
+#: so only `render_headcam` ever turns it on.
+FLOOR_GROUP = 1
+FLOOR_CAM_GROUP = 3
 
 BALL_RGBA = "1 0.55 0 1"  # (255, 140, 0): H≈16 in OpenCV, inside the detector's ball range
 PERSON_RGBA = "0.24 0.35 0.86 1"  # (60, 90, 220): H≈112, the detector's person range
@@ -67,9 +101,17 @@ def arena_xml(
     person: tuple[float, float] | None,
     timestep: float = 0.005,
     include: str = "",
+    shadows: bool | None = None,
 ) -> str:
     """The whole scene. `include` goes first (a robot's own MJCF, merged by MuJoCo's
-    `<include>`); `body_xml` is dropped into `<worldbody>` as given."""
+    `<include>`); `body_xml` is dropped into `<worldbody>` as given.
+
+    `shadows` defaults to whatever `QUACKD_MUJOCO_SHADOWS` says, and off when it says
+    nothing: see `SHADOWS_ENV`."""
+    if shadows is None:
+        shadows = os.environ.get(SHADOWS_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+    shadowsize = SHADOWSIZE if shadows else 0
+    castshadow = "true" if shadows else "false"
     lim = ARENA_HALF + 0.02
     walls = "\n".join(
         f'    <geom name="quackd_wall_{name}" type="box" pos="{px} {py} {WALL_H}" '
@@ -94,25 +136,39 @@ def arena_xml(
 {include}
   <option timestep="{timestep}" gravity="0 0 -9.81"/>
   <visual>
-    <global fovy="{HEADCAM_FOV_DEG:g}" offwidth="{OFFSCREEN_PX}" offheight="{OFFSCREEN_PX}"/>
-    <headlight ambient="0.5 0.5 0.5" diffuse="0.6 0.6 0.6" specular="0 0 0"/>
-    <quality shadowsize="0" offsamples="0"/>
+    <global fovy="{HEADCAM_FOV_DEG:g}" offwidth="{OFFSCREEN_PX}" offheight="{OFFSCREEN_PX}"
+            azimuth="{VIEWER_AZIMUTH:g}" elevation="{VIEWER_ELEVATION:g}"/>
+    <headlight ambient="0.3 0.3 0.3" diffuse="0.6 0.6 0.6" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <quality shadowsize="{shadowsize}" offsamples="0"/>
     <!-- No antialiasing: a blended edge pixel on the orange ball lands in the
          detector's cream band and reads as a second duck. The cartoon draws flat
          fills for the same reason. -->
   </visual>
   <asset>
-    <texture name="quackd_floor" type="2d" builtin="checker" width="256" height="256"
-             rgb1="0.86 0.86 0.84" rgb2="0.74 0.74 0.72"/>
-    <material name="quackd_floor" texture="quackd_floor" texrepeat="8 8" reflectance="0.05"/>
-    <texture name="quackd_sky" type="skybox" builtin="gradient" width="256" height="256"
-             rgb1="0.80 0.86 0.95" rgb2="0.60 0.70 0.85"/>
+    <!-- Upstream's own scene palette, from the `scene*.xml` wrappers in microduck_rl. -->
+    <texture name="quackd_floor" type="2d" builtin="checker" mark="edge" width="300" height="300"
+             rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8"/>
+    <material name="quackd_floor" texture="quackd_floor" texuniform="true" texrepeat="5 5"
+              reflectance="0.2"/>
+    <!-- The same checker with the colour taken out, for the head camera alone. See
+         FLOOR_GROUP below: a blue floor and a blue person are one blob to an HSV detector. -->
+    <texture name="quackd_floor_cam" type="2d" builtin="checker" mark="edge" width="300"
+             height="300" rgb1="0.62 0.62 0.62" rgb2="0.50 0.50 0.50" markrgb="0.85 0.85 0.85"/>
+    <material name="quackd_floor_cam" texture="quackd_floor_cam" texuniform="true"
+              texrepeat="5 5" reflectance="0"/>
+    <texture name="quackd_sky" type="skybox" builtin="gradient" width="512" height="3072"
+             rgb1="0.3 0.5 0.7" rgb2="0 0 0"/>
   </asset>
   <worldbody>
-    <light name="quackd_sun" pos="0.5 -0.5 3" dir="-0.15 0.15 -1" diffuse="0.7 0.7 0.7"
-           specular="0 0 0" castshadow="false"/>
-    <geom name="quackd_floor" type="plane" size="{ARENA_HALF + 0.5:g} {ARENA_HALF + 0.5:g} 0.1"
+    <light name="quackd_sun" pos="0 0 3.5" dir="0 0 -1" directional="true"
+           castshadow="{castshadow}"/>
+    <geom name="quackd_floor" type="plane" group="{FLOOR_GROUP}"
+          size="{ARENA_HALF + 0.5:g} {ARENA_HALF + 0.5:g} 0.05"
           material="quackd_floor" friction="0.8 0.005 0.0001"/>
+    <geom name="quackd_floor_cam" type="plane" group="{FLOOR_CAM_GROUP}" contype="0"
+          conaffinity="0" size="{ARENA_HALF + 0.5:g} {ARENA_HALF + 0.5:g} 0.05"
+          material="quackd_floor_cam"/>
 {walls}
     <body name="ball" pos="{ball[0]} {ball[1]} {BALL_R}">
       <joint name="ball_free" type="free"/>

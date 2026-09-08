@@ -272,6 +272,52 @@ def test_the_head_camera_shows_the_detector_what_the_cartoon_would() -> None:
     w.close()
 
 
+def test_upstreams_blue_scene_is_never_mistaken_for_a_person() -> None:
+    """The scene is upstream's, and upstream's policies are blind: nothing in `microduck_rl`
+    ever looks at its own floor. quackd put a colour detector in front of it, and that floor
+    is the same blue as the person marker — hue 105 against 114, and overlapping on saturation
+    and value too, so no threshold separates them. Measured before the head camera got its own
+    view: a person 0.12 m ahead in 48 of 48 frames, whichever way the duck faced.
+
+    The head camera renders the colourless copy of the floor and no skybox. Every other view
+    keeps upstream's palette.
+    """
+    detector = ColorBlobDetector()
+    phantoms = frames = 0
+    for seed in range(4):
+        w = MujocoWorld(seed=seed, body=Puppet())
+        require_render(w)
+        for eighth in range(8):
+            w.body.theta = eighth * math.pi / 4
+            w.body._place()
+            mujoco.mj_forward(w.model, w.data)
+            frames += 1
+            for d in detector.detect(render_headcam(w, 256)):
+                # the arena is 2 m across and the duck is 8 cm: anything "seen" closer than a
+                # duck's own radius is scenery, not a person
+                if d.label == "person" and d.est_distance_m < 0.25:
+                    phantoms += 1
+        w.close()
+    assert frames == 32
+    assert phantoms == 0, f"the scenery reads as a person in {phantoms} of {frames} frames"
+
+
+def test_the_two_floors_are_the_same_floor_seen_by_different_eyes() -> None:
+    """One collides and one does not, so the physics cannot notice which is drawn."""
+    from quackd.sim3d.scene import FLOOR_CAM_GROUP, FLOOR_GROUP
+
+    w = MujocoWorld(seed=0, body=Puppet())
+    groups = {}
+    for i in range(w.model.ngeom):
+        name = mujoco.mj_id2name(w.model, mujoco.mjtObj.mjOBJ_GEOM, i)
+        if name and "floor" in name:
+            groups[name] = (int(w.model.geom_group[i]), int(w.model.geom_contype[i]))
+    assert groups["quackd_floor"] == (FLOOR_GROUP, 1), "the scene's floor is the one that collides"
+    assert groups["quackd_floor_cam"] == (FLOOR_CAM_GROUP, 0), "the camera's floor is a picture"
+    assert FLOOR_CAM_GROUP >= 3, "MuJoCo hides 3 and up by default, the live viewer included"
+    w.close()
+
+
 def test_the_person_is_blue_enough_to_be_seen() -> None:
     w = MujocoWorld(seed=0)
     require_render(w)
