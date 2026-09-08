@@ -208,6 +208,11 @@ class MujocoTransport:
     async def subscribe(self, topic: str) -> AsyncIterator[dict[str, Any]]:  # type: ignore[override]
         from quackd.sim3d.world import CONTROL_DT
 
+        # Deliberately this duck's own participant id, not a second one. Time advances only
+        # when every registered participant is parked, so a subscriber with an id of its own
+        # would be waiting for a duck that is awake only because the same coroutine is inside
+        # the subscription: one task, two ids, and it blocks itself. The clock refuses two
+        # tasks sleeping under one id, which is the case this used to lose silently.
         while not self._closed:
             await self.sleep(CONTROL_DT)
             yield {"topic": topic, **(await self.get_state()).model_dump()}
@@ -215,6 +220,8 @@ class MujocoTransport:
     async def heartbeat(self) -> None:
         if self._closed:
             raise HeartbeatError("mujoco transport is closed")
+        if self.clock is not None and self.clock.failure is not None:
+            raise HeartbeatError(str(self.clock.failure))
 
     async def stop(self) -> None:
         if self.world is not None:
@@ -224,7 +231,7 @@ class MujocoTransport:
         return 0.0 if self.world is None else float(self.world.t)
 
     async def sleep(self, seconds: float) -> None:
-        from quackd.sim2d.clock import HookInterrupt
+        from quackd.sim2d.clock import HookInterrupt, WorldStepError
 
         try:
             await self.clock.sleep(self.pid, seconds)
@@ -232,5 +239,9 @@ class MujocoTransport:
             from quackd.safety import Aborted  # local import: safety must stay clock-free
 
             raise Aborted(str(e)) from None
+        except WorldStepError as e:
+            # The verb fails with the reason, and the next heartbeat aborts the run with the
+            # same words. Without this the physics failure surfaced as a verb that hung.
+            raise TransportError(str(e)) from e
         if self.post_sleep is not None:
             self.post_sleep()

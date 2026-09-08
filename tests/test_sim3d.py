@@ -7,6 +7,7 @@ like; everything else runs headless.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from pathlib import Path
 from typing import Any
@@ -302,6 +303,48 @@ async def test_the_recorder_draws_the_physics_panes(tmp_path: Path) -> None:
     gif = rec.save_gif(tmp_path / "run.gif")
     assert gif.exists() and gif.stat().st_size > 500
     assert len(rec.frames) >= 3 and rec.frames[0].size == (64 * 2 + 4, 64 + 22)
+    await t.close()
+
+
+# ── when time stops ─────────────────────────────────────────────────────────────────────
+
+
+async def test_a_world_that_cannot_step_ends_the_run_instead_of_hanging_it() -> None:
+    """The advancer is a task nobody awaits until `stop()`. An exception in it used to sit
+    unretrieved while every sleeper waited on a future that would never resolve: the run hung
+    until a verb timed out and the reason was collected by the garbage collector."""
+    from quackd.transport.base import HeartbeatError
+
+    t = MujocoTransport(seed=0, body="puppet")
+    await t.connect()
+
+    def explode(*_a: object, **_k: object) -> None:
+        raise RuntimeError("the physics gave up")
+
+    t.world.body.control = explode  # type: ignore[method-assign]
+    with pytest.raises(TransportError, match="the physics gave up"):
+        await asyncio.wait_for(t.sleep(0.1), timeout=5)
+    # the heartbeat says the same thing, so the run aborts rather than limping on
+    with pytest.raises(HeartbeatError, match="the physics gave up"):
+        await t.heartbeat()
+    # and a later sleep raises at once rather than starting a fresh advancer over a dead world
+    with pytest.raises(TransportError, match="the physics gave up"):
+        await asyncio.wait_for(t.sleep(0.1), timeout=5)
+    await t.close()
+
+
+async def test_two_tasks_sleeping_as_one_duck_say_so_instead_of_stranding_each_other() -> None:
+    """The clock keeps one parked waiter per participant, so a second task sleeping under the
+    same id silently overwrote the first and left its future unresolved for good. One
+    participant is one task; the pair is usually a subscription and a verb, and the answer is
+    to say which id rather than to hang."""
+    t = MujocoTransport(seed=0, body="puppet")
+    await t.connect()
+    first = asyncio.create_task(t.sleep(0.2))
+    await asyncio.sleep(0)  # let it park
+    with pytest.raises(RuntimeError, match="two tasks are sleeping as 'duck-0'"):
+        await asyncio.wait_for(t.sleep(0.2), timeout=5)
+    await asyncio.wait_for(first, timeout=5), "and the one that got there first still wakes"
     await t.close()
 
 
