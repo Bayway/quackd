@@ -287,8 +287,28 @@ class MicroduckBody:
         """`stand_up`: upstream has no get-up policy, so the model is stood up again."""
         if self.posture != "fallen":
             return
-        x, y, yaw = self.pose()
-        self.reset(x, y, yaw)
+        x, y, _yaw = self.pose()
+        self.reset(x, y, self.heading())
+
+    def heading(self) -> float:
+        """Which way the duck is facing, in a way that survives being on its face.
+
+        `pose()` reads yaw from the trunk quaternion, which is the right answer while the duck
+        is upright and an arbitrary one where it usually is not: face-down and on its back are
+        both at the gimbal degeneracy, and that is exactly when `stand_up` asks. Take the
+        trunk's own forward axis projected on the floor, and when the duck is nose-down or
+        belly-up and that projection vanishes, fall back to where its underside points.
+        """
+        r = self._data.xmat[self.trunk].reshape(3, 3)
+        forward = (float(r[0, 0]), float(r[1, 0]))
+        if math.hypot(*forward) < 0.1:
+            # nose-down or nose-up: the trunk's z-axis is the only thing still lying flat
+            up_axis = (float(r[0, 2]), float(r[1, 2]))
+            sign = -1.0 if r[2, 0] > 0 else 1.0
+            forward = (sign * up_axis[0], sign * up_axis[1])
+        if math.hypot(*forward) < 1e-6:
+            return self.pose()[2]  # nothing to read: keep whatever it had
+        return math.atan2(forward[1], forward[0])
 
     def assumptions(self) -> list[str]:
         return list(ASSUMPTIONS)

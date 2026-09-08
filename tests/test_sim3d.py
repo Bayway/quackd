@@ -306,6 +306,39 @@ async def test_the_recorder_draws_the_physics_panes(tmp_path: Path) -> None:
     await t.close()
 
 
+# ── standing back up ────────────────────────────────────────────────────────────────────
+
+
+def test_standing_up_clears_the_twist_that_put_it_down() -> None:
+    """The command that made it fall is still on the books until the deadman notices, so a
+    duck stood back up used to walk straight off again."""
+    w = MujocoWorld(seed=0, body=Puppet())
+    w.set_velocity(0.2, 0.0, 0.0)
+    w.body.fall()
+    w.enable()
+    assert w.posture == "standing"
+    assert w.cmd == (0.0, 0.0, 0.0)
+
+
+def test_standing_up_does_not_leave_the_duck_inside_something() -> None:
+    """A duck goes down while walking, so it comes to rest wherever it slid to: against a
+    wall, on the ball, or overlapping the person. Standing up in place puts it inside them."""
+    from quackd.sim3d.scene import ARENA_HALF, PERSON_R
+    from quackd.sim3d.world import DUCK_R
+
+    w = MujocoWorld(seed=0, body=Puppet())
+    px, py = w.people[0]
+    w.body.x, w.body.y = px, py  # face down on top of the person
+    w.body.fall()
+    w.enable()
+    assert math.hypot(w.x - px, w.y - py) >= DUCK_R + PERSON_R - 1e-9
+
+    w.body.x, w.body.y = ARENA_HALF * 2, 0.0  # slid through the wall
+    w.body.fall()
+    w.enable()
+    assert abs(w.x) <= ARENA_HALF - DUCK_R + 1e-9
+
+
 # ── rendering, and what happens without a screen ────────────────────────────────────────
 
 
@@ -526,6 +559,30 @@ def test_the_real_duck_walks_turns_and_stays_upright() -> None:
     _walked, turned = drive(0.0, 1.2, 6.0)
     assert turned > 1.5, f"asked for 1.2 rad/s and turned {turned:.2f} rad in 6 s"
     assert w.posture == "standing", "the duck fell over walking on its own policy"
+    w.close()
+
+
+@pytest.mark.real_duck
+def test_a_duck_that_fell_on_its_face_stands_up_facing_the_way_it_was_going() -> None:
+    """Yaw from the trunk quaternion is the right answer while the duck is upright and an
+    arbitrary one where it usually is not. Face-down is the gimbal degeneracy, and it is also
+    how a biped most often lands: measured on the real model, a duck facing +x that goes onto
+    its nose reads as yaw 3.14, so `stand_up` used to put it back on its feet facing
+    backwards, one step into whatever it had been walking towards."""
+    from quackd.sim3d.microduck import MicroduckBody
+
+    w = MujocoWorld(seed=0, body=MicroduckBody(_cached_microduck()))
+    b = w.body
+    b.reset(0.0, 0.0, 0.0)  # facing +x
+    b._data.qpos[b.free_q + 3 : b.free_q + 7] = (
+        math.cos(-math.pi / 4),
+        0.0,
+        math.sin(-math.pi / 4),
+        0.0,
+    )
+    mujoco.mj_forward(b._model, b._data)
+    assert abs(b.pose()[2]) == pytest.approx(math.pi, abs=0.01), "the quaternion says backwards"
+    assert b.heading() == pytest.approx(0.0, abs=0.01), "and the trunk's own axis says forwards"
     w.close()
 
 

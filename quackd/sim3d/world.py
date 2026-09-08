@@ -24,7 +24,9 @@ import numpy as np
 from quackd.sim3d.scene import (
     ARENA_HALF,
     BALL_PARK,
+    BALL_R,
     OFFSCREEN_PX,
+    PERSON_R,
     PUPPET_BODY_Z,
     PUPPET_HEAD_AHEAD,
     PUPPET_HEAD_Z,
@@ -492,7 +494,40 @@ class MujocoWorld:
         return posture
 
     def enable(self) -> None:
+        """`stand_up`: put it back on its feet, stopped, and not inside anything.
+
+        The body knows how to stand itself up but not what it would be standing in. A duck
+        goes down while walking, so it comes to rest wherever it slid to: against a wall, on
+        top of the ball, or overlapping the person. And `stop()` first, because the twist that
+        put it down is still on the books until the deadman notices.
+        """
+        if self.posture != "fallen":
+            return
+        self.stop()
         self.body.enable()
+        x, y, theta = self.body.pose()
+        sx, sy = self._standing_spot(x, y)
+        if (sx, sy) != (x, y):
+            self.body.reset(sx, sy, theta)
+
+    def _standing_spot(self, x: float, y: float) -> tuple[float, float]:
+        """`(x, y)` pushed out of anything solid and back inside the walls."""
+        lim = ARENA_HALF - DUCK_R
+        x, y = min(max(x, -lim), lim), min(max(y, -lim), lim)
+        obstacles = [(px, py, PERSON_R) for px, py in self.people]
+        if self.ball_present:
+            obstacles.append((self.ball_x, self.ball_y, BALL_R))
+        for ox, oy, r in obstacles:
+            dx, dy = x - ox, y - oy
+            dist = math.hypot(dx, dy)
+            need = DUCK_R + r
+            if dist >= need:
+                continue
+            if dist < 1e-6:  # exactly on top of it: any direction will do, pick a fixed one
+                dx, dy, dist = 1.0, 0.0, 1.0
+            x = min(max(ox + dx / dist * need, -lim), lim)
+            y = min(max(oy + dy / dist * need, -lim), lim)
+        return x, y
 
     def sound(self, tag: str, text: str | None) -> None:
         self.quacks.append((self.t, tag, text))
