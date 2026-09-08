@@ -141,27 +141,24 @@ before the trace kinds existed.
 ## Trace
 
 The transcript is one *sink* of an event stream, not a thing the loop writes directly
-([ADR-0029](adr/0029-tracing.md)). The same events drive two live views, both on by default:
+([ADR-0029](adr/0029-tracing.md)). The same events drive three live views, all on by default:
 
 - **The terminal** (`quackd run`), on stderr, so `2> trace.log` keeps the outcome on screen.
   It shows the system prompt once, then per turn: the observation, what the model thought,
   the tool it called, tokens and latency, each gate that fired, each intent, and the result.
   A burst of intents from a steering loop is one line with its parameter ranges, because
-  `go_to` recomputes its twist every 100 ms: `-> move x26 over 0.5 s (vx 0.1..0.2, wz -0.01..0.88)`.
+  `go_to` recomputes its twist every 100 ms: `-> move x26 over 2.5 s (vx 0.1..0.2, vy 0, wz -0.01..0.88)`.
+  A burst still going after two seconds is flushed as it stands and the next line continues
+  it, so a long approach narrates itself instead of printing nothing until it ends.
 - **The MCP tool result**, as a `trace` list on every call that reaches an executor, capped
   at thirty lines, with the uncapped version on the server's stderr. Over MCP the pilot is
   the client, so its reasoning and its token counts are not quackd's to show. What quackd can
   see it says: the verb, the gates, the intents, the result and the budget.
+- **A flock's terminal**, one view per member with its name on every line and the
+  coordinator's decisions under `flock`. Each robot's own transcript is its record.
 
-A burst that is still going after two seconds is flushed as it stands and the next line
-continues it, so a twenty second `go_to` narrates itself rather than printing nothing until
-it ends.
-
-A flock is traced the same way, one view per member with its name on every line, and the
-coordinator's decisions under `flock`. Each robot's own transcript is its record.
-
-`quackd trace` replays a finished run from its transcript, through the same renderer, on
-stdout.
+`quackd trace` replays a finished run from its transcript afterwards, through the same
+renderer, on stdout.
 
 `--no-trace` or `QUACKD_TRACE=0` removes the views. The transcript is unaffected, because a
 run that cannot be argued about afterwards is the thing this project cannot give up.
