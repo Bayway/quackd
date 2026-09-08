@@ -228,3 +228,46 @@ def test_the_upstream_licence_is_named_on_the_page_that_downloads_it() -> None:
     """The visitor's browser fetches CC BY-NC-SA meshes. The page has to say so."""
     assert "BY-SA-NC" in HTML or "BY-NC-SA" in HTML
     assert json.dumps  # keeps the import honest if the assertion above is ever relaxed
+
+
+def test_the_browser_refuses_the_arguments_python_refuses() -> None:
+    """The one check here that runs the code rather than reading it.
+
+    The verb schemas were sent to the vendor and never enforced locally, so a model that
+    ignored one got what it asked for: `duration_s: 1e6` became ten million awaited slices and
+    hung the tab, and `duration_s: "soon"` produced NaN, ran no loop and reported success.
+    Python rejects both with pydantic before the verb runs.
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("no node on this machine; the GitHub runners all have one")
+    script = f"""
+    import {{ checkParams, VERBS }} from {json.dumps((SRC / "pilot.js").as_uri())};
+    const out = {{}};
+    out.huge = checkParams(VERBS.move.params, {{ duration_s: 1e6 }});
+    out.notANumber = checkParams(VERBS.move.params, {{ duration_s: "soon" }});
+    out.outOfRange = checkParams(VERBS.move.params, {{ vx: 99, duration_s: 1 }});
+    out.unknown = checkParams(VERBS.move.params, {{ nope: 1 }});
+    out.fine = checkParams(VERBS.move.params, {{ duration_s: 2, vx: 0.2 }});
+    out.empty = checkParams(VERBS.move.params, {{}});
+    out.longSay = checkParams(VERBS.say.params, {{ text: "x".repeat(500) }});
+    out.badLeg = checkParams(VERBS.kick.params, {{ leg: "middle" }});
+    console.log(JSON.stringify(out));
+    """
+    done = subprocess.run(
+        [node, "--input-type=module"],
+        input=script,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert done.returncode == 0, done.stderr
+    got = json.loads(done.stdout)
+    assert "at most 10" in got["huge"]
+    assert "finite number" in got["notANumber"]
+    assert "at most 0.3" in got["outOfRange"]
+    assert "nope" in got["unknown"]
+    assert "at most 200" in got["longSay"]
+    assert "left, right" in got["badLeg"]
+    assert got["fine"] is None
+    assert got["empty"] is None, "Python's MoveParams requires nothing, so neither may this"

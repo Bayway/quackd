@@ -12,6 +12,11 @@
  * position targets of `default_pose + action`. Two numbers here were measured rather than
  * read, and are marked where they are used: the gait floor and the fraction of a command
  * the duck actually achieves.
+ *
+ * Three things differ from Python on purpose, and `web/README.md` says so too. Perception is
+ * geometric rather than a colour detector over a rendered frame. Nothing fetched is checked
+ * against a hash. And the seeded arena uses a different generator, so a seed means the same
+ * distributions here, not the same layout.
  */
 
 const RL_PIN = "2b25a48b08f1f17bc38c90bb03144c81fbd9ed07"; // microduck_rl develop, 2026-09-06
@@ -47,6 +52,9 @@ export const GAIT_FLOOR = { vx: 0.22, vy: 0.30, wz: 1.0 };
 // What fraction of a commanded twist the body actually delivers. Python holds the same
 // number in quackd/sim3d/gait.py; the prompt quotes it rather than rounding it to "half".
 export const ACHIEVED_FRACTION = 0.42;
+// What the world accepts before the gait floor sees it, from quackd/sim3d/world.py. The verb
+// schemas advertise the same numbers; this is the floor under a model that ignores them.
+export const MAX_VX = 0.3, MAX_VY = 0.2, MAX_WZ = 1.5;
 const CMD_MAX = { vx: 0.40, vy: 0.30, wz: 1.50 };
 const DEAD_FRACTION = 1 / 3;
 
@@ -60,10 +68,20 @@ export const HEAD_YAW_LIMIT = (60 * Math.PI) / 180;
 const HEAD_PITCH_LIMIT = (35 * Math.PI) / 180;
 
 /** A small deterministic generator, so a seed lays out the same arena every time. */
+/**
+ * xorshift32, seeded. Every shift is unsigned: `>>` sign-extends once the state passes 2^31,
+ * which quietly made this a different generator from the one it looks like.
+ *
+ * It is not numpy's PCG64 either, and it is not trying to be. The same seed lays out a
+ * different arena here than in Python; what the two share is the distributions and the
+ * rejection rules, not the stream.
+ */
 function rng(seed) {
   let s = (seed >>> 0) || 1;
   return () => {
-    s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0;
+    s ^= s << 13; s >>>= 0;
+    s ^= s >>> 17;
+    s ^= s << 5; s >>>= 0;
     return s / 4294967296;
   };
 }
@@ -153,12 +171,24 @@ export class Microduck {
     const random = rng(seed);
     const dx = () => (random() - 0.5) * 0.6;
     const duck = [dx(), dx(), (random() - 0.5) * 2 * Math.PI];
-    let ball, person;
-    do { ball = [(random() - 0.5) * 1.5, (random() - 0.5) * 1.5]; }
-    while (Math.hypot(ball[0] - duck[0], ball[1] - duck[1]) < 0.5);
-    do { person = [(random() - 0.5) * 1.6, (random() - 0.5) * 1.6]; }
-    while (Math.hypot(person[0] - duck[0], person[1] - duck[1]) < 0.6 ||
-           Math.hypot(person[0] - ball[0], person[1] - ball[1]) < 0.4);
+    // Bounded like Python's, which stops after a thousand draws. Unbounded, a generator that
+    // ever stopped producing usable numbers would hang the page during load with the overlay
+    // still up and nothing to say why.
+    const place = (spread, ok) => {
+      let at = [0, 0];
+      for (let i = 0; i < 1000; i++) {
+        at = [(random() - 0.5) * spread, (random() - 0.5) * spread];
+        if (ok(at)) break;
+      }
+      return at;
+    };
+    const ball = place(1.5, (b) => Math.hypot(b[0] - duck[0], b[1] - duck[1]) >= 0.5);
+    const person = place(
+      1.6,
+      (q) =>
+        Math.hypot(q[0] - duck[0], q[1] - duck[1]) >= 0.6 &&
+        Math.hypot(q[0] - ball[0], q[1] - ball[1]) >= 0.4
+    );
 
     const model = mujoco.MjModel.from_xml_string(arenaXml(ball, person), vfs);
     const data = new mujoco.MjData(model);
@@ -195,32 +225,48 @@ export class Microduck {
     this.reset();
   }
 
-  reset() {
+  /** Put the robot back on its feet where it is. Nothing else in the world is touched. */
+  placeBody(x, y, theta) {
     const { data, mujoco, model } = this;
-    mujoco.mj_resetData(model, data);
-    const [x, y, theta] = this.spawn;
     const q = data.qpos;
     q[this.freeQ] = x; q[this.freeQ + 1] = y; q[this.freeQ + 2] = 0.125;
     q[this.freeQ + 3] = Math.cos(theta / 2);
     q[this.freeQ + 4] = 0; q[this.freeQ + 5] = 0;
     q[this.freeQ + 6] = Math.sin(theta / 2);
-    for (let j = 0; j < NJ; j++) { q[this.qadr[j]] = HOME[j]; data.ctrl[j] = HOME[j]; }
-    q[this.ballQ] = this.ballStart[0]; q[this.ballQ + 1] = this.ballStart[1]; q[this.ballQ + 2] = BALL_R;
-    q[this.ballQ + 3] = 1; q[this.ballQ + 4] = 0; q[this.ballQ + 5] = 0; q[this.ballQ + 6] = 0;
+    for (let i = 0; i < 6; i++) data.qvel[this.freeV + i] = 0;
+    for (let j = 0; j < NJ; j++) {
+      q[this.qadr[j]] = HOME[j];
+      data.qvel[this.vadr[j]] = 0;
+      data.ctrl[j] = HOME[j];
+    }
     this.lastAction.fill(0);
-    this.t = 0;
     this.posture = "standing";
     this.downTicks = 0;
-    this.kicks = 0; this.kicksConnected = 0; this.kickOrigin = null;
     this.setTwist(0, 0, 0);
     mujoco.mj_forward(model, data);
+  }
+
+  /** Start the whole episode again: the robot, the ball, the clock and the tally. */
+  reset() {
+    const { data, mujoco, model } = this;
+    mujoco.mj_resetData(model, data);
+    const q = data.qpos;
+    q[this.ballQ] = this.ballStart[0]; q[this.ballQ + 1] = this.ballStart[1]; q[this.ballQ + 2] = BALL_R;
+    q[this.ballQ + 3] = 1; q[this.ballQ + 4] = 0; q[this.ballQ + 5] = 0; q[this.ballQ + 6] = 0;
+    this.t = 0;
+    this.kicks = 0; this.kicksConnected = 0; this.kickOrigin = null;
+    this.placeBody(...this.spawn);
   }
 
   // ── what a pilot may ask for ─────────────────────────────────────────────────────
 
   /** A body-frame twist. Re-send it at least every 0.3 s or the deadman zeroes it. */
   setTwist(vx, vy, wz) {
-    this.commanded = [vx, vy, wz];
+    // Clipped to the envelope the world accepts before the gait floor sees it, exactly as
+    // `MujocoWorld.set_velocity` does. Nothing clamped here at all, so a model that ignored
+    // the schema could ask for any speed it liked.
+    const clip = (v, limit) => (Number.isFinite(v) ? Math.max(-limit, Math.min(limit, v)) : 0);
+    this.commanded = [clip(vx, MAX_VX), clip(vy, MAX_VY), clip(wz, MAX_WZ)];
     this.cmdAge = 0;
   }
 
@@ -237,6 +283,12 @@ export class Microduck {
    * standing pose when it was tried, so this is the cartoon's rule — an impulse on the
    * ball when it is inside 0.30 m of the head and within a 35 degree cone.
    */
+  /** A normal deviate from the seeded stream, by Box-Muller. */
+  gaussian(mean, sigma) {
+    const u = Math.max(this.random(), Number.EPSILON);
+    return mean + sigma * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * this.random());
+  }
+
   kick(leg = "right") {
     this.kicks += 1;
     if (this.posture !== "standing") return false;
@@ -244,19 +296,26 @@ export class Microduck {
     this.kickOrigin = [this.ballX, this.ballY];
     if (distance > KICK_RANGE || Math.abs((bearing * 180) / Math.PI) > KICK_CONE_DEG) return false;
     this.kicksConnected += 1;
-    const skew = (this.random() - 0.5) * 0.2 + (leg === "left" ? 0.05 : -0.05);
+    // Gaussian with sigma six degrees, as sim2d and sim3d both use. A uniform +/- 5.7 was a
+    // different distribution wearing the same numbers, so a kick here missed differently.
+    const skew = this.gaussian(0, (6 * Math.PI) / 180) + (leg === "left" ? 0.05 : -0.05);
     const angle = this.pose.theta + skew;
     this.data.qvel[this.ballV] = KICK_SPEED * Math.cos(angle);
     this.data.qvel[this.ballV + 1] = KICK_SPEED * Math.sin(angle);
+    this.data.qvel[this.ballV + 2] = 0;  // Python zeroes it: a kicked ball rolls, it does not hop
     return true;
   }
 
   /** Upstream ships no get-up policy, so recovery stands the model up where it lies. */
   standUp() {
     if (this.posture !== "fallen") return;
+    // The body only. This used to call reset(), which re-placed the ball, set the clock back
+    // to zero and cleared the kick tally: the run's time budget went permanently negative
+    // because it is measured from a start time, and every kick the pilot had landed was
+    // erased along with the evidence it would cite. Python's `enable()` moves the robot and
+    // nothing else.
     const { x, y, theta } = this.pose;
-    this.spawn = [x, y, theta];
-    this.reset();
+    this.placeBody(x, y, theta);
   }
 
   // ── one 50 Hz control tick ───────────────────────────────────────────────────────
@@ -378,8 +437,8 @@ export class Microduck {
       twist_sent: this.sent.map((v) => +v.toFixed(2)),
       head_yaw_deg: Math.round((this.head[0] * 180) / Math.PI),
       detections: [
-        inView(ball) && { label: "ball", bearing_deg: Math.round((ball.bearing * 180) / Math.PI), distance_m: +ball.distance.toFixed(2) },
-        inView(person) && { label: "person", bearing_deg: Math.round((person.bearing * 180) / Math.PI), distance_m: +person.distance.toFixed(2) },
+        inView(ball) && { label: "ball", bearing_deg: Math.round((ball.bearing * 180) / Math.PI), est_distance_m: +ball.distance.toFixed(2) },
+        inView(person) && { label: "person", bearing_deg: Math.round((person.bearing * 180) / Math.PI), est_distance_m: +person.distance.toFixed(2) },
       ].filter(Boolean),
       ball_moved_m: +this.ballDisplacement.toFixed(2),
     };
