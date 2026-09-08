@@ -82,3 +82,61 @@ def test_pyproject_declares_the_hook_and_ships_it() -> None:
     assert cfg["tool"]["hatch"]["metadata"]["hooks"]["custom"]["path"] == "hatch_build.py"
     # the sdist must carry the hook, or building a wheel from it cannot run this
     assert "hatch_build.py" in cfg["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
+
+
+def test_no_image_under_docs_assets_ships_in_the_sdist() -> None:
+    """The one rule keeping a non-Apache asset out of a published package.
+
+    `docs/assets/quackd-on-off.gif` renders upstream's model and carries its CC BY-NC-SA
+    terms, and `docs/licenses.md` promises that neither the wheel nor the repository's
+    published artefacts carry a byte of it. The README serves every image from
+    raw.githubusercontent, so no artefact needed any of them anyway. Nothing checked this.
+    """
+    import fnmatch
+
+    cfg = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    patterns = cfg["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"]
+    images = [
+        p
+        for p in (REPO / "docs" / "assets").iterdir()
+        if p.suffix.lower() in {".gif", ".png", ".svg", ".jpg", ".jpeg", ".webp"}
+    ]
+    assert images, "docs/assets has no images, so this test is not testing anything"
+    for image in images:
+        relative = image.relative_to(REPO).as_posix()
+        assert any(fnmatch.fnmatch(relative, pattern) for pattern in patterns), (
+            f"{relative} would ship in the sdist. The README serves images from "
+            f"raw.githubusercontent and the hero renders a CC BY-NC-SA model "
+            f"(docs/licenses.md), so add its suffix to the sdist exclude in pyproject.toml."
+        )
+
+
+def test_the_hero_script_uses_the_cap_the_pre_commit_hook_is_configured_with() -> None:
+    """`check-added-large-files` only inspects files being *added*, so regenerating the hero
+    in place past the cap is invisible to it. The script's own check is the one that fires,
+    and it was set 97 KB tighter than the hook it claimed to mirror."""
+    import ast
+
+    hook = (REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    maxkb = int(re.search(r"--maxkb=(\d+)", hook).group(1))  # type: ignore[union-attr]
+    source = (REPO / "docs" / "assets" / "hero3d.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    found = [
+        ast.literal_eval(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(getattr(t, "id", None) == "MAX_BYTES" for t in node.targets)
+    ]
+    assert found == [maxkb * 1024], (
+        f"docs/assets/hero3d.py caps the hero at {found}, and the pre-commit hook refuses "
+        f"anything over {maxkb} KB ({maxkb * 1024} bytes). Move one of the two."
+    )
+
+
+def test_every_recorded_asset_is_under_that_cap_today() -> None:
+    hook = (REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    maxkb = int(re.search(r"--maxkb=(\d+)", hook).group(1))  # type: ignore[union-attr]
+    for asset in (REPO / "docs" / "assets").iterdir():
+        if asset.is_file() and asset.suffix.lower() != ".py":
+            kb = asset.stat().st_size // 1024
+            assert kb <= maxkb, f"docs/assets/{asset.name} is {kb} KB; the cap is {maxkb} KB"

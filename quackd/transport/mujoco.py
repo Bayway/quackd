@@ -77,11 +77,23 @@ class MujocoTransport:
         else:
             self.clock.add_tick_hook(hook)
 
+    def _connected(self) -> Any:
+        """The world, or a refusal that names the reason.
+
+        Every one of these used to reach through `self.world` while it was still None, so
+        calling them before `connect()` gave an AttributeError about NoneType rather than a
+        transport error saying what was wrong.
+        """
+        if self.world is None:
+            raise TransportError("the mujoco transport is not connected")
+        return self.world
+
     def render_panes(self, size: int) -> tuple[Image.Image, Image.Image, str]:
         """What the recorder draws: the arena from a corner, and the head's own view."""
         from quackd.sim3d.render import render_headcam, render_overview
 
-        return render_overview(self.world, size), render_headcam(self.world, size), "duck cam"
+        w = self._connected()
+        return render_overview(w, size), render_headcam(w, size), "duck cam"
 
     # ── protocol ────────────────────────────────────────────────────────────────────
 
@@ -129,18 +141,17 @@ class MujocoTransport:
     async def get_frame(self) -> Image.Image | None:
         from quackd.sim3d.render import render_headcam
 
-        return render_headcam(self.world, self.frame_size)
+        return render_headcam(self._connected(), self.frame_size)
 
     async def get_state(self) -> DuckState:
-        w = self.world
+        w = self._connected()
         battery = max(0.0, self.battery_start - BATTERY_DRAIN_PER_S * w.t)
-        policy = "sit" if w.posture == "sitting" else ("walk" if w.moving else "stand")
         return DuckState(
             t=w.t,
             x=w.x,
             y=w.y,
             theta=w.theta,
-            policy=policy,
+            policy=w.policy,
             posture=w.posture,
             fallen=w.posture == "fallen",
             battery_percent=battery,
@@ -149,8 +160,16 @@ class MujocoTransport:
         )
 
     async def send_intent(self, intent: Intent) -> Ack:
-        w = self.world
+        w = self._connected()
         p = intent.params
+        try:
+            return self._dispatch(w, intent, p)
+        except ValueError as e:
+            # the world refuses a non-finite twist or gaze. A refused intent is an answer the
+            # pilot can read and correct; letting it out of here would end the run instead.
+            return Ack(accepted=False, reason=str(e))
+
+    def _dispatch(self, w: Any, intent: Intent, p: dict[str, Any]) -> Ack:
         match intent.kind:
             case "move":
                 w.set_velocity(p.get("vx", 0.0), p.get("vy", 0.0), p.get("wz", 0.0))
@@ -201,6 +220,11 @@ class MujocoTransport:
     async def subscribe(self, topic: str) -> AsyncIterator[dict[str, Any]]:  # type: ignore[override]
         from quackd.sim3d.world import CONTROL_DT
 
+        # Deliberately this duck's own participant id, not a second one. Time advances only
+        # when every registered participant is parked, so a subscriber with an id of its own
+        # would be waiting for a duck that is awake only because the same coroutine is inside
+        # the subscription: one task, two ids, and it blocks itself. The clock refuses two
+        # tasks sleeping under one id, which is the case this used to lose silently.
         while not self._closed:
             await self.sleep(CONTROL_DT)
             yield {"topic": topic, **(await self.get_state()).model_dump()}
@@ -208,6 +232,8 @@ class MujocoTransport:
     async def heartbeat(self) -> None:
         if self._closed:
             raise HeartbeatError("mujoco transport is closed")
+        if self.clock is not None and self.clock.failure is not None:
+            raise HeartbeatError(str(self.clock.failure))
 
     async def stop(self) -> None:
         if self.world is not None:
@@ -217,7 +243,7 @@ class MujocoTransport:
         return 0.0 if self.world is None else float(self.world.t)
 
     async def sleep(self, seconds: float) -> None:
-        from quackd.sim2d.clock import HookInterrupt
+        from quackd.sim2d.clock import HookInterrupt, WorldStepError
 
         try:
             await self.clock.sleep(self.pid, seconds)
@@ -225,5 +251,9 @@ class MujocoTransport:
             from quackd.safety import Aborted  # local import: safety must stay clock-free
 
             raise Aborted(str(e)) from None
+        except WorldStepError as e:
+            # The verb fails with the reason, and the next heartbeat aborts the run with the
+            # same words. Without this the physics failure surfaced as a verb that hung.
+            raise TransportError(str(e)) from e
         if self.post_sleep is not None:
             self.post_sleep()

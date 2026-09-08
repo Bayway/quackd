@@ -92,8 +92,14 @@ COMPILER = UpstreamRef(
     "VERIFIED",
     src(f"{_ROBOT}/robot_walk.xml"),
 )
+MESH_BYTES = 21_593_292
+"""The meshes on disk, in bytes, as a number rather than as prose inside a ref's name.
+
+The tarball over the wire is about a tenth of this, and saying only the smaller figure while
+writing the larger one into someone's cache is the kind of surprise a log line should not
+spring."""
 MESH_COUNT = UpstreamRef(
-    "38 STL meshes, 21,593,292 bytes",
+    f"38 STL meshes, {MESH_BYTES:,} bytes",
     "VERIFIED",
     src(f"{_ROBOT}/assets"),
     "every <mesh> the walking model references; all 75 mesh geoms are class 'visual' "
@@ -295,6 +301,15 @@ GAIT_THRESHOLD = UpstreamRef(
     "10 s, 0.22 walks 0.90 m; wz 0.8 turns 0.14 rad, 1.0 turns 3.83 rad. Upstream trains and "
     "deploys with the BAM actuator model, so the real robot may track commands directly. "
     "quackd scales a non-zero twist up so the gait starts, and says so in the state",
+)
+HEAD_PITCH_SIGN = UpstreamRef(
+    "a positive head_pitch in the command vector tilts the camera down",
+    "UNVERIFIED",
+    src(_INFER),
+    "measured 2026-09-07 by driving the command and watching the rendered head camera, not "
+    "read anywhere: quackd negates its own pitch so that looking up is a positive number. "
+    "neck_pitch (command[3]) and head_roll (command[6]) are left at zero, because quackd's "
+    "gaze has one pitch and no roll, so nothing here has ever exercised them",
 )
 KICK_STANDIN = UpstreamRef(
     "ball_kick_left.onnx, ball_kick_right.onnx, alpha_ground_pick.onnx, alpha_sitstand.onnx",

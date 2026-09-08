@@ -8,7 +8,10 @@ kick cone, the deadman and the seeded spawn order are the cartoon's, deliberatel
 `.duck` written against one runs unchanged against the other and a seed means the same
 layout in both.
 
-Everything here imports `mujoco`, which is an optional extra (`quackd[mujoco]`): nothing on
-the default path imports this package, and the transport that uses it imports it inside
-`connect()` so `--robot microduck:mujoco` fails with the extra's name rather than a stack.
+Nearly everything here imports `mujoco`, which is an optional extra (`quackd[mujoco]`):
+nothing on the default path imports this package, and the transport that uses it imports it
+inside `connect()` so `--robot microduck:mujoco` fails with the extra's name rather than a
+stack. The exception is `gait.py`, which is deliberately pure arithmetic over floats, so the
+rule that decides whether a duck moves or only reports moving is tested on every runner
+rather than only where the extra and a filled asset cache happen to meet.
 """

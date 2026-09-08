@@ -580,3 +580,13 @@ def test_a_console_that_raises_is_reported_once_at_the_end(tmp_path: Path, monke
     assert "could not be shown" in out
     assert "transcript.jsonl has them" in out
     assert "SUCCESS" in out, "a broken console must not change the outcome"
+
+
+def test_a_gif_pane_larger_than_the_offscreen_buffer_is_refused_before_anything_runs() -> None:
+    """The physics model compiles a 1024 px offscreen buffer, so a larger pane fails inside
+    MuJoCo halfway through a run. Typer refuses it at the boundary instead, and the number is
+    spelled in `cli.py` because `cli.py` must not import `sim3d`. `tests/test_sim3d.py` pins
+    the two to each other."""
+    result = runner.invoke(app, ["run", "hello-world", "--gif-size", "4096"])
+    assert result.exit_code == 2
+    assert "1024" in result.output

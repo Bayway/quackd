@@ -36,8 +36,9 @@ GPU. Its README says an NVIDIA GPU is required for training and macOS is evaluat
 its Windows support is "preliminary" and "not guaranteed to be stable"; MuJoCo Warp's own
 documentation says a single step is *slower* than MuJoCo's because it optimises throughput
 rather than latency; and `microduck_rl` pins Python 3.12 exactly with torch and warp behind
-it. None of that suits one duck in a 50 Hz loop on a laptop. Plain MuJoCo is a 17 MB wheel
-with cp311 and cp312 builds for Windows, macOS and Linux, and no GPU.
+it. None of that suits one duck in a 50 Hz loop on a laptop. Plain MuJoCo is a wheel of 17
+to 20 MB depending on the platform, with builds for Windows and Linux on x86-64 and macOS on
+Apple Silicon, and no GPU. There is no Intel Mac wheel.
 
 ## Decision
 
@@ -60,7 +61,7 @@ with cp311 and cp312 builds for Windows, macOS and Linux, and no GPU.
   CI exercises every intent, the recorder and a seeded acceptance sweep offline, and the
   tests that need the real duck skip when the cache is empty.
 - **The gait floor is handled in the open.** Under the model's own PD actuators the walking
-  policy does not step below about 0.22 m/s or 1.0 rad/s, and it achieves roughly half of
+  policy does not step below about 0.22 m/s or 1.0 rad/s, and it achieves about 0.42 of
   what it is asked. `move` defaults to 0.15 m/s, so passing a command through unchanged
   would give a duck that reports walking and stands still, which is the worst failure a
   simulator can have. A non-zero twist is scaled bodily up to the floor, keeping the ratio
@@ -86,13 +87,18 @@ with cp311 and cp312 builds for Windows, macOS and Linux, and no GPU.
 
 - The one thing the cartoon could never show is now on the table: `find-and-kick` succeeds
   on 10 of 10 seeds with the scripted pilot **and the duck walking on its own trained
-  policy**, ground truth checked. A pilot that works here has met a robot that undershoots.
+  policy**, ground truth checked. That sweep is `test_find_and_kick_on_the_real_duck`; it runs
+  only where upstream's model is already cached, and the sweep beside it runs the same ten
+  seeds on the puppet. A pilot that works here has met a robot that undershoots.
 - Rendering is the cost. On an Intel iGPU a head-camera frame is 4 ms with the shell hidden
   and the over-the-shoulder view about 110 ms with 431k triangles in it, so shadows are off,
   the recorder samples half as often as the cartoon's, and `--live` uses MuJoCo's own viewer.
 - CI never fetches the model, so the `microduck:mujoco` row's ✅ rests on the puppet's sweep
   plus tests that skip where the cache is empty. The real duck's numbers in this ADR were
-  measured on one machine, and `GAIT_THRESHOLD` is tagged UNVERIFIED for that reason.
+  measured on one machine, and `GAIT_THRESHOLD` is tagged UNVERIFIED for that reason. What
+  changed since this was written is that the trained-gait number is a test rather than a
+  memory: it is reproducible by anyone with the cache filled, and it fails loudly if the body
+  silently falls back to the puppet.
 - Two upstreams now have to be tracked rather than one, both pinned, both in
   `quackd/sim3d/upstream_api.py`. A new export from either is a new pin and a new sha256.
 - Flock mode stays `sim2d` only. `FlockClock` was generalised to any world with a `t` and a

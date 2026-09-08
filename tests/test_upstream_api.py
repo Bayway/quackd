@@ -110,6 +110,9 @@ UPSTREAMS: list[tuple[ModuleType, set[str], tuple[str, ...]]] = [
             "sim3d/upstream_api.py",
             "sim3d/assets.py",
             "sim3d/microduck.py",
+            # the measured gait envelope `GAIT_THRESHOLD` documents; it moved out of
+            # `microduck.py` so it could be tested without the extra, and cites its source
+            "sim3d/gait.py",
             "doctor.py",
         },
         (

@@ -24,6 +24,9 @@ import numpy as np
 from quackd.sim3d.scene import (
     ARENA_HALF,
     BALL_PARK,
+    BALL_R,
+    OFFSCREEN_PX,
+    PERSON_R,
     PUPPET_BODY_Z,
     PUPPET_HEAD_AHEAD,
     PUPPET_HEAD_Z,
@@ -52,6 +55,27 @@ HEAD_PITCH_LIMIT = math.radians(35)
 BODIES = ("puppet", "microduck")
 
 Posture = Literal["standing", "sitting", "fallen"]
+
+
+def _wrap(radians_: float) -> float:
+    """An angle folded back into (-pi, pi]."""
+    return math.atan2(math.sin(radians_), math.cos(radians_))
+
+
+def _finite(what: str, *values: float) -> None:
+    """A non-finite command must not reach the body.
+
+    `np.clip` passes NaN straight through, and so does every comparison against it, so an
+    unguarded NaN twist would arrive at the servos as a NaN target. The verb layer's pydantic
+    bounds already reject one, but this is the public API a flock runner or a notebook calls
+    directly, and the refusal belongs where the world is rather than in one caller's habits.
+    """
+    if not all(math.isfinite(v) for v in values):
+        raise ValueError(f"{what} must be finite, got {values}")
+
+
+class RenderError(TransportError):
+    """No offscreen context, or a frame size the model's buffer cannot hold."""
 
 
 class NotSupported(TransportError):
@@ -89,6 +113,15 @@ class Body(Protocol):
         on a kinematic body and becomes a joint target on a body with a real neck."""
         ...
 
+    walking: bool
+    """Whether the last control tick actually produced a gait.
+
+    A body may be sent a twist and legitimately not walk: `MicroduckBody` drops one below the
+    gait floor, and a duck that is down is sent nothing at all. The world reports `policy`
+    from this rather than from the twist it commanded, so the state does not say `walk` while
+    the duck stands still.
+    """
+
     def control(self, cmd: tuple[float, float, float], dt: float, rng: np.random.Generator) -> None:
         """One control step: apply a body-frame twist before the physics substeps."""
         ...
@@ -109,6 +142,9 @@ class Body(Protocol):
         """Recover from a fall, however this body can."""
         ...
 
+    def close(self) -> None:
+        """Release whatever the body holds: inference sessions, handles, buffers."""
+
     def extras(self) -> dict[str, Any]:
         """Body-specific telemetry, merged into the state the pilot reads."""
         ...
@@ -128,6 +164,7 @@ class Puppet:
 
     def __init__(self) -> None:
         self.posture: Posture = "standing"
+        self.walking = False
         self.x = self.y = self.theta = 0.0
         self.head = (0.0, 0.0)
         self._data: Any = None
@@ -151,12 +188,15 @@ class Puppet:
 
     def reset(self, x: float, y: float, theta: float) -> None:
         self.x, self.y, self.theta = x, y, theta
+        self.posture = "standing"
+        self.walking = False
         self._place()
 
     def set_head(self, head: tuple[float, float]) -> None:
         self.head = head
 
     def control(self, cmd: tuple[float, float, float], dt: float, rng: np.random.Generator) -> None:
+        self.walking = self.posture == "standing" and any(cmd)
         if self.posture != "standing":
             return
         vx, vy, wz = cmd
@@ -166,7 +206,7 @@ class Puppet:
         vx *= 1 + noise[0]
         vy *= 1 + noise[1]
         wz *= 1 + noise[2]
-        self.theta = math.atan2(math.sin(self.theta + wz * dt), math.cos(self.theta + wz * dt))
+        self.theta = _wrap(self.theta + wz * dt)
         self.x += (vx * math.cos(self.theta) - vy * math.sin(self.theta)) * dt
         self.y += (vx * math.sin(self.theta) + vy * math.cos(self.theta)) * dt
         lim = ARENA_HALF - DUCK_R
@@ -203,10 +243,19 @@ class Puppet:
     def fall(self) -> None:
         """Knock it over (tests): the world reports `fallen` and refuses to walk."""
         self.posture = "fallen"
+        self.walking = False
         self._place()
 
+    def close(self) -> None:
+        """Nothing to release: it is a mocap body in the world's own model."""
+
     def extras(self) -> dict[str, Any]:
-        return {"assumptions": ["the puppet is kinematic: it has no gait and cannot fall"]}
+        return {
+            "assumptions": [
+                "the puppet is kinematic: it moves exactly as the cartoon does, has no gait, "
+                "and goes down only when a test knocks it over"
+            ]
+        }
 
     def _place(self) -> None:
         if self._data is None:
@@ -290,6 +339,7 @@ class MujocoWorld:
         self.t = 0.0
         self.steps = 0
         self._renderers: dict[int, Any] = {}
+        self.closed = False
         self.body.attach(self.model, self.data)
         self.body.set_head(self.head)
         self.body.reset(x, y, theta)
@@ -318,8 +368,29 @@ class MujocoWorld:
         return any(abs(c) > 1e-6 for c in self.cmd)
 
     @property
+    def policy(self) -> str:
+        """What the body is actually doing, not what it was asked to do.
+
+        `moving` is the commanded twist, and a body is free to decline it: below the gait
+        floor `MicroduckBody` sends nothing and stands. Reporting the command here told the
+        pilot `policy=walk` while the duck stood still, which is the one thing the gait floor
+        exists to stop, and it reached the model while the body's own honest `extras["policy"]`
+        did not.
+        """
+        if self.posture == "sitting":
+            return "sit"
+        return "walk" if self.moving and self.body.walking else "stand"
+
+    @property
     def head_yaw(self) -> float:
-        return self.head[0]
+        """Where the head is pointing, not where it was asked to point.
+
+        On the real body the neck is a servo the policy drives, so it lags a `look` and may
+        never quite arrive. Bearings already come from the achieved pose through
+        `relative(camera=True)`, so reporting the command here made the state disagree with
+        the camera it describes. On the puppet the two are the same number.
+        """
+        return _wrap(self.body.head_pose()[3] - self.theta)
 
     @property
     def ball_x(self) -> float:
@@ -362,6 +433,7 @@ class MujocoWorld:
     # ── intents ─────────────────────────────────────────────────────────────────────
 
     def set_velocity(self, vx: float, vy: float, wz: float) -> None:
+        _finite("a twist", vx, vy, wz)
         self.cmd = (
             float(np.clip(vx, -MAX_VX, MAX_VX)),
             float(np.clip(vy, -MAX_VY, MAX_VY)),
@@ -375,6 +447,7 @@ class MujocoWorld:
 
     def look(self, x: float, y: float, z: float = 0.0) -> bool:
         """Point the camera at a trunk-frame point. Returns True if clamped."""
+        _finite("a gaze target", x, y, z)
         yaw = math.atan2(y, x)
         pitch = math.atan2(z, math.hypot(x, y))
         clamped = abs(yaw) > HEAD_YAW_LIMIT or abs(pitch) > HEAD_PITCH_LIMIT
@@ -421,7 +494,40 @@ class MujocoWorld:
         return posture
 
     def enable(self) -> None:
+        """`stand_up`: put it back on its feet, stopped, and not inside anything.
+
+        The body knows how to stand itself up but not what it would be standing in. A duck
+        goes down while walking, so it comes to rest wherever it slid to: against a wall, on
+        top of the ball, or overlapping the person. And `stop()` first, because the twist that
+        put it down is still on the books until the deadman notices.
+        """
+        if self.posture != "fallen":
+            return
+        self.stop()
         self.body.enable()
+        x, y, theta = self.body.pose()
+        sx, sy = self._standing_spot(x, y)
+        if (sx, sy) != (x, y):
+            self.body.reset(sx, sy, theta)
+
+    def _standing_spot(self, x: float, y: float) -> tuple[float, float]:
+        """`(x, y)` pushed out of anything solid and back inside the walls."""
+        lim = ARENA_HALF - DUCK_R
+        x, y = min(max(x, -lim), lim), min(max(y, -lim), lim)
+        obstacles = [(px, py, PERSON_R) for px, py in self.people]
+        if self.ball_present:
+            obstacles.append((self.ball_x, self.ball_y, BALL_R))
+        for ox, oy, r in obstacles:
+            dx, dy = x - ox, y - oy
+            dist = math.hypot(dx, dy)
+            need = DUCK_R + r
+            if dist >= need:
+                continue
+            if dist < 1e-6:  # exactly on top of it: any direction will do, pick a fixed one
+                dx, dy, dist = 1.0, 0.0, 1.0
+            x = min(max(ox + dx / dist * need, -lim), lim)
+            y = min(max(oy + dy / dist * need, -lim), lim)
+        return x, y
 
     def sound(self, tag: str, text: str | None) -> None:
         self.quacks.append((self.t, tag, text))
@@ -435,10 +541,31 @@ class MujocoWorld:
         self.body.control(self.cmd, dt, self.rng)
         for _ in range(max(1, round(dt / self.model.opt.timestep))):
             mujoco.mj_step(self.model, self.data)
+        self._check_diverged()
         if not self.ball_present:
             self._park_ball()
         self.t += dt
         self.steps += 1
+
+    def _check_diverged(self) -> None:
+        """Refuse to keep simulating a state MuJoCo has already given up on.
+
+        MuJoCo does not raise when the physics goes non-finite. `mj_checkPos`, `mj_checkVel`
+        and `mj_checkAcc` log a warning and call `mj_resetData`, which silently teleports
+        every body to `qpos0` and sets the clock back to zero. Without this the run would
+        carry on reporting poses and distances from a world that had quietly restarted, which
+        is worse than a crash: the transcript would look ordinary and be fiction.
+        """
+        for flag in (
+            mujoco.mjtWarning.mjWARN_BADQPOS,
+            mujoco.mjtWarning.mjWARN_BADQVEL,
+            mujoco.mjtWarning.mjWARN_BADQACC,
+        ):
+            if self.data.warning[flag].number:
+                raise TransportError(
+                    f"the physics diverged at t={self.t:.2f}s ({flag.name}) and MuJoCo reset "
+                    "the world; nothing after this point would be true"
+                )
 
     def _push_ball(self, vx: float, vy: float) -> None:
         self.data.qvel[self._ball_dof : self._ball_dof + 3] = (vx, vy, 0.0)
@@ -481,11 +608,29 @@ class MujocoWorld:
     def renderer(self, size: int) -> Any:
         """One offscreen renderer per frame size, kept for the world's lifetime: creating
         one is a GL context, which costs hundreds of milliseconds; rendering costs a few."""
+        if self.closed:
+            raise RenderError("this world is closed")
+        if not 0 < size <= OFFSCREEN_PX:
+            raise RenderError(
+                f"a {size} px frame does not fit the model's offscreen buffer "
+                f"({OFFSCREEN_PX} px, `sim3d.scene.OFFSCREEN_PX`)"
+            )
         if size not in self._renderers:
-            self._renderers[size] = mujoco.Renderer(self.model, height=size, width=size)
+            try:
+                self._renderers[size] = mujoco.Renderer(self.model, height=size, width=size)
+            except Exception as e:
+                # A bare OpenGL traceback is the least useful thing to hand someone on a
+                # server. docs/faq.md promises this sentence; say it here so it is true.
+                raise RenderError(
+                    f"no OpenGL context for offscreen rendering ({type(e).__name__}: {e}). "
+                    "On a headless Linux box install libosmesa6 and set MUJOCO_GL=osmesa, "
+                    "or MUJOCO_GL=egl where there is a GPU"
+                ) from e
         return self._renderers[size]
 
     def close(self) -> None:
         for renderer in self._renderers.values():
             renderer.close()
         self._renderers.clear()
+        self.body.close()
+        self.closed = True

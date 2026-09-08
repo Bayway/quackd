@@ -125,12 +125,14 @@ include = [
 # The README's images are served from raw.githubusercontent, so no published artefact ever
 # needed them. Keeping them out matters for one of them: the hero renders upstream's model
 # and carries its CC BY-SA-NC terms, and a published package must stay wholly Apache-2.0.
-exclude = ["docs/assets/*.gif", "docs/assets/*.png"]
+exclude = ["docs/assets/*.gif", "docs/assets/*.png", "docs/assets/*.svg"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["runs", "docs/assets"]
+# `docs/assets` held two scripts that nothing linted, formatted or type-checked, one of which
+# builds the README's hero. Only the binaries are excluded now.
+extend-exclude = ["runs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC", "T20"]
@@ -140,6 +142,8 @@ ignore = ["RUF012", "B008"]
 "quackd/cli.py" = ["T20"]
 "quackd/mcp_server.py" = ["T20"]
 "tests/**" = ["T20"]
+# The two scripts that build the README's assets are run by hand and report as they go.
+"docs/assets/*.py" = ["T20"]
 # Prose-heavy files: upstream citations and LLM-facing prompt text read better unwrapped.
 "quackd/transport/upstream_api.py" = ["E501"]
 "quackd/agent/prompts.py" = ["E501"]
@@ -152,7 +156,7 @@ line-ending = "lf"
 # mypy reject numpy's stubs (PEP 695 `type` statements) when running under 3.12.
 # `bridge/` is the code that runs on the robot, and it was the only Python here that nothing
 # type-checked. mypy takes packages OR files, not both, so both are listed as paths.
-files = ["quackd", "bridge"]
+files = ["quackd", "bridge", "docs/assets"]
 ignore_missing_imports = true
 warn_unused_ignores = false
 check_untyped_defs = true
@@ -165,6 +169,11 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    # The only tests allowed to read the developer's own asset cache, and the only ones the
+    # conftest does not redirect to a throwaway one. They never fetch: an empty cache skips.
+    "real_duck: needs upstream's Microduck model and policies already cached",
+]
 # A single test that runs five minutes has hung: the slowest here, a ten-seed sweep, takes
 # well under one. pytest then dumps every thread's stack to stderr and carries on, so the
 # job timeout in ci.yml ends a hang with the blocked frame in the log rather than nothing.

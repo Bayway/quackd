@@ -14,18 +14,20 @@
  * back at the speed it happened.
  */
 
-import { CONTROL_DT, GAIT_FLOOR, HEAD_YAW_LIMIT } from "./microduck.js";
+import { ACHIEVED_FRACTION, CONTROL_DT, GAIT_FLOOR, HEAD_YAW_LIMIT } from "./microduck.js";
 
 const MOVE_RESEND_S = 0.1; // the twist is re-sent at 10 Hz or the deadman zeroes it
 
 export class Runtime {
-  constructor(duck) {
+  constructor(duck, { onError = null } = {}) {
     this.duck = duck;
     this.running = false;
     this.manualTwist = [0, 0, 0];
     this.manual = false;
+    this.error = null;
     this._waiters = [];
     this._onFrame = null;
+    this._onError = onError;
   }
 
   start(onFrame) {
@@ -38,13 +40,20 @@ export class Runtime {
       if (!this.running) return;
       carry += Math.min(0.1, (now - previous) / 1000); // never simulate a lost tab
       previous = now;
-      while (carry >= CONTROL_DT) {
-        carry -= CONTROL_DT;
-        if (this.manual) this.duck.setTwist(...this.manualTwist);
-        await this.duck.step();
-        this._wake(CONTROL_DT);
+      try {
+        while (carry >= CONTROL_DT) {
+          carry -= CONTROL_DT;
+          if (this.manual) this.duck.setTwist(...this.manualTwist);
+          await this.duck.step();
+          this._wake(CONTROL_DT);
+        }
+        this._onFrame?.();
+      } catch (error) {
+        // Without this the loop simply stopped: no more frames, and every verb waiting on
+        // simulated time hung for good, with nothing on the page to say why.
+        this._die(error);
+        return;
       }
-      this._onFrame?.();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -52,10 +61,35 @@ export class Runtime {
 
   stop() { this.running = false; }
 
+  /** Stop the world and refuse every waiter, so nothing is left hanging on a dead clock. */
+  _die(error) {
+    this.running = false;
+    this.error = error;
+    const waiting = this._waiters;
+    this._waiters = [];
+    for (const waiter of waiting) waiter.reject(error);
+    this._onError?.(error);
+  }
+
   /** Let `seconds` of simulated time pass. Verbs never touch the clock directly. */
-  sleep(seconds) {
+  sleep(seconds, signal = null) {
+    if (this.error) return Promise.reject(this.error);
+    if (signal?.aborted) return Promise.reject(signal.reason);
     if (seconds <= 0) return Promise.resolve();
-    return new Promise((resolve) => this._waiters.push({ left: seconds, resolve }));
+    return new Promise((resolve, reject) => {
+      const waiter = { left: seconds, resolve, reject };
+      this._waiters.push(waiter);
+      // Stop has to reach a move that is already running. Without this a ten second move ran
+      // to completion after the button, and the duck kept walking the whole time.
+      signal?.addEventListener(
+        "abort",
+        () => {
+          this._waiters = this._waiters.filter((w) => w !== waiter);
+          reject(signal.reason);
+        },
+        { once: true }
+      );
+    });
   }
 
   _wake(dt) {
@@ -70,6 +104,57 @@ export class Runtime {
   }
 }
 
+// ── the same checks pydantic makes on the Python side ──────────────────────────────────
+
+/**
+ * Check a model's arguments against the schema they were offered, and say what is wrong.
+ *
+ * The schemas were sent to the vendor and never enforced here, so a model that ignored one
+ * got whatever it asked for: `duration_s: 1e6` became ten million awaited slices and hung the
+ * tab, and `duration_s: "soon"` produced NaN, ran no loop at all, and reported success.
+ * Python refuses both at the verb boundary, with `extra="forbid"` and real bounds.
+ *
+ * Returns null when the arguments are usable, or a sentence for the transcript when not.
+ */
+export function checkParams(schema, args) {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) {
+    return `expected an object of arguments, got ${JSON.stringify(args)}`;
+  }
+  const properties = schema.properties ?? {};
+  if (schema.additionalProperties === false) {
+    const unknown = Object.keys(args).filter((k) => !(k in properties));
+    if (unknown.length) return `unknown parameter(s): ${unknown.join(", ")}`;
+  }
+  for (const name of schema.required ?? []) {
+    if (!(name in args)) return `${name} is required`;
+  }
+  for (const [name, value] of Object.entries(args)) {
+    const rule = properties[name];
+    if (!rule) continue;
+    if (rule.type === "number") {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        return `${name} must be a finite number, got ${JSON.stringify(value)}`;
+      }
+      if (rule.minimum !== undefined && value < rule.minimum) {
+        return `${name} must be at least ${rule.minimum}, got ${value}`;
+      }
+      if (rule.maximum !== undefined && value > rule.maximum) {
+        return `${name} must be at most ${rule.maximum}, got ${value}`;
+      }
+    }
+    if (rule.type === "string") {
+      if (typeof value !== "string") return `${name} must be a string`;
+      if (rule.maxLength !== undefined && value.length > rule.maxLength) {
+        return `${name} must be at most ${rule.maxLength} characters`;
+      }
+      if (rule.enum && !rule.enum.includes(value)) {
+        return `${name} must be one of ${rule.enum.join(", ")}`;
+      }
+    }
+  }
+  return null;
+}
+
 // ── the verbs, as the Microduck's manifest declares them ───────────────────────────────
 
 export const VERBS = {
@@ -77,7 +162,7 @@ export const VERBS = {
     description:
       "Walk with a velocity for a duration. Use small values; the robot is 25 cm tall. " +
       `This body does not step below ${GAIT_FLOOR.vx} m/s or ${GAIT_FLOOR.wz} rad/s, and ` +
-      "achieves roughly half of what it is asked, so read the pose afterwards.",
+      `achieves about ${ACHIEVED_FRACTION} of what it is asked, so read the pose afterwards.`,
     params: {
       type: "object",
       properties: {
@@ -86,11 +171,12 @@ export const VERBS = {
         wz: { type: "number", description: "Turn rate rad/s (+ = left).", minimum: -1.5, maximum: 1.5 },
         duration_s: { type: "number", description: "How long to hold this velocity.", minimum: 0.1, maximum: 10 },
       },
-      required: ["duration_s"],
+      // Python's MoveParams defaults vx to 0.15 and duration_s to 1.0 and requires neither.
+      required: [],
       additionalProperties: false,
     },
     async run(runtime, p) {
-      const { vx = 0, vy = 0, wz = 0, duration_s = 1 } = p;
+      const { vx = 0.15, vy = 0, wz = 0, duration_s = 1 } = p;  // Python's defaults
       const slices = Math.max(1, Math.round(duration_s / MOVE_RESEND_S));
       for (let i = 0; i < slices; i++) {
         runtime.duck.setTwist(vx, vy, wz); // re-sent, exactly as the real verb does
@@ -145,10 +231,21 @@ export const VERBS = {
       additionalProperties: false,
     },
     async run(runtime, p) {
-      runtime.duck.kick(p.leg ?? "right");
+      const connected = runtime.duck.kick(p.leg ?? "right");
       await runtime.sleep(1.5);
       const moved = runtime.duck.lastKickBallMoved;
-      return moved === null ? "kicked" : `kicked; the ball moved ${moved.toFixed(2)} m`;
+      if (!connected) {
+        const ball = runtime.duck.observe().detections?.find((d) => d.label === "ball");
+        const where = ball
+          ? `the ball is ${ball.est_est_distance_m.toFixed(2)} m away at ${ball.bearing_deg.toFixed(0)} degrees`
+          : "the camera cannot see the ball";
+        return { ok: false, summary: `kick missed: ${where} (needs under 0.3 m, roughly ahead)` };
+      }
+      return {
+        ok: true,
+        summary: moved === null ? "kicked" : `kicked; the ball moved ${moved.toFixed(2)} m`,
+        data: { ball_moved_m: moved },
+      };
     },
   },
   say: {
@@ -170,7 +267,8 @@ export const VERBS = {
     async run(runtime) {
       runtime.duck.standUp();
       await runtime.sleep(1.0);
-      return runtime.duck.posture === "standing" ? "upright" : "still down";
+      const up = runtime.duck.posture === "standing";
+      return { ok: up, summary: up ? "upright" : "still down" };
     },
   },
 };
@@ -229,7 +327,7 @@ that rolls when it is kicked, and a blue person marker. Distances are metres.
 
 ## This body
 It walks on a learned policy, not on arithmetic. It does not step at all below about
-${GAIT_FLOOR.vx} m/s or ${GAIT_FLOOR.wz} rad/s, and it achieves roughly half of what it is asked. Every
+${GAIT_FLOOR.vx} m/s or ${GAIT_FLOOR.wz} rad/s, and it achieves about ${ACHIEVED_FRACTION} of what it is asked. Every
 observation carries the pose it actually reached: steer from that, not from the numbers you
 sent. To walk a shape, walk a leg, read the pose, correct, and repeat.
 
@@ -243,7 +341,7 @@ export function observationText(duck, step, contract, last) {
     `[step ${step}/${contract.maxSteps} - ${state.sim_time.toFixed(1)}s of ${contract.maxMinutes * 60}s]`,
     `state: posture=${state.posture} pose=(${state.pose.x}, ${state.pose.y}, ${state.pose.theta} rad) head=${state.head_yaw_deg} deg`,
     `camera: ${state.detections.length
-      ? state.detections.map((d) => `${d.label} at ${d.bearing_deg} degrees, about ${d.distance_m} m`).join("; ")
+      ? state.detections.map((d) => `${d.label} at ${d.bearing_deg} degrees, about ${d.est_distance_m} m`).join("; ")
       : "nothing detected"}`,
   ];
   if (last) lines.push(`last verb \`${last.name}\`: ${last.ok ? "ok" : "FAILED"} - ${last.summary}`);
@@ -298,9 +396,21 @@ export async function pilot({ runtime, goal, provider, contract = DEFAULT_CONTRA
       onEvent({ kind: "result", ...last });
       continue;
     }
+    const complaint = checkParams(verb.params, call.arguments ?? {});
+    if (complaint !== null) {
+      // Refused before anything moves, exactly as a pydantic ValidationError does in Python.
+      last = { name: call.name, ok: false, summary: `refused: ${complaint}` };
+      onEvent({ kind: "result", ...last });
+      continue;
+    }
     try {
-      const summary = await verb.run(runtime, call.arguments ?? {});
-      last = { name: call.name, ok: true, summary };
+      const outcome = await verb.run(runtime, call.arguments ?? {});
+      // A verb may report that it did not work. `ok: true` used to be unconditional, so a
+      // kick that missed read as a success and the failure style was unreachable.
+      last =
+        typeof outcome === "string"
+          ? { name: call.name, ok: true, summary: outcome }
+          : { name: call.name, ok: outcome.ok, summary: outcome.summary, data: outcome.data };
     } catch (error) {
       runtime.duck.setTwist(0, 0, 0); // a verb that threw leaves the robot stopped
       last = { name: call.name, ok: false, summary: String(error.message || error) };

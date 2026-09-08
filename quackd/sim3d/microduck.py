@@ -34,6 +34,14 @@ from numpy.typing import NDArray
 
 from quackd.sim3d import upstream_api as up
 from quackd.sim3d.assets import MicroduckAssets, ensure_microduck
+from quackd.sim3d.gait import (
+    ACHIEVED_FRACTION,
+    GAIT_FLOOR_VX,
+    GAIT_FLOOR_VY,
+    GAIT_FLOOR_WZ,
+    tilt_deg,
+    usable_twist,
+)
 from quackd.sim3d.world import NotSupported, Posture
 from quackd.transport.base import TransportError
 
@@ -44,22 +52,6 @@ PHYSICS_DT = 0.005  # upstream's timestep; four substeps per control tick
 OBS_LEN = 61
 ACTION_LEN = 14
 STAND_SWITCH = 0.05  # below this twist norm the standing policy runs (upstream's default)
-
-#: The command envelope the walking policy actually uses, measured here (see
-#: `upstream_api.GAIT_THRESHOLD`). Below the floor it stands; above the ceiling is outside
-#: what it trained on.
-GAIT_FLOOR_VX = 0.22
-GAIT_FLOOR_VY = 0.30
-GAIT_FLOOR_WZ = 1.00
-CMD_MAX_VX = 0.40
-CMD_MAX_VY = 0.30
-CMD_MAX_WZ = 1.50
-#: A twist below a third of the floor is dropped rather than raised: a steering loop that
-#: asks for a two-degree correction should get nothing, not a full-rate lurch.
-DEAD_FRACTION = 1 / 3
-
-#: Roughly what fraction of a command the body achieves, for the honest line in the state.
-ACHIEVED_FRACTION = 0.42
 
 FALL_TILT = -0.5  # projected gravity z above this (upright is -1) is on its side
 FALL_HEIGHT = 0.06  # trunk metres above the floor
@@ -74,7 +66,12 @@ ASSUMPTIONS = (
     "grab is the cartoon's 60% scoop, not upstream's ground_pick policy",
     "sit is refused: upstream's sit-stand policy put the duck on its back when tried",
     "stand_up stands the model up again; upstream ships no get-up policy",
-    f"a non-zero twist is raised to the gait floor (vx {GAIT_FLOOR_VX}, wz {GAIT_FLOOR_WZ})",
+    f"a non-zero twist is raised to the gait floor (vx {GAIT_FLOOR_VX}, wz {GAIT_FLOOR_WZ}), "
+    "and one below a third of it is dropped to zero rather than lurched",
+    f"it achieves about {ACHIEVED_FRACTION} of the twist it is sent: read `pose` after every "
+    "move and correct from it, rather than trusting the numbers you sent",
+    "the sideways floor is not measured, unlike the forward and turning ones, so any lateral "
+    "request is sent at full scale",
 )
 
 
@@ -88,7 +85,35 @@ def _session(path: Any) -> Any:
     options = ort.SessionOptions()
     options.intra_op_num_threads = 1  # one duck, 200k parameters: threads only add latency
     options.log_severity_level = 3
-    return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
+    try:
+        return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
+    except Exception as e:
+        raise PolicyError(f"could not load {path}: {e}") from e
+
+
+def _check_io(session: Any, path: Any) -> str:
+    """Check a policy is the shape upstream documents, and return the input's real name.
+
+    `OBS_LEN` was a number in a comment: nothing compared it to the model, and the input name
+    and output index were written in by hand. A re-export with one more observation would have
+    failed somewhere inside onnxruntime on the first tick rather than here, where the file
+    that is wrong can be named.
+    """
+    inputs, outputs = session.get_inputs(), session.get_outputs()
+    if len(inputs) != 1 or len(outputs) != 1:
+        raise PolicyError(
+            f"{path}: {len(inputs)} inputs and {len(outputs)} outputs; upstream's contract "
+            f"is one of each ({up.WALK_POLICY.note})"
+        )
+    if list(inputs[0].shape)[-1:] != [OBS_LEN]:
+        raise PolicyError(
+            f"{path}: takes {inputs[0].shape}, and quackd builds {OBS_LEN} observations"
+        )
+    if list(outputs[0].shape)[-1:] != [ACTION_LEN]:
+        raise PolicyError(
+            f"{path}: returns {outputs[0].shape}, and this body has {ACTION_LEN} actuators"
+        )
+    return str(inputs[0].name)
 
 
 class MicroduckBody:
@@ -104,20 +129,31 @@ class MicroduckBody:
                 "the Microduck body needs the physics extra: uv pip install 'quackd[mujoco]'"
             ) from e
         self.assets = assets if assets is not None else ensure_microduck()
-        self.walk = _session(self.assets.policies_dir / up.WALK_POLICY.name)
-        self.stand = _session(self.assets.policies_dir / up.STAND_POLICY.name)
+        walk_path = self.assets.policies_dir / up.WALK_POLICY.name
+        stand_path = self.assets.policies_dir / up.STAND_POLICY.name
+        self.walk = _session(walk_path)
+        self.stand = _session(stand_path)
+        self.obs_name = _check_io(self.walk, walk_path)
+        _check_io(self.stand, stand_path)
         meta = self.walk.get_modelmeta().custom_metadata_map
-        self.joint_names = [n.strip() for n in meta["joint_names"].split(",")]
-        self.default_pose = np.array(
-            [float(v) for v in meta["default_joint_pos"].split(",")], dtype=np.float64
-        )
-        self.action_scale = float(meta.get("action_scale", "1.0"))
+        try:
+            self.joint_names = [n.strip() for n in meta["joint_names"].split(",")]
+            self.default_pose = np.array(
+                [float(v) for v in meta["default_joint_pos"].split(",")], dtype=np.float64
+            )
+            self.action_scale = float(meta.get("action_scale", "1.0"))
+        except (KeyError, ValueError) as e:
+            raise PolicyError(
+                f"{walk_path}: bad or missing ONNX metadata ({e!r}). Upstream writes "
+                "joint_names, default_joint_pos and action_scale when it exports"
+            ) from e
         if len(self.joint_names) != ACTION_LEN or self.default_pose.shape != (ACTION_LEN,):
             raise PolicyError(
                 f"{up.WALK_POLICY.name} declares {len(self.joint_names)} joints; "
                 f"upstream's contract is {ACTION_LEN}"
             )
         self.posture: Posture = "standing"
+        self.walking = False
         # Annotated shape-free on purpose: numpy 2.2's stubs, which the lock resolves on
         # 3.12, infer a fixed 1-D shape from `np.zeros` and then refuse the `asarray` the
         # policy's output is stored through.
@@ -127,7 +163,7 @@ class MicroduckBody:
         self.sent: tuple[float, float, float] = (0.0, 0.0, 0.0)
         self._model: Any = None
         self._data: Any = None
-        self._down_ticks = 0
+        self._posture_ticks = 0
 
     # ── the scene ───────────────────────────────────────────────────────────────────
 
@@ -190,7 +226,7 @@ class MicroduckBody:
         d.ctrl[:] = self.default_pose
         self.last_action[:] = 0.0
         self.posture = "standing"
-        self._down_ticks = 0
+        self._posture_ticks = 0
         mujoco.mj_forward(m, d)
 
     # ── one control tick ────────────────────────────────────────────────────────────
@@ -204,37 +240,23 @@ class MicroduckBody:
         self, cmd: tuple[float, float, float], _dt: float, _rng: np.random.Generator
     ) -> None:
         self.commanded = cmd
-        twist = self._usable_twist(cmd)
+        twist = usable_twist(cmd, standing=self.posture == "standing")
         self.sent = twist
         obs = self._observe(twist, self.head)
         policy = self.stand if float(np.linalg.norm(twist)) <= STAND_SWITCH else self.walk
-        action = policy.run(None, {"obs": obs[None]})[0][0]
+        self.walking = policy is self.walk
+        action = policy.run(None, {self.obs_name: obs[None]})[0][0]
+        if not np.isfinite(action).all():
+            # A NaN here becomes a NaN servo target, and one tick later MuJoCo gives up on the
+            # state and silently resets the world. Stop at the policy, where the cause is
+            # still legible, rather than at the physics, where it is not.
+            raise PolicyError(
+                f"{up.WALK_POLICY.name if policy is self.walk else up.STAND_POLICY.name} "
+                f"returned a non-finite action at t={self._data.time:.2f}s"
+            )
         self.last_action = np.asarray(action, dtype=np.float32)
         self._data.ctrl[:] = self.default_pose + self.last_action * self.action_scale
         self._update_posture()
-
-    def _usable_twist(self, cmd: tuple[float, float, float]) -> tuple[float, float, float]:
-        """The commanded twist, mapped onto what the gait can actually do.
-
-        The floor belongs to the twist as a whole, not to each axis: a duck already walking
-        forward turns happily at a rate that would not start a turn on its own. So the
-        measure is how close the twist is to stepping at all, and a twist that is not there
-        yet is scaled up bodily. Scaling keeps the ratio between the axes, which is what
-        makes an arc an arc: raising `wz` alone would turn "walk in a circle" into a spin.
-        """
-        if self.posture != "standing":
-            return (0.0, 0.0, 0.0)
-        floors = (GAIT_FLOOR_VX, GAIT_FLOOR_VY, GAIT_FLOOR_WZ)
-        activity = max(abs(v) / floor for v, floor in zip(cmd, floors, strict=True))
-        if activity < DEAD_FRACTION:
-            return (0.0, 0.0, 0.0)  # too small to step: standing still is the honest answer
-        gain = 1.0 / activity if activity < 1.0 else 1.0
-        ceilings = (CMD_MAX_VX, CMD_MAX_VY, CMD_MAX_WZ)
-        scaled = [
-            math.copysign(min(abs(v) * gain, ceiling), v)
-            for v, ceiling in zip(cmd, ceilings, strict=True)
-        ]
-        return (scaled[0], scaled[1], scaled[2])
 
     def _observe(self, twist: tuple[float, float, float], head: tuple[float, float]) -> Any:
         d = self._data
@@ -242,8 +264,9 @@ class MicroduckBody:
         command = np.zeros(13, dtype=np.float64)
         command[0:3] = twist
         # [3] neck pitch, [4] head pitch, [5] head yaw, [6] head roll — deltas from home.
-        # Measured: a positive head-pitch command tilts the camera down, so quackd's
-        # "look up" (a positive z) is a negative command.
+        # The sign is `up.HEAD_PITCH_SIGN`: measured here rather than read anywhere, and
+        # tagged UNVERIFIED for that reason, so `quackd doctor` and adapter-status.md say so.
+        # [3] and [6] stay zero because quackd's gaze has one pitch and no roll.
         command[4] = -head[1]
         command[5] = head[0]
         return np.concatenate(
@@ -262,11 +285,18 @@ class MicroduckBody:
             return
         d = self._data
         down = self.gravity_z > FALL_TILT or d.qpos[self.free_q + 2] < FALL_HEIGHT
-        self._down_ticks = self._down_ticks + 1 if down else 0
-        if self._down_ticks >= FALL_DEBOUNCE_TICKS:
-            self.posture = "fallen"
-        elif not down and self.posture == "fallen":
-            self.posture = "standing"
+        # Debounced both ways. Going down took ten ticks and coming back up took one, so a
+        # duck hovering at the threshold flapped between postures every other tick, and each
+        # flap is a verb refused or allowed on the strength of one noisy frame.
+        if down == (self.posture == "fallen"):
+            self._posture_ticks = 0
+            return
+        self._posture_ticks += 1
+        if self._posture_ticks >= FALL_DEBOUNCE_TICKS:
+            self.posture = "fallen" if down else "standing"
+            self._posture_ticks = 0
+            if down:
+                self.walking = False
 
     # ── what the world asks ─────────────────────────────────────────────────────────
 
@@ -301,20 +331,53 @@ class MicroduckBody:
         """`stand_up`: upstream has no get-up policy, so the model is stood up again."""
         if self.posture != "fallen":
             return
-        x, y, yaw = self.pose()
-        self.reset(x, y, yaw)
+        x, y, _yaw = self.pose()
+        self.reset(x, y, self.heading())
+
+    def heading(self) -> float:
+        """Which way the duck is facing, in a way that survives being on its face.
+
+        `pose()` reads yaw from the trunk quaternion, which is the right answer while the duck
+        is upright and an arbitrary one where it usually is not: face-down and on its back are
+        both at the gimbal degeneracy, and that is exactly when `stand_up` asks. Take the
+        trunk's own forward axis projected on the floor, and when the duck is nose-down or
+        belly-up and that projection vanishes, fall back to where its underside points.
+        """
+        r = self._data.xmat[self.trunk].reshape(3, 3)
+        forward = (float(r[0, 0]), float(r[1, 0]))
+        if math.hypot(*forward) < 0.1:
+            # nose-down or nose-up: the trunk's z-axis is the only thing still lying flat
+            up_axis = (float(r[0, 2]), float(r[1, 2]))
+            sign = -1.0 if r[2, 0] > 0 else 1.0
+            forward = (sign * up_axis[0], sign * up_axis[1])
+        if math.hypot(*forward) < 1e-6:
+            return self.pose()[2]  # nothing to read: keep whatever it had
+        return math.atan2(forward[1], forward[0])
 
     def assumptions(self) -> list[str]:
         return list(ASSUMPTIONS)
 
+    def close(self) -> None:
+        """Drop the two inference sessions.
+
+        `MujocoWorld.close()` used to close renderers only, so a process that built several
+        worlds — `docs/assets/hero3d.py` builds two — kept every onnxruntime session alive
+        until the interpreter exited.
+
+        The model and data handles deliberately stay. They are plain memory that goes when the
+        world does, and reading the final pose after a run is ordinary: the loop closes the
+        transport before its caller looks at where the duck ended up.
+        """
+        self.walk = self.stand = None
+
     def extras(self) -> dict[str, Any]:
         return {
-            "policy": "walk" if float(np.linalg.norm(self.sent)) > STAND_SWITCH else "stand",
+            "policy": "walk" if self.walking else "stand",
             "twist_commanded": [round(v, 3) for v in self.commanded],
             "twist_sent": [round(v, 3) for v in self.sent],
             "gait_floor": {"vx": GAIT_FLOOR_VX, "vy": GAIT_FLOOR_VY, "wz": GAIT_FLOOR_WZ},
             "achieved_fraction": ACHIEVED_FRACTION,
-            "tilt_deg": round(math.degrees(math.acos(min(1.0, -self.gravity_z))), 1),
+            "tilt_deg": round(tilt_deg(self.gravity_z), 1),
             "trunk_z": round(float(self._data.qpos[self.free_q + 2]), 3),
             "assumptions": self.assumptions(),
             "model_pinned": self.assets.pinned,

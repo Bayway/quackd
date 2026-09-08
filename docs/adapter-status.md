@@ -10,7 +10,7 @@ it). A test proves UNVERIFIED names stay inside the backend that needs them.
 | Adapter | `--robot` | Status | Upstream file | Page |
 |---|---|---|---|---|
 | Microduck | `microduck:sim2d` | ✅ default | | this page |
-| | `microduck:mujoco` | ✅ physics simulator (MuJoCo, `quackd[mujoco]`): `find-and-kick` 10 of 10 seeds, on one machine rather than in CI | [`quackd/sim3d/upstream_api.py`](../quackd/sim3d/upstream_api.py) | |
+| | `microduck:mujoco` | ✅ physics simulator (MuJoCo, `quackd[mujoco]`): `find-and-kick` 10 of 10 seeds on both bodies, the stand-in and the trained gait, on one machine rather than in CI | [`quackd/sim3d/upstream_api.py`](../quackd/sim3d/upstream_api.py) | |
 | | `microduck:mock` | ✅ | | |
 | | `microduck:jsonrpc` | 🧪 experimental: every method VERIFIED, never run on a duck | [`quackd/transport/upstream_api.py`](../quackd/transport/upstream_api.py) | |
 | | `microduck:websocket` | ⏳ stub: raises with a link until upstream ships it | | |
@@ -162,6 +162,7 @@ Read: 2026-09-07, pinned at
 | observation layout, 13-value command, `ctrl = default_pose + action`, 50 Hz | **VERIFIED** | read from `scripts/infer_policy.py`; the same layout appears in the daemon and in Pollen's own browser simulator |
 | projected gravity is the world's `-z` in the trunk frame | **VERIFIED** | get its sign wrong and the duck braces and stands still for every command, silently |
 | the gait floor: `no gait below vx 0.22 m/s or wz 1.0 rad/s; above it about 0.42x the commanded speed` | **UNVERIFIED** | measured here on one machine with the XML's own actuators. Upstream trains and deploys with a different actuator model, so a real duck may track commands directly |
+| `a positive head_pitch in the command vector tilts the camera down` | **UNVERIFIED** | measured by driving the command and watching the rendered head camera, not read anywhere, so quackd negates its own pitch to make looking up positive. `neck_pitch` and `head_roll` are left at zero: quackd's gaze has one pitch and no roll, so nothing has exercised them |
 | the four stand-ins, in place of `ball_kick_left.onnx, ball_kick_right.onnx, alpha_ground_pick.onnx, alpha_sitstand.onnx` | **UNVERIFIED** | upstream's episodic policies did nothing from a standing pose when tried and the sit-stand one toppled the model, so these four are quackd's stand-ins and say so in `extras.assumptions` |
 
 The head camera is the one place quackd deliberately does not do what the file says: upstream's

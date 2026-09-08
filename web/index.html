@@ -42,7 +42,7 @@
       </div>
       <div id="readout" class="readout">twist 0.00, 0.00, 0.00</div>
       <div class="record-buttons">
-        <button type="button" id="record">● Record</button>
+        <button type="button" id="record" disabled>● Record</button>
         <button type="button" id="save" disabled>Save clip</button>
         <a id="share" class="button share" href="#" target="_blank" rel="noopener" hidden>Share on X</a>
       </div>
@@ -61,13 +61,13 @@
       </div>
     </div>
 
-    <form id="goal-form">
+    <form id="goal-form" method="dialog">
       <label for="goal">Tell the duck what to do</label>
-      <input id="goal" name="goal" value="Walk in a square, half a metre a side" autocomplete="off">
+      <input id="goal" value="Walk in a square, half a metre a side" autocomplete="off">
       <div class="row">
-        <button type="submit" id="run">Run</button>
+        <button type="submit" id="run" disabled>Run</button>
         <button type="button" id="stop-run" disabled>Stop</button>
-        <button type="button" id="reset">Reset duck</button>
+        <button type="button" id="reset" disabled>Reset duck</button>
       </div>
       <div class="examples">
         Try:

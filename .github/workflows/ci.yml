@@ -46,3 +46,49 @@ jobs:
         # a glob for an external command, so this would hand quackd the literal `ducks/*.duck`.
         shell: bash
         run: uv run quackd validate ducks/*.duck
+
+  physics:
+    name: physics · mujoco + osmesa
+    runs-on: ubuntu-latest
+    # The two sim3d files with the physics extra actually installed. Nothing else in the
+    # suite behaves differently when mujoco is present, and `test` already runs it six times.
+    #
+    # Not a matrix. sim3d has no OS branch; what differs between platforms is the GL stack,
+    # and of the three runners only Linux gives a software rasteriser worth testing against.
+    # macOS would exercise its own GPU and the Windows image's software GL cannot make an
+    # offscreen context at all, so both cells would be skip factories.
+    timeout-minutes: 25
+    env:
+      # Software OpenGL, rendering into process memory. A runner has no GPU, no display and
+      # no /dev/dri, and OSMesa is the one mujoco backend that needs none of the three: it
+      # dlopens libOSMesa.so.8. `egl` would ask Mesa to enumerate a device that is not there,
+      # and glfw under xvfb would add an X server to reach the same llvmpipe. mujoco's OSMesa
+      # context is PyOpenGL's, and pyopengl is already one of mujoco's dependencies, so
+      # libosmesa6 is the only thing the image is missing.
+      MUJOCO_GL: osmesa
+      PYOPENGL_PLATFORM: osmesa
+      QUACKD_STRICT_SEEDS: "1"
+      # Without this a runner that cannot make a context turns every rendering test into a
+      # skip and the job goes green having proved nothing, which is the state it exists to end.
+      QUACKD_REQUIRE_GL: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - name: OSMesa, the software rasteriser mujoco renders through
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libosmesa6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Sync (dev + the physics extra — mujoco and onnxruntime, about 42 MB cold)
+        run: uv sync --python 3.12 --extra dev --extra mujoco
+      - name: Prove the context exists before blaming the physics
+        # The cheapest failure first, as toddlerbot-contract.yml proves its imports: a missing
+        # system library says so here instead of arriving as a dozen skips further down.
+        run: |
+          uv run python -c "import mujoco; mujoco.Renderer(mujoco.MjModel.from_xml_string('<mujoco/>'), 64, 64); print('osmesa ok')"
+      - name: The physics world, the transport, the renders and the seeded sweep
+        # `not real_duck` is the honest half: those need upstream's CC BY-NC-SA model, and
+        # this job fetches nothing. The nightly `microduck-assets` job runs them, as a user
+        # would, into a runner that is then destroyed.
+        run: uv run pytest tests/test_sim3d.py tests/test_acceptance_mujoco.py -m "not real_duck"

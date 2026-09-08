@@ -13,7 +13,6 @@ import { Microduck, UPSTREAM } from "./microduck.js";
 import { DEFAULT_CONTRACT, Runtime, pilot } from "./pilot.js";
 import { PROVIDERS, makeProvider } from "./providers.js";
 import { Recorder, shareUrl } from "./record.js";
-import { View } from "./view.js";
 
 const $ = (id) => document.getElementById(id);
 const MANUAL_SPEED = 0.3, MANUAL_TURN = 1.2;
@@ -33,26 +32,56 @@ let duck, view, runtime, recorder;
 let running = null;
 const held = new Set();
 
+// ── one place every failure ends up ─────────────────────────────────────────────────────
+
+/**
+ * Show a failure instead of freezing on one. Emscripten and embind can throw a bare number
+ * or a string, so `error.message` alone prints "undefined" for exactly the failures that are
+ * hardest to guess at.
+ */
+function fail(error, where) {
+  const message = String(error?.message ?? error ?? "something went wrong");
+  if (!ui.loading.hidden) {
+    ui.phase.textContent = message;
+    ui.phase.classList.add("bad");
+  }
+  line("end error", `<b>${escape(where)}</b> ${escape(message)}`);
+  return message;
+}
+
+addEventListener("error", (event) => fail(event.error ?? event.message, "page"));
+addEventListener("unhandledrejection", (event) => fail(event.reason, "promise"));
+
 // ── boot ────────────────────────────────────────────────────────────────────────────────
 
 async function boot() {
-  try {
-    duck = await Microduck.load({
-      onProgress: ({ phase, loaded, total }) => {
-        ui.phase.textContent = `${phase} — ${loaded} of ${total}`;
-        ui.bar.style.width = `${Math.round((loaded / Math.max(total, 1)) * 100)}%`;
-      },
-    });
-  } catch (error) {
-    ui.phase.textContent = `could not load: ${error.message}`;
-    ui.phase.classList.add("bad");
-    return;
+  // Cheapest check first, so a missing prerequisite names itself rather than arriving as a
+  // failure 45 MB later. Each of these used to be a dead page: the WebGL one threw outside
+  // the try, and a blocked CDN broke the module graph before any listener was attached.
+  ui.phase.textContent = "checking this browser";
+  if (!globalThis.ort) {
+    throw new Error(
+      "onnxruntime did not arrive from cdn.jsdelivr.net. This page ships none of its own " +
+        "dependencies on purpose, so a blocked CDN stops it here."
+    );
   }
+  if (!document.createElement("canvas").getContext("webgl2")) {
+    throw new Error("this browser has no WebGL2, so the arena cannot be drawn");
+  }
+  // Dynamic, so three.js failing to load is a message rather than a module graph that never
+  // evaluates and a page that sits on "starting" with no listeners and no error.
+  const { View } = await import("./view.js");
+  duck = await Microduck.load({
+    onProgress: ({ phase, loaded, total }) => {
+      ui.phase.textContent = `${phase} — ${loaded} of ${total}`;
+      ui.bar.style.width = `${Math.round((loaded / Math.max(total, 1)) * 100)}%`;
+    },
+  });
   view = new View(ui.canvas, duck);
-  runtime = new Runtime(duck);
+  runtime = new Runtime(duck, { onError: (error) => fail(error, "physics") });
   recorder = new Recorder(ui.canvas);
+  for (const button of [ui.run, ui.reset, ui.record]) button.disabled = false;
   ui.loading.hidden = true;
-  $("model-link").href = UPSTREAM.model;
   runtime.start(() => {
     view.frame();
     const [vx, vy, wz] = duck.sent;
@@ -141,7 +170,7 @@ function line(className, html) {
   item.className = className;
   item.innerHTML = html;
   ui.transcript.append(item);
-  ui.transcript.parentElement.scrollTop = ui.transcript.parentElement.scrollHeight;
+  ui.transcript.scrollTop = ui.transcript.scrollHeight;  // overflow is on the list itself
 }
 
 const escape = (value) =>
@@ -193,9 +222,14 @@ function manualTwist() {
 }
 
 addEventListener("keydown", (event) => {
-  if (event.target.matches("input, textarea, select")) return;
-  if (["Space", "KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) event.preventDefault();
+  // Anything that has its own use for a key keeps it. `preventDefault` used to run before the
+  // quackd-on check, so Space stopped activating every focused button and <summary> on the
+  // page, in both modes, which is a WCAG 2.1.1 failure for a keyboard-only visitor.
+  if (event.target?.matches?.("input, textarea, select, button, summary, a, [contenteditable]")) {
+    return;
+  }
   if (ui.toggle.checked || !runtime) return;
+  if (["Space", "KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) event.preventDefault();
   held.add(event.code);
   if (event.code === "KeyQ") duck.setHead((duck.head[0] ?? 0) + 0.3);
   if (event.code === "KeyE") duck.setHead((duck.head[0] ?? 0) - 0.3);
@@ -255,14 +289,27 @@ for (const [id, spec] of Object.entries(PROVIDERS)) {
 function applyProvider() {
   const spec = PROVIDERS[ui.provider.value];
   ui.model.value = spec.defaultModel;
-  ui.model.setAttribute("list", "");
+  // Cleared on every change, in both directions. Disabling the field left the value readable,
+  // so a key pasted for Anthropic was still there when the visitor switched to a local server
+  // and went out as a bearer token to whatever host they had typed in the box below.
+  ui.key.value = "";
   ui.key.placeholder = spec.keyPlaceholder;
-  ui.key.disabled = !spec.needsKey;
+  ui.key.disabled = false;
   ui.baseUrl.hidden = spec.needsKey;
   if (!spec.needsKey) ui.baseUrl.value ||= spec.baseUrl;
-  ui.providerNote.innerHTML = spec.note
-    ? escape(spec.note)
-    : `Need a key? <a href="${spec.keyUrl}" target="_blank" rel="noopener">${escape(spec.label)}</a>.`;
+  ui.providerNote.textContent = "";
+  if (spec.note) {
+    ui.providerNote.textContent = spec.note;
+  } else {
+    // built rather than interpolated: an href is a URL context, and escape() is not enough
+    ui.providerNote.append("Need a key? ");
+    const link = document.createElement("a");
+    link.href = spec.keyUrl;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = spec.label;
+    ui.providerNote.append(link, ".");
+  }
 }
 
 ui.provider.addEventListener("change", applyProvider);
@@ -270,6 +317,7 @@ for (const chip of document.querySelectorAll(".chip")) {
   chip.addEventListener("click", () => { ui.goal.value = chip.textContent; ui.goal.focus(); });
 }
 
+$("model-link").href = UPSTREAM.model;
 applyProvider();
 applyToggle();
-boot();
+boot().catch((error) => fail(error, "boot"));

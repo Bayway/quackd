@@ -7,7 +7,9 @@ like; everything else runs headless.
 
 from __future__ import annotations
 
+import asyncio
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,7 @@ from quackd.sim3d.scene import BALL_PARK  # noqa: E402
 from quackd.sim3d.world import CONTROL_DT, DEADMAN_S, MujocoWorld, Puppet  # noqa: E402
 from quackd.transport.base import Intent, TransportError  # noqa: E402
 from quackd.transport.mujoco import MujocoTransport  # noqa: E402
+from tests.gl import require_render  # noqa: E402
 
 
 def _run(world: MujocoWorld, seconds: float) -> None:
@@ -39,14 +42,6 @@ def _place_ball(world: MujocoWorld, dist: float, bearing_deg: float) -> None:
     world.data.qvel[world._ball_dof : world._ball_dof + 6] = 0.0
     mujoco.mj_forward(world.model, world.data)
     world.ball_start = (world.ball_x, world.ball_y)
-
-
-def _can_render(world: MujocoWorld) -> bool:
-    try:
-        world.renderer(64)
-    except Exception:
-        return False
-    return True
 
 
 # ── the world ───────────────────────────────────────────────────────────────────────────
@@ -254,8 +249,7 @@ async def test_a_fallen_duck_refuses_skills_until_enabled() -> None:
 
 def test_the_head_camera_shows_the_detector_what_the_cartoon_would() -> None:
     w = MujocoWorld(seed=3)
-    if not _can_render(w):
-        pytest.skip("no OpenGL context for offscreen rendering")
+    require_render(w)
     w.body.reset(0.0, 0.0, 0.3)
     _place_ball(w, 0.5, 20.0)
     w.step()
@@ -280,8 +274,7 @@ def test_the_head_camera_shows_the_detector_what_the_cartoon_would() -> None:
 
 def test_the_person_is_blue_enough_to_be_seen() -> None:
     w = MujocoWorld(seed=0)
-    if not _can_render(w):
-        pytest.skip("no OpenGL context for offscreen rendering")
+    require_render(w)
     px, py = w.people[0]
     w.body.reset(px - 0.8, py, 0.0)  # 0.8 m west of the person, facing it
     w.step()
@@ -294,8 +287,7 @@ async def test_the_recorder_draws_the_physics_panes(tmp_path: Path) -> None:
     t = MujocoTransport(seed=0, body="puppet")
     rec = FrameRecorder(t, size=64)  # before connect, as the CLI does
     await t.connect()
-    if not _can_render(t.world):
-        pytest.skip("no OpenGL context for offscreen rendering")
+    require_render(t.world)
     await t.send_intent(Intent.move(0.2, 0.0, 0.3))
     await t.sleep(0.6)
     rec.capture(await t.get_frame(), "observe")
@@ -305,12 +297,252 @@ async def test_the_recorder_draws_the_physics_panes(tmp_path: Path) -> None:
     await t.close()
 
 
+# ── standing back up ────────────────────────────────────────────────────────────────────
+
+
+def test_standing_up_clears_the_twist_that_put_it_down() -> None:
+    """The command that made it fall is still on the books until the deadman notices, so a
+    duck stood back up used to walk straight off again."""
+    w = MujocoWorld(seed=0, body=Puppet())
+    w.set_velocity(0.2, 0.0, 0.0)
+    w.body.fall()
+    w.enable()
+    assert w.posture == "standing"
+    assert w.cmd == (0.0, 0.0, 0.0)
+
+
+def test_standing_up_does_not_leave_the_duck_inside_something() -> None:
+    """A duck goes down while walking, so it comes to rest wherever it slid to: against a
+    wall, on the ball, or overlapping the person. Standing up in place puts it inside them."""
+    from quackd.sim3d.scene import ARENA_HALF, PERSON_R
+    from quackd.sim3d.world import DUCK_R
+
+    w = MujocoWorld(seed=0, body=Puppet())
+    px, py = w.people[0]
+    w.body.x, w.body.y = px, py  # face down on top of the person
+    w.body.fall()
+    w.enable()
+    assert math.hypot(w.x - px, w.y - py) >= DUCK_R + PERSON_R - 1e-9
+
+    w.body.x, w.body.y = ARENA_HALF * 2, 0.0  # slid through the wall
+    w.body.fall()
+    w.enable()
+    assert abs(w.x) <= ARENA_HALF - DUCK_R + 1e-9
+
+
+# ── rendering, and what happens without a screen ────────────────────────────────────────
+
+
+def test_a_frame_bigger_than_the_offscreen_buffer_is_refused_by_name() -> None:
+    """The buffer is compiled into the model, so a larger frame fails inside MuJoCo. Refuse it
+    where the number lives, and bound `--gif-size` to the same figure."""
+    from quackd.sim3d.scene import OFFSCREEN_PX
+    from quackd.sim3d.world import RenderError
+
+    w = MujocoWorld(seed=0, body=Puppet())
+    with pytest.raises(RenderError, match="OFFSCREEN_PX"):
+        w.renderer(OFFSCREEN_PX + 1)
+    with pytest.raises(RenderError, match="OFFSCREEN_PX"):
+        w.renderer(0)
+
+
+def test_the_cli_caps_a_gif_pane_at_the_size_the_model_can_actually_render() -> None:
+    """`cli.py` spells 1024 rather than importing it, because importing `sim3d` on the default
+    path would drag in the physics extra. This is the thread between the two numbers."""
+    from quackd.cli import _GIFSIZE
+    from quackd.sim3d.scene import OFFSCREEN_PX
+
+    assert _GIFSIZE.max == OFFSCREEN_PX
+
+
+def test_a_machine_with_no_opengl_is_told_which_variable_to_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """docs/faq.md promises this sentence. A bare OpenGL traceback is the least useful thing
+    to hand someone on a server."""
+    from quackd.sim3d.world import RenderError
+
+    w = MujocoWorld(seed=0, body=Puppet())
+
+    def no_display(*_a: object, **_k: object) -> None:
+        raise RuntimeError("could not create an OpenGL context")
+
+    monkeypatch.setattr(mujoco, "Renderer", no_display)
+    with pytest.raises(RenderError, match="MUJOCO_GL=osmesa"):
+        w.renderer(64)
+
+
+def test_a_world_can_be_closed_twice_and_refuses_to_render_after() -> None:
+    w = MujocoWorld(seed=0, body=Puppet())
+    from quackd.sim3d.world import RenderError
+
+    w.close()
+    w.close()
+    with pytest.raises(RenderError, match="closed"):
+        w.renderer(64)
+
+
+async def test_the_transport_says_it_is_not_connected_rather_than_dereferencing_nothing() -> None:
+    t = MujocoTransport(seed=0, body="puppet")
+    for call in (t.get_state(), t.get_frame()):
+        with pytest.raises(TransportError, match="not connected"):
+            await call
+    with pytest.raises(TransportError, match="not connected"):
+        t.render_panes(64)
+
+
+# ── when time stops ─────────────────────────────────────────────────────────────────────
+
+
+async def test_a_world_that_cannot_step_ends_the_run_instead_of_hanging_it() -> None:
+    """The advancer is a task nobody awaits until `stop()`. An exception in it used to sit
+    unretrieved while every sleeper waited on a future that would never resolve: the run hung
+    until a verb timed out and the reason was collected by the garbage collector."""
+    from quackd.transport.base import HeartbeatError
+
+    t = MujocoTransport(seed=0, body="puppet")
+    await t.connect()
+
+    def explode(*_a: object, **_k: object) -> None:
+        raise RuntimeError("the physics gave up")
+
+    t.world.body.control = explode  # type: ignore[method-assign]
+    with pytest.raises(TransportError, match="the physics gave up"):
+        await asyncio.wait_for(t.sleep(0.1), timeout=5)
+    # the heartbeat says the same thing, so the run aborts rather than limping on
+    with pytest.raises(HeartbeatError, match="the physics gave up"):
+        await t.heartbeat()
+    # and a later sleep raises at once rather than starting a fresh advancer over a dead world
+    with pytest.raises(TransportError, match="the physics gave up"):
+        await asyncio.wait_for(t.sleep(0.1), timeout=5)
+    await t.close()
+
+
+async def test_two_tasks_sleeping_as_one_duck_say_so_instead_of_stranding_each_other() -> None:
+    """The clock keeps one parked waiter per participant, so a second task sleeping under the
+    same id silently overwrote the first and left its future unresolved for good. One
+    participant is one task; the pair is usually a subscription and a verb, and the answer is
+    to say which id rather than to hang."""
+    t = MujocoTransport(seed=0, body="puppet")
+    await t.connect()
+    first = asyncio.create_task(t.sleep(0.2))
+    await asyncio.sleep(0)  # let it park
+    with pytest.raises(RuntimeError, match="two tasks are sleeping as 'duck-0'"):
+        await asyncio.wait_for(t.sleep(0.2), timeout=5)
+    await asyncio.wait_for(first, timeout=5), "and the one that got there first still wakes"
+    await t.close()
+
+
+# ── what the state says the duck is doing ───────────────────────────────────────────────
+
+
+async def test_the_state_reports_the_gait_that_ran_not_the_one_that_was_asked_for() -> None:
+    """`policy` is what reaches the model; the body's own honest `extras["policy"]` does not.
+    Reporting the commanded twist here said `walk` while a duck below the gait floor stood
+    still, which is the failure the floor exists to prevent."""
+    t = MujocoTransport(seed=0, body="puppet")
+    await t.connect()
+    assert (await t.get_state()).policy == "stand"
+    assert (await t.send_intent(Intent(kind="move", params={"vx": 0.2}))).accepted
+    assert (await t.get_state()).policy == "stand", "commanded, but no tick has run yet"
+    await t.sleep(0.1)
+    assert (await t.get_state()).policy == "walk"
+    await t.send_intent(Intent(kind="stop", params={}))
+    await t.sleep(0.1)
+    assert (await t.get_state()).policy == "stand"
+    await t.close()
+
+
+def test_a_body_that_declines_a_twist_is_not_reported_as_walking() -> None:
+    """The puppet takes every twist, so this pins the wiring with a body that refuses one:
+    the world must read the body's answer, not its own command."""
+    w = MujocoWorld(seed=0, body=Puppet())
+    w.set_velocity(0.2, 0.0, 0.0)
+    w.body.fall()  # a body that is down declines whatever it is sent
+    w.step()
+    assert w.moving, "the command is still on the books"
+    assert not w.body.walking
+    assert w.policy == "stand"
+
+
+# ── what the world refuses to do ────────────────────────────────────────────────────────
+
+
+def test_a_twist_that_is_not_a_number_never_reaches_the_body() -> None:
+    """`np.clip` passes NaN through and every comparison against it is False, so without a
+    guard a NaN twist arrives at the servos as a NaN target and the physics quietly resets."""
+    w = MujocoWorld(seed=0, body=Puppet())
+    for bad in ((math.nan, 0.0, 0.0), (0.0, math.inf, 0.0), (0.0, 0.0, math.nan)):
+        with pytest.raises(ValueError, match="finite"):
+            w.set_velocity(*bad)
+    assert w.cmd == (0.0, 0.0, 0.0), "and nothing was commanded on the way out"
+    with pytest.raises(ValueError, match="finite"):
+        w.look(math.nan, 0.0)
+
+
+async def test_a_non_finite_intent_is_refused_rather_than_ending_the_run() -> None:
+    """A refusal is an answer the pilot can read and correct; an exception out of
+    `send_intent` would end the run over one bad number."""
+    t = MujocoTransport(seed=0, body="puppet")
+    await t.connect()
+    ack = await t.send_intent(Intent(kind="move", params={"vx": math.nan}))
+    assert not ack.accepted
+    assert "finite" in (ack.reason or "")
+    assert (await t.get_state()).policy != "walk", "and the duck was not left walking"
+    assert (await t.send_intent(Intent(kind="move", params={"vx": 0.2}))).accepted
+    await t.close()
+
+
+def test_a_world_that_mujoco_has_reset_under_us_refuses_to_carry_on() -> None:
+    """MuJoCo answers a non-finite state by resetting the world and logging a warning, not by
+    raising. A run that kept going would report poses from a world that had quietly restarted:
+    an ordinary-looking transcript that is fiction."""
+    w = MujocoWorld(seed=0, body=Puppet())
+    w.data.qvel[w._ball_dof] = math.inf
+    with pytest.raises(TransportError, match="diverged"):
+        for _ in range(5):
+            w.step()
+
+
+# ── what a wrong policy file does ───────────────────────────────────────────────────────
+
+
+def test_a_policy_of_the_wrong_shape_is_refused_by_name() -> None:
+    """`OBS_LEN` was a number in a comment: nothing compared it to the model, and the input
+    name and output index were written in by hand. A re-export with one more observation
+    would have failed inside onnxruntime on the first tick, with nothing naming the file."""
+    from types import SimpleNamespace
+
+    from quackd.sim3d.microduck import ACTION_LEN, OBS_LEN, PolicyError, _check_io
+
+    def session(inputs: list[Any], outputs: list[Any]) -> Any:
+        return SimpleNamespace(get_inputs=lambda: inputs, get_outputs=lambda: outputs)
+
+    good_in = SimpleNamespace(name="obs", shape=[1, OBS_LEN])
+    good_out = SimpleNamespace(name="actions", shape=[1, ACTION_LEN])
+    assert _check_io(session([good_in], [good_out]), "walk.onnx") == "obs"
+    # whatever upstream calls it, quackd asks by the name the file declares
+    renamed = SimpleNamespace(name="observation", shape=[1, OBS_LEN])
+    assert _check_io(session([renamed], [good_out]), "walk.onnx") == "observation"
+
+    short = SimpleNamespace(name="obs", shape=[1, OBS_LEN - 1])
+    with pytest.raises(PolicyError, match=re.escape("walk.onnx")):
+        _check_io(session([short], [good_out]), "walk.onnx")
+    wide = SimpleNamespace(name="actions", shape=[1, ACTION_LEN + 2])
+    with pytest.raises(PolicyError, match="actuators"):
+        _check_io(session([good_in], [wide]), "walk.onnx")
+    with pytest.raises(PolicyError, match="one of each"):
+        _check_io(session([good_in, good_in], [good_out]), "walk.onnx")
+
+
 # ── the real duck ───────────────────────────────────────────────────────────────────────
 
 
 #: The Microduck body needs upstream's model and policies, which are fetched at run time and
 #: never shipped. Tests must not reach the network, so these run only when a previous run
-#: (or a developer) has already filled the cache, and are skipped everywhere else.
+#: (or a developer) has already filled the cache, and are skipped everywhere else. Every
+#: caller carries `@pytest.mark.real_duck`, which is what exempts it from the conftest's
+#: throwaway cache; without the marker this would look in an empty directory and always skip.
 def _cached_microduck() -> Any:
     from quackd.sim3d.assets import AssetError, ensure_microduck
 
@@ -320,26 +552,7 @@ def _cached_microduck() -> Any:
         pytest.skip(f"upstream's Microduck model is not cached: {e}")
 
 
-def test_the_gait_floor_scales_a_twist_instead_of_dropping_or_lurching() -> None:
-    from quackd.sim3d.microduck import GAIT_FLOOR_VX, GAIT_FLOOR_WZ, MicroduckBody
-
-    body = MicroduckBody(_cached_microduck())
-    # too small to step at all: standing still beats a lurch nobody asked for
-    assert body._usable_twist((0.02, 0.0, 0.0)) == (0.0, 0.0, 0.0)
-    assert body._usable_twist((0.0, 0.0, 0.1)) == (0.0, 0.0, 0.0)
-    # below the floor: raised, keeping the ratio, so an arc stays an arc
-    vx, _vy, wz = body._usable_twist((0.11, 0.0, 0.5))
-    assert vx == pytest.approx(GAIT_FLOOR_VX)
-    assert wz == pytest.approx(0.5 * GAIT_FLOOR_VX / 0.11)
-    # already walking: passed through untouched, however small the turn
-    assert body._usable_twist((0.25, 0.0, 0.3)) == pytest.approx((0.25, 0.0, 0.3))
-    # a turn on its own is raised to the turning floor
-    assert body._usable_twist((0.0, 0.0, 0.6))[2] == pytest.approx(GAIT_FLOOR_WZ)
-    # a fallen duck is sent nothing at all
-    body.posture = "fallen"
-    assert body._usable_twist((0.3, 0.0, 0.0)) == (0.0, 0.0, 0.0)
-
-
+@pytest.mark.real_duck
 def test_the_real_duck_walks_turns_and_stays_upright() -> None:
     assets = _cached_microduck()
     from quackd.sim3d.microduck import MicroduckBody
@@ -371,6 +584,31 @@ def test_the_real_duck_walks_turns_and_stays_upright() -> None:
     w.close()
 
 
+@pytest.mark.real_duck
+def test_a_duck_that_fell_on_its_face_stands_up_facing_the_way_it_was_going() -> None:
+    """Yaw from the trunk quaternion is the right answer while the duck is upright and an
+    arbitrary one where it usually is not. Face-down is the gimbal degeneracy, and it is also
+    how a biped most often lands: measured on the real model, a duck facing +x that goes onto
+    its nose reads as yaw 3.14, so `stand_up` used to put it back on its feet facing
+    backwards, one step into whatever it had been walking towards."""
+    from quackd.sim3d.microduck import MicroduckBody
+
+    w = MujocoWorld(seed=0, body=MicroduckBody(_cached_microduck()))
+    b = w.body
+    b.reset(0.0, 0.0, 0.0)  # facing +x
+    b._data.qpos[b.free_q + 3 : b.free_q + 7] = (
+        math.cos(-math.pi / 4),
+        0.0,
+        math.sin(-math.pi / 4),
+        0.0,
+    )
+    mujoco.mj_forward(b._model, b._data)
+    assert abs(b.pose()[2]) == pytest.approx(math.pi, abs=0.01), "the quaternion says backwards"
+    assert b.heading() == pytest.approx(0.0, abs=0.01), "and the trunk's own axis says forwards"
+    w.close()
+
+
+@pytest.mark.real_duck
 def test_the_real_duck_refuses_to_sit_and_stands_itself_up() -> None:
     from quackd.sim3d.microduck import MicroduckBody
     from quackd.sim3d.world import NotSupported

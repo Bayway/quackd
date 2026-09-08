@@ -50,7 +50,7 @@ from quackd.transport.mujoco import MujocoTransport
 
 GOAL = "walk in a square, half a metre a side"
 SAMPLE_S = 0.4  # sim seconds between recorded frames
-MAX_BYTES = 2_000_000  # .pre-commit-config.yaml refuses anything over 2048 KB
+MAX_BYTES = 2_097_152  # 2048 KB, exactly the --maxkb the pre-commit hook is configured with
 
 CAPTION_H = 34
 GUTTER = 3
@@ -201,6 +201,10 @@ async def main() -> int:
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
     left = await run_with_quackd(args.seed, args.pane)
+    if left.world is None:
+        # `PaneRecorder.world` is set by the first capture, so without this the next line
+        # raises an AttributeError about NoneType rather than saying what went wrong.
+        raise SystemExit("no frames were captured: the tick hook never ran, or rendering failed")
     right = run_without_quackd(args.seed, args.pane, seconds=left.world.t)
     out = save(
         compose(left, right, args.pane),
@@ -210,7 +214,9 @@ async def main() -> int:
         fps=args.fps,
     )
     size = out.stat().st_size
-    saved = Image.open(out).n_frames
+    # `n_frames` exists on the multi-frame plugins, not on the `ImageFile` base the stubs
+    # declare, and this is always a GIF because `save_gif` wrote it.
+    saved = getattr(Image.open(out), "n_frames", 0)
     print(f"{out} — {size / 1000:.0f} kB, {saved} frames")
     print(f"  left walked {left.walked:.2f} m, right walked {right.walked:.2f} m")
     if size > MAX_BYTES:

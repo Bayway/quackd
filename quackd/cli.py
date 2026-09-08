@@ -722,7 +722,13 @@ _GOAL = typer.Option(
     "-g",
     help='A plain-language goal instead of a .duck file, e.g. --goal "find the ball and kick it".',
 )
-_GIFSIZE = typer.Option(256, "--gif-size", help="Simulators: pixel size of each GIF pane.")
+_GIFSIZE = typer.Option(
+    256,
+    "--gif-size",
+    min=64,
+    max=1024,  # `sim3d.scene.OFFSCREEN_PX`; spelled here because cli.py must not import sim3d
+    help="Simulators: pixel size of each GIF pane, 64 to 1024.",
+)
 _FLOCK = typer.Option(
     None,
     "--flock",
