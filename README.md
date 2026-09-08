@@ -14,7 +14,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0"></a>
   <a href="docs/mcp.md"><img src="https://img.shields.io/badge/MCP-ready-8A2BE2" alt="MCP ready"></a>
   <a href="docs/adapter-status.md"><img src="https://img.shields.io/badge/robots-8%20bodies%2C%20simulated%20and%20mocked-f5c518" alt="robots: 8 bodies, simulated and mocked"></a>
-  <a href="https://github.com/pollen-robotics/microduck#readme"><img src="https://img.shields.io/badge/community-Pollen%20Discord-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 <details>
@@ -99,7 +98,7 @@ uvx quackd run find-and-kick --provider fake                                    
 claude mcp add quackd -- uvx quackd serve-mcp --robot microduck:sim2d               # or just chat with it: "find the ball and kick it"
 uvx quackd run open-duck-scout --provider fake                                     # a duck you can build: it finds the ball and walks up, no kick
 uvx quackd run reachy-spotter --provider fake                                       # another body: a Reachy Mini head, no legs, same loop
-uvx --from "quackd[anthropic]" quackd run find-and-kick --provider anthropic --robot microduck:mujoco   # a real model on the real gait, needs ANTHROPIC_API_KEY
+uvx --from "quackd[mujoco,anthropic]" quackd run find-and-kick --provider anthropic --robot microduck:mujoco   # a real model on the real gait, needs ANTHROPIC_API_KEY
 uvx --from "quackd[openai]" quackd run find-and-kick --provider ollama --model qwen3:8b          # local model, no key
 open runs/*/run.gif                                                                 # a GIF in either simulator, a transcript every time
 ```
@@ -353,6 +352,8 @@ Cloud or local, same command.
 | llama.cpp (local) | `quackd[openai]` | none | `uvx --from "quackd[openai]" quackd run find-and-kick --provider llamacpp` |
 | LM Studio (local) | `quackd[openai]` | none | `uvx --from "quackd[openai]" quackd run find-and-kick --provider lmstudio` |
 | any OpenAI compatible server | `quackd[openai]` | optional | `uvx --from "quackd[openai]" quackd run find-and-kick --provider local --base-url http://host:8000/v1` |
+
+Every row above runs the cartoon, which is the default robot. To put the same model on the physics simulator instead, ask for both extras and name the backend: `uvx --from "quackd[mujoco,anthropic]" quackd run find-and-kick --provider anthropic --robot microduck:mujoco`. The extras are independent, so `quackd[anthropic]` alone gives you the model and no physics.
 
 The four cloud providers see the camera frame as an image. Local models get the text detections by default and the frame too with `--vision`. The scripted pilot only reads the detection summary. Local setup, tool calling flags per server and what to expect from small models: [docs/local-llms.md](docs/local-llms.md).
 
