@@ -36,13 +36,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   named stand-ins there too: `kick` and `grab` use the cartoon's contact rules, `sit` is
   refused, and a fall is recovered by standing the model up, because upstream's episodic
   policies did nothing from a standing pose and it ships no get-up policy.
-- **A browser demo, so trying quackd costs nobody an install** (`web/`, a static page with a
-  deployed from `web/` by Vercel at www.quackd.org, with no build step). The same physics and the same policy through MuJoCo's official WebAssembly build and
-  onnxruntime-web, with the verbs, the contract and the one-tool-per-turn loop in six modules of
-  plain JavaScript and no build step. Bring your own key for Anthropic, OpenAI or Gemini, or point it at
-  Ollama and keep everything on your machine. A switch turns quackd off, which removes the
-  layer and only the layer: the robot and its policy are identical, nothing reads English any
-  more, and you drive it with the keyboard. Runs can be recorded from the canvas and shared.
+- **A browser demo, so trying quackd costs nobody an install** (`web/`, a static page with no
+  build step, deployed from that directory by Vercel; www.quackd.org is where it is headed and
+  today serves the separate landing page). The same physics and the same policy through
+  MuJoCo's official WebAssembly build and onnxruntime-web, with the verbs, the contract and the
+  one-tool-per-turn loop in six modules of plain JavaScript. Bring your own key for Anthropic,
+  OpenAI or Gemini, or point it at Ollama and keep everything on your machine. Both ways of
+  driving a robot are live at once, and neither takes turns with the other: the keyboard writes
+  the twist the hardware actually takes — `W`/`S` walk, `A`/`D` turn, `Shift` strafes, `Q`/`E`
+  look, `Space` stops, `K` kicks, `R` stands it up — while the box above it hands the same
+  robot to a model. A drive key pressed during a run takes the duck back at once, aborts the
+  run and the request in flight with it, and leaves the key that did it in the transcript;
+  `O` and the camera keys read without interrupting. The switch keeps the one job that is the
+  demo's whole argument — whether anything here reads English — and no longer decides whether
+  you may drive at all. The page wears quackd's own mark instead of an emoji, in the
+  quackd-web design language, and the arena's person marker is quackd's purple rather than the
+  blue that Python's colour detector needs and nothing in the browser reads. Runs can be
+  recorded from the canvas and shared. `tests/test_web.py` gates all of it that can be gated
+  without a browser, which is not the rendering.
 - **`walk in a square` and `walk in a circle` need no API key.** The scripted pilot learned
   two shapes, and both close the loop on the pose the robot reports rather than on a
   stopwatch, so a body that delivers half of what it was asked still walks the shape. That is

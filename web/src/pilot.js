@@ -43,6 +43,13 @@ export class Runtime {
       try {
         while (carry >= CONTROL_DT) {
           carry -= CONTROL_DT;
+          // LOAD-BEARING, and invisible: the hand's twist is RE-ASSERTED here every tick,
+          // immediately before the physics reads it. That asymmetry — 50 Hz against the
+          // pilot's 10 Hz — is what lets a key take the robot mid-run without cancelling
+          // anything first, because every stray pilot write is overwritten before `step()`
+          // sees it. Turn this into a one-shot write on key change and four separate
+          // `setTwist(0, 0, 0)` calls (the per-verb catch, `move`'s tail, `stop`, and the
+          // page's `run()` finally) all become real bugs at once.
           if (this.manual) this.duck.setTwist(...this.manualTwist);
           await this.duck.step();
           this._wake(CONTROL_DT);
@@ -77,18 +84,24 @@ export class Runtime {
     if (signal?.aborted) return Promise.reject(signal.reason);
     if (seconds <= 0) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const waiter = { left: seconds, resolve, reject };
-      this._waiters.push(waiter);
+      // The listener has to come OFF again when the sleep ends normally. `once: true` only
+      // covers the abort path, and `move` issues up to a hundred slices per verb against a
+      // budget of eighteen steps, so one run left ~1800 live closures on a single signal —
+      // and an abort then walked every one of them.
+      const done = () => signal?.removeEventListener("abort", onAbort);
+      const waiter = {
+        left: seconds,
+        resolve: () => { done(); resolve(); },
+        reject: (error) => { done(); reject(error); },
+      };
       // Stop has to reach a move that is already running. Without this a ten second move ran
       // to completion after the button, and the duck kept walking the whole time.
-      signal?.addEventListener(
-        "abort",
-        () => {
-          this._waiters = this._waiters.filter((w) => w !== waiter);
-          reject(signal.reason);
-        },
-        { once: true }
-      );
+      const onAbort = () => {
+        this._waiters = this._waiters.filter((w) => w !== waiter);
+        reject(signal.reason);
+      };
+      this._waiters.push(waiter);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 
@@ -175,12 +188,12 @@ export const VERBS = {
       required: [],
       additionalProperties: false,
     },
-    async run(runtime, p) {
+    async run(runtime, p, signal = null) {
       const { vx = 0.15, vy = 0, wz = 0, duration_s = 1 } = p;  // Python's defaults
       const slices = Math.max(1, Math.round(duration_s / MOVE_RESEND_S));
       for (let i = 0; i < slices; i++) {
         runtime.duck.setTwist(vx, vy, wz); // re-sent, exactly as the real verb does
-        await runtime.sleep(duration_s / slices);
+        await runtime.sleep(duration_s / slices, signal);
       }
       runtime.duck.setTwist(0, 0, 0);
       const sent = runtime.duck.sent;
@@ -215,9 +228,9 @@ export const VERBS = {
       required: ["bearing_deg"],
       additionalProperties: false,
     },
-    async run(runtime, p) {
+    async run(runtime, p, signal = null) {
       const clamped = runtime.duck.setHead((p.bearing_deg * Math.PI) / 180);
-      await runtime.sleep(0.6); // the neck is a servo the policy drives, not a teleport
+      await runtime.sleep(0.6, signal); // the neck is a servo the policy drives, not a teleport
       const limit = ((HEAD_YAW_LIMIT * 180) / Math.PI).toFixed(0);
       return `looking ${p.bearing_deg} degrees${clamped ? ` (clamped to ${limit})` : ""}`;
     },
@@ -230,14 +243,16 @@ export const VERBS = {
       properties: { leg: { type: "string", enum: ["left", "right"] } },
       additionalProperties: false,
     },
-    async run(runtime, p) {
+    async run(runtime, p, signal = null) {
       const connected = runtime.duck.kick(p.leg ?? "right");
-      await runtime.sleep(1.5);
+      await runtime.sleep(1.5, signal);
       const moved = runtime.duck.lastKickBallMoved;
       if (!connected) {
         const ball = runtime.duck.observe().detections?.find((d) => d.label === "ball");
+        // `est_est_distance_m` was a typo for the field observe() actually publishes, so a
+        // miss with the ball in view threw a TypeError instead of reporting how far off it was.
         const where = ball
-          ? `the ball is ${ball.est_est_distance_m.toFixed(2)} m away at ${ball.bearing_deg.toFixed(0)} degrees`
+          ? `the ball is ${ball.est_distance_m.toFixed(2)} m away at ${ball.bearing_deg.toFixed(0)} degrees`
           : "the camera cannot see the ball";
         return { ok: false, summary: `kick missed: ${where} (needs under 0.3 m, roughly ahead)` };
       }
@@ -264,9 +279,9 @@ export const VERBS = {
   stand_up: {
     description: "Recover to standing after a fall.",
     params: { type: "object", properties: {}, additionalProperties: false },
-    async run(runtime) {
+    async run(runtime, p, signal = null) {
       runtime.duck.standUp();
-      await runtime.sleep(1.0);
+      await runtime.sleep(1.0, signal);
       const up = runtime.duck.posture === "standing";
       return { ok: up, summary: up ? "upright" : "still down" };
     },
@@ -317,7 +332,7 @@ export function systemPrompt(goal, contract) {
   return `You are the brain of a Microduck: a small biped duck robot, 25 cm tall, 800 g.
 You are a high-level pilot. You choose ONE verb per turn; the robot's own controllers handle
 balance and gait. You are in a physics simulator: a 2 m arena with low walls, an orange ball
-that rolls when it is kicked, and a blue person marker. Distances are metres.
+that rolls when it is kicked, and a purple person marker. Distances are metres.
 
 ## Rules, enforced by the executor and not optional
 - Call exactly one tool per turn. Never zero, never two.
@@ -349,6 +364,13 @@ export function observationText(duck, step, contract, last) {
   return lines.join("\n");
 }
 
+/**
+ * Why the run stopped, in the words of whoever stopped it. Every route names itself — the
+ * Stop button, Reset, the switch, a drive key taking the controls — so the transcript quotes
+ * a reason instead of assuming there was only ever one.
+ */
+const abortedBecause = (signal) => signal?.reason?.message ?? "you stopped the run";
+
 /** One run of the loop. `onEvent` is how the page draws the transcript. */
 export async function pilot({ runtime, goal, provider, contract = DEFAULT_CONTRACT, onEvent, signal }) {
   const duck = runtime.duck;
@@ -358,7 +380,7 @@ export async function pilot({ runtime, goal, provider, contract = DEFAULT_CONTRA
   onEvent({ kind: "start", goal, contract });
 
   for (let step = 0; step < contract.maxSteps; step++) {
-    if (signal?.aborted) { onEvent({ kind: "end", outcome: "aborted", reason: "you stopped the run" }); return; }
+    if (signal?.aborted) { onEvent({ kind: "end", outcome: "aborted", reason: abortedBecause(signal) }); return; }
     if (duck.t - startedAt > contract.maxMinutes * 60) {
       onEvent({ kind: "end", outcome: "budget", reason: "the time budget is spent" });
       return;
@@ -372,8 +394,13 @@ export async function pilot({ runtime, goal, provider, contract = DEFAULT_CONTRA
         history,
         observation,
         tools: toolSchemas(contract),
+        signal,
       });
     } catch (error) {
+      // An abort during the model's turn is not a provider failure. Without the signal on the
+      // fetch this arrived seconds late, after a response nobody wanted and the visitor's own
+      // key had already been billed for.
+      if (signal?.aborted) { onEvent({ kind: "end", outcome: "aborted", reason: abortedBecause(signal) }); return; }
       onEvent({ kind: "end", outcome: "error", reason: String(error.message || error) });
       return;
     }
@@ -404,7 +431,10 @@ export async function pilot({ runtime, goal, provider, contract = DEFAULT_CONTRA
       continue;
     }
     try {
-      const outcome = await verb.run(runtime, call.arguments ?? {});
+      // The signal is passed down. It was not, so `Runtime.sleep`'s abort listener was dead
+      // code and a ten second `move` ran to completion after Stop, exactly as the comment
+      // above that listener claimed it would not.
+      const outcome = await verb.run(runtime, call.arguments ?? {}, signal);
       // A verb may report that it did not work. `ok: true` used to be unconditional, so a
       // kick that missed read as a success and the failure style was unreachable.
       last =
@@ -413,6 +443,8 @@ export async function pilot({ runtime, goal, provider, contract = DEFAULT_CONTRA
           : { name: call.name, ok: outcome.ok, summary: outcome.summary, data: outcome.data };
     } catch (error) {
       runtime.duck.setTwist(0, 0, 0); // a verb that threw leaves the robot stopped
+      // An abort is not a failed verb: this used to print `result move FAILED AbortError`.
+      if (signal?.aborted) { onEvent({ kind: "end", outcome: "aborted", reason: abortedBecause(signal) }); return; }
       last = { name: call.name, ok: false, summary: String(error.message || error) };
     }
     onEvent({ kind: "result", ...last });

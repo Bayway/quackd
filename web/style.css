@@ -1,136 +1,1236 @@
-/* One column of controls beside a big canvas; dark, because the arena is bright. */
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   quackd — the browser simulator.
+
+   Hand-authored CSS in the quackd-web design language (www.quackd.org): cream ground with a
+   radial wash, film grain, purple/gold brand, Nunito Sans + DM Mono, 1rem radii, hard-drop
+   button shadows, a 2px #7c4a9e focus ring.
+
+   THREE RULES THAT DECIDE EVERY LATER QUESTION
+   R1  The page has exactly two objects plus a brandline: .brandline, section.console,
+       footer. Everything needed during a run lives inside the console: the arena on top,
+       a two-lane deck beneath it — lane A "say it / drive it / your key", lane B the log.
+   R2  The sentence box and the keycaps are ADJACENT, in that order, in one lane. That
+       adjacency is the dual-control argument, made by proximity instead of by copy. Do not
+       separate them, do not put the log between them, do not move the cockpit to lane B.
+   R3  Machine speech is mono, human speech is sans. Verb calls, results, #readout, keycaps,
+       eyebrows and bay numbers are DM Mono; the goal line, the refusal paragraph and every
+       .fine are Nunito Sans. This is deliberate — do not "fix" the mixed-family log.
+
+   Exactly ONE dark surface exists on this page: .terminal-window (#483652). The log is
+   content, not chrome. Everything else is cream.
+
+   Section order below: tokens · reset · class registry · base/type · shell · brandline ·
+   console/stage · stage chrome · deck · controls · cockpit · key box · terminal · footer ·
+   keyframes · responsive.
+   ═════════════════════════════════════════════════════════════════════════════════════ */
+
+/* ── tokens ──────────────────────────────────────────────────────────────────────────── */
+
 :root {
-  color-scheme: dark;
-  --ink: #e8eaed;
-  --dim: #9aa3ad;
-  --bg: #14171b;
-  --panel: #1c2026;
-  --edge: #2c323a;
-  --duck: #f5c542;
-  --good: #6ee7a8;
-  --bad: #ff8a80;
-  --off: #ff9d5c;
+  /* Was `dark`. Every native control — the <select> popup, the password reveal eye — renders
+     wrong against a cream page under a dark scheme. */
+  color-scheme: light;
+
+  /* ground */
+  --cream: #fffdf7;
+  --card: #ffffff;
+  --card-soft: linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(250, 243, 255, 0.94));
+  --lilac: #f2e9fa;
+  --lilac-edge: #e2d2ef;
+  --lilac-2: #f7f1fb;
+  --tint: #f8f0ff;        /* the hover wash under every outline control */
+
+  /* ink, every value checked against --cream */
+  --ink: #3e294e;    /* 12.6:1 */
+  --ink-2: #4e365b;  /* 10.6:1 */
+  --body: #6b5875;   /*  5.9:1 */
+  --meta: #7a6784;   /*  4.9:1 */
+  --btn-ink: #5f4577;     /* quackd-web's control ink, 7.3:1 */
+
+  /* edges */
+  --edge: #dfcce9;
+  --edge-3: #ecdff2;
+  --edge-guard: #e4d3ee;  /* quackd-web's .guard-card border */
+  --edge-soft: #cdb3e6;
+  --field: #ddc8ea;
+
+  /* brand */
+  --primary: #8a5cc4;
+  --primary-deep: #7c4a9e;
+  --primary-ink: #573c68;
+  --pink: #a34a72;        /* 5.4:1 — eyebrows, links */
+  --pink-hi: #ad5079;     /* the pink button's hover, 5.0:1 against white */
+  --pink-deep: #7c3457;   /* its plinth and its pressed link */
+  --pink-edge: #e2c3d6;
+  --pink-rule: #e7a7c4;
+  --gold: #f5c533;
+  --gold-hi: #f8cb43;
+  --gold-deep: #d59f18;
+  --gold-press: #cf9a15;
+  --gold-dot: #d99a12;    /* the live dot, and the hand pill's ink lives beside it */
+  --gold-ink: #4b3828;    /* text ON gold, 8:1 */
+  --gold-ink-warm: #6d4c10;
+  --bad: #a3312f;
+  /* Deliberately the same hue as --pink: with the language layer off the page has ONE
+     off-brand accent, not two. The pink #run is a two-colour object — face, ink, plinth and
+     hover — and a single custom property cannot express that, so it is spelled out under
+     `body.no-quackd #run` rather than smuggled in here. */
+  --off: var(--pink);
+  --ring: #7c4a9e;
+  --duck: var(--gold);
+
+  /* the one dark panel */
+  --plum: #483652;
+  --plum-edge: rgba(255, 255, 255, 0.14);
+  --plum-rule: rgba(255, 255, 255, 0.07);
+  --log-ink: #e8dcf2;
+  --log-meta: #c0a9c2;
+  --log-dim: #9c87a8;
+  --log-gold: #f1c642;
+  --log-gold-soft: #f6dc93;
+  --log-purple: #c08ae8;
+  --log-purple-soft: #e2d3ee;
+  --log-green: #cfe9d5;
+  --log-green-soft: #a9e0bd;
+  --log-green-dot: #7fc48f;
+  --log-bad: #f3b3b0;
+  --log-bad-dot: #e08a86;
+  /* #7c4a9e on #483652 is 1.7:1 and FAILS the 3:1 non-text minimum, i.e. the focus ring is
+     invisible on the dark panel. Gold #f1c642 is 8:1 there. */
+  --ring-dark: #f1c642;
+
+  /* shadow — the four that quackd-web casts, at quackd-web's own strength */
+  --shadow-card: 0 24px 60px rgba(118, 81, 140, 0.1);
+  --shadow-term: 0 22px 48px rgba(79, 55, 85, 0.18);
+  --shadow-guard: 0 16px 40px rgba(118, 81, 140, 0.08);
+  --shadow-pill: 0 8px 24px rgba(146, 91, 137, 0.08);
+  --shadow-glass: 0 10px 28px rgba(113, 80, 130, 0.14);
+  --shadow-nav: 0 12px 35px rgba(113, 80, 130, 0.12);
+
+  /* fonts — always a real fallback stack, the page must be readable before Google answers */
+  --sans: "Nunito Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "DM Mono", ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace;
+
+  /* type scale */
+  --t-micro: 0.6875rem;
+  --t-eyebrow: 0.6875rem;
+  --t-mono: 0.78125rem;
+  --t-fine: 0.8125rem;
+  --t-ui: 0.875rem;
+  --t-body: 0.9375rem;
+  --t-input: 1rem;        /* NEVER lower: iOS Safari zooms a focused input under 16px, and
+                             that zoom destroys a stage-first layout mid-interaction. */
+  --t-h1: 1.125rem;
+  --t-h2: 1.25rem;
+  --t-lede: clamp(1.35rem, 2.6vw, 1.75rem);
+
+  /* motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 0.14s;
+  --t-base: 0.2s;
+  --t-slow: 0.3s;
+
+  /* radius */
+  --r-pill: 99px;
+  --r-xs: 0.375rem;
+  --r-sm: 0.5rem;
+  --r-md: 0.75rem;
+  --r: 1rem;
+  --r-lg: 1.25rem;
+
+  /* spacing, a 0.25rem ladder. quackd-web's section rhythm is py-20 sm:py-28 (5rem/7rem) and
+     NONE of it is ported: a landing page can afford 7rem between ideas, a tool cannot afford
+     it between the arena and the button that drives it. The ladder stops at --s-6. */
+  --s-0: 0.25rem;
+  --s-1: 0.5rem;
+  --s-2: 0.75rem;
+  --s-3: 1rem;
+  --s-4: 1.5rem;
+  --s-5: 2rem;
+  --s-6: 3rem;
+  --gutter: clamp(0.875rem, 3vw, 1.25rem);
 }
+
+/* ── reset ───────────────────────────────────────────────────────────────────────────── */
 
 * { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font: 15px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-}
-
-header {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
-  padding: 0.8rem 1.1rem; border-bottom: 1px solid var(--edge);
-}
-h1 { font-size: 1.15rem; margin: 0; letter-spacing: 0.01em; }
-h1 small { color: var(--dim); font-weight: 400; font-size: 0.85rem; margin-left: 0.5rem; }
-nav a { color: var(--dim); text-decoration: none; margin-left: 1rem; font-size: 0.9rem; }
-nav a:hover { color: var(--duck); }
-
-main {
-  flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 24rem;
-  gap: 1rem; padding: 1rem; align-items: start;
-}
-@media (max-width: 60rem) { main { grid-template-columns: 1fr; } }
-
-/* ── stage ───────────────────────────────────────────────────────────────────────── */
-.stage { position: relative; background: #0e1013; border: 1px solid var(--edge); border-radius: 10px; overflow: hidden; }
-canvas { display: block; width: 100%; height: min(62vh, 40rem); touch-action: none; cursor: grab; }
-canvas:active { cursor: grabbing; }
 
 /* The user-agent rule for [hidden] is `display: none`, and it loses to any author rule that
    sets `display` at equal specificity. `.overlay` sets `display: grid`, so `loading.hidden =
    true` left the loading panel covering the canvas and the whole stage bar for good. Anything
-   the JS hides with `.hidden` needs this to actually go away. */
+   the JS hides with `.hidden` — #loading, #key-box, #manual, #base-url, #share — needs this
+   to actually go away. It must stay in THIS file: tests/test_web.py reads only style.css. */
 [hidden] { display: none !important; }
 
-.overlay {
-  position: absolute; inset: 0; display: grid; place-content: center; gap: 0.6rem;
-  text-align: center; background: #0e1013; padding: 2rem;
-}
-.overlay h2 { margin: 0; font-size: 1.1rem; }
-.bar { width: min(24rem, 70vw); height: 6px; background: var(--edge); border-radius: 99px; overflow: hidden; }
-.bar > div { height: 100%; width: 0; background: var(--duck); transition: width 0.2s; }
+/* ── class registry ──────────────────────────────────────────────────────────────────────
+   tests/test_web.py asserts every class the JavaScript passes to classList.add/remove/toggle
+   or querySelectorAll is defined here. The matcher wants `.name` immediately followed by a
+   comma, an opening brace or a colon — `body.no-quackd #run {` does NOT register `no-quackd`,
+   and `.a .b {` registers only `b`.
+
+   The other five checked classes register themselves where they are actually styled and need
+   no stub: `bad` below, `on` at `.camera-buttons button.on`, `live` at `#record.live`, `chip`
+   at `.chip`, `down` at `kbd.down`. Only `no-quackd` needs a line of its own, because every
+   rule that uses it is a descendant selector the matcher cannot see. */
+
 .bad { color: var(--bad); }
+body.no-quackd { --duck: var(--off); }       /* standalone: a descendant selector will not do */
+
+/* ── base and typography ─────────────────────────────────────────────────────────────── */
+
+body {
+  margin: 0;
+  /* clip, not hidden: overflow-x:hidden on body makes position:sticky scroll away. */
+  overflow-x: clip;
+  font: 400 var(--t-body) / 1.6 var(--sans);
+  color: var(--body);
+  -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(circle at 81% 5%, rgba(229, 213, 255, 0.72), transparent 26rem),
+    radial-gradient(circle at 5% 54%, rgba(255, 222, 232, 0.42), transparent 25rem),
+    var(--cream);
+}
+
+/* Film grain. Sits above the page and must never eat a click. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.75'/%3E%3C/svg%3E");
+}
+
+::selection { background: #e8c9db; color: #3e294e; }
+
+img { max-width: 100%; }
+
+a[href],
+button,
+summary,
+label[for],
+select,
+[role="button"] { cursor: pointer; }
+
+button:disabled,
+[aria-disabled="true"] { cursor: not-allowed; }
+
+/* A visible, high-contrast focus ring everywhere, not only where somebody remembered it.
+   NO border-radius here: an outline already follows the element's own corners, and a bare
+   `:focus-visible` (0-1-0) outranks `input, select` (0-0-1), so squaring the radius from this
+   rule snapped every field's corners on keyboard focus and put them back on blur. */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.eyebrow {
+  font: 500 var(--t-eyebrow) var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--pink);
+}
+.eyebrow-muted {
+  font: 500 var(--t-eyebrow) var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--meta);
+}
+
+.fine {
+  margin: 0.45rem 0 0;
+  max-width: 62ch;
+  font: 400 var(--t-fine) / 1.55 var(--sans);
+  color: var(--body);
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -4rem;
+  z-index: 70;
+  background: var(--cream);
+  color: var(--ink);
+  border: 1px solid var(--edge-soft);
+  padding: 0.7rem 1.1rem;
+  border-radius: var(--r-md);
+  font: 700 0.85rem var(--sans);
+  text-decoration: none;
+  transition: top 0.2s ease;
+}
+.skip-link:focus { top: 1rem; }
+
+/* ── shell and header ────────────────────────────────────────────────────────────────── */
+
+/* quackd.org's nav is a DETACHED rounded pill sitting inside the page's own 1180px column,
+   not an app bar flush to the viewport. As a full-bleed bar the mark landed ~190px left of the
+   console it labels on a 1600px screen — three different left edges stacked down one page. */
+.nav-shell {
+  position: sticky;
+  top: var(--s-1);
+  z-index: 40;
+  width: min(1180px, 100% - 2.5rem);
+  margin: var(--s-1) auto 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0.6rem var(--s-3);
+  background: rgba(255, 253, 247, 0.85);
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(216, 195, 232, 0.82);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-nav);
+}
+.nav-shell h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  margin: 0;
+  font: 800 var(--t-h1) / 1.1 var(--sans);
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+.nav-shell h1 .mark {
+  width: 30px;
+  height: 30px;
+  display: block;
+  filter: drop-shadow(0 2px 4px rgba(119, 83, 165, 0.18));
+}
+.nav-shell h1 small {
+  font: 400 var(--t-fine) / 1 var(--sans);
+  color: var(--body);
+}
+
+/* quackd-web's own pill, at its own strength: #5f4577 ink, a soft pink shadow, and the live
+   dot the hero puts in front of the text. */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  color: var(--btn-ink);
+  background: rgba(255, 253, 247, 0.75);
+  border: 1px solid var(--pink-edge);
+  border-radius: var(--r-pill);
+  padding: var(--s-0) 0.7rem;
+  font: 500 var(--t-eyebrow) var(--mono);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow: var(--shadow-pill);
+}
+.status-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: var(--gold-dot);
+}
+
+.nav-shell nav { display: flex; gap: var(--s-0); }
+.nav-link {
+  color: var(--body);
+  text-decoration: none;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--r-sm);
+  font: 600 var(--t-ui) var(--sans);
+  transition: color var(--t-base) ease, background-color var(--t-base) ease,
+    border-color var(--t-base) ease;
+  border: 1px solid transparent;
+}
+.nav-link:hover { color: var(--primary-deep); background: rgba(235, 221, 250, 0.7); }
+/* quackd-web's .nav-star: the one visible action in the nav, so the bar is not two identical
+   pieces of grey text. */
+.nav-star {
+  color: var(--btn-ink);
+  border-color: #d9c4ec;
+  background: rgba(255, 253, 247, 0.7);
+  border-radius: var(--r-pill);
+}
+.nav-star:hover { color: var(--btn-ink); border-color: #b98cd7; background: var(--tint); }
+
+.wrap {
+  width: min(1180px, 100% - 2.5rem);
+  margin-inline: auto;
+  padding-block: var(--s-4) var(--s-6);
+}
+
+/* ── brandline ───────────────────────────────────────────────────────────────────────── */
+
+.brandline { margin: 0 0 var(--s-4); }
+.brandline .eyebrow { margin: 0 0 0.35rem; }
+.lede {
+  margin: 0;
+  font: 800 var(--t-lede) / 1.1 var(--sans);
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+/* ── console and stage ───────────────────────────────────────────────────────────────── */
+
+.console {
+  background: var(--card-soft);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;              /* the canvas clips to the card's top corners */
+}
+
+.stage { position: relative; }
+
+/* HARD RULE: never transition or animate any property that changes the box of .stage,
+   canvas#view or .console. view.js reads clientWidth/clientHeight every frame and calls
+   setSize when the CSS box has actually changed, so an animating box reallocates the WebGL
+   drawing buffer 60×/s. (The guard compares against the pixel-ratio-scaled backing store; it
+   used to compare backing-store pixels to CSS pixels, which on any retina display was true
+   every frame and reallocated regardless of whether anything moved.) */
+canvas#view {
+  display: block;
+  width: 100%;
+  height: clamp(18rem, 50vh, 34rem);
+  background: var(--lilac-2);    /* the one frame before MuJoCo draws; never white */
+  touch-action: none;            /* REQUIRED: view.js binds pointer drag and a passive:false wheel */
+  cursor: grab;
+}
+canvas#view:active { cursor: grabbing; }
+/* NEGATIVE offset: .console has overflow:hidden, so an outset ring is scissored away. */
+canvas#view:focus-visible { outline: 3px solid var(--ring); outline-offset: -3px; }
+
+/* ── stage chrome ────────────────────────────────────────────────────────────────────── */
 
 .stage-bar {
-  display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: space-between;
-  padding: 0.5rem 0.6rem; border-top: 1px solid var(--edge); background: var(--panel);
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;          /* or the canvas drag dies under the bar */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: var(--s-2);
 }
-.readout { font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--dim); }
+.bar-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.stage-bar .glass { pointer-events: auto; }
 
-/* ── controls ────────────────────────────────────────────────────────────────────── */
-button, .button, select, input {
-  font: inherit; color: var(--ink); background: #232830;
-  border: 1px solid var(--edge); border-radius: 7px; padding: 0.42rem 0.7rem;
+.glass {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-0);
+  padding: var(--s-0);
+  background: rgba(255, 253, 247, 0.86);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(216, 195, 232, 0.82);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-glass);
 }
-button, .button { cursor: pointer; }
-button:hover:not(:disabled), .button:hover { border-color: var(--duck); }
-button:disabled { opacity: 0.45; cursor: default; }
-#run { background: var(--duck); color: #1a1400; border-color: var(--duck); font-weight: 600; }
-#record.live { color: var(--bad); border-color: var(--bad); }
+@supports not (backdrop-filter: blur(1px)) {
+  .glass { background: rgba(255, 253, 247, 0.96); }
+}
+.glass :focus-visible { outline-offset: 2px; }   /* 3px bleeds into the render */
+
+.hud { gap: var(--s-1); padding: var(--s-0) 0.6rem var(--s-0) 0.35rem; }
+
+/* #loading (z:3) covers .stage-bar (z:2), so shipping #owner in its `live` state in the HTML
+   is not a lie: nobody can see it while it is still false. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--s-2);
+  text-align: center;
+  padding: var(--s-5);
+  background: linear-gradient(150deg, #fdf6ff, #fff8f4);
+}
+.overlay h2 {
+  margin: 0;
+  font: 800 var(--t-h2) / 1.2 var(--sans);
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+.overlay .fine { text-align: center; max-width: 44ch; }
+.boot-mark { width: 64px; height: 64px; }
+.bar {
+  width: min(22rem, 60vw);
+  height: 6px;
+  background: #ece0f3;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.bar > div {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #b48ae4, var(--gold));
+  transition: width 0.25s ease;
+}
+/* #loading-phase is textContent-owned. ::before is generated content, not a DOM child, so it
+   survives `textContent = message` — the only safe way to decorate any of the six elements
+   the JS overwrites (#loading-phase #toggle-label #toggle-note #run #record #readout). */
+#loading-phase {
+  margin: 0;
+  min-height: 1.2em;             /* no layout jump between load phases */
+  color: var(--body);
+  font-size: var(--t-fine);
+}
+#loading-phase.bad { color: var(--bad); font-weight: 600; }
+#loading-phase.bad::before { content: "⚠ "; }
+
+/* the owner pill: who is holding the twist. aria-live lives here, and paintOwner() must
+   early-return on an unchanged state or it announces every keystroke. */
+#owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.28rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  font: 500 var(--t-eyebrow) var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: background-color var(--t-base), border-color var(--t-base), color var(--t-base);
+}
+#owner::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-pill);
+  flex: none;
+}
+#owner[data-state="live"] {
+  background: rgba(255, 253, 247, 0.9);
+  border-color: #e2c3d6;
+  color: var(--ink-2);
+}
+#owner[data-state="live"]::before { box-shadow: inset 0 0 0 2px var(--gold-dot); }
+#owner[data-state="hand"] { background: #fdf3dd; border-color: #ecd9ae; color: var(--gold-ink-warm); }
+#owner[data-state="hand"]::before { background: var(--gold-dot); }
+#owner[data-state="pilot"] { background: var(--lilac); border-color: var(--lilac-edge); color: var(--primary-ink); }
+#owner[data-state="pilot"]::before { background: var(--primary); }
+#owner[data-state="typing"] { background: #f4ecfa; border-color: #e3d4ef; color: #5f4a6b; }
+#owner[data-state="typing"]::before { display: none; }
+
+/* textContent-owned, so it is ONE colour: an asked→sent arrow form cannot be two-toned.
+   The ellipsis is what stops a long arrow form pushing the pill wider than the arena. */
+#readout {
+  font: 400 var(--t-micro) / 1 var(--mono);
+  color: var(--body);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(52ch, 60vw);
+}
+
+/* ── deck and lanes ──────────────────────────────────────────────────────────────────── */
+
+.deck {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  border-top: 1px solid var(--edge-3);
+}
+.lane { padding: var(--s-3) var(--gutter); min-width: 0; }
+.lane > * + * { margin-top: var(--s-3); }
+#manual { margin-top: var(--s-5); }
+#key-box {
+  margin-top: var(--s-5);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--edge-3);
+}
+
+/* Four numbered bays are the page's entire heading system:
+   01 Say it · 02 Drive it · 03 Your API key · 04 Transcript. */
+/* No `font-size: 0` here. It was carried over to "kill the whitespace between the inline
+   spans", but a flex container already drops whitespace-only anonymous items — `summary`
+   below uses the same span pattern without it and renders identically. */
+.lane-label {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  margin: 0 0 var(--s-2);
+}
+.lane-label .num {
+  font: 500 var(--t-micro) var(--mono);
+  color: var(--pink);
+  letter-spacing: 0.04em;
+}
+.lane-label .rule {
+  display: block;
+  width: 1.5rem;
+  height: 1px;
+  background: var(--pink-rule);
+  flex: none;
+}
+.lane-label .eyebrow { margin: 0; }
+.lane-label .tag {
+  margin-left: auto;
+  font: 500 var(--t-eyebrow) var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--meta);
+}
+
+/* ── controls ────────────────────────────────────────────────────────────────────────── */
+
+button, .button {
+  font: 700 var(--t-ui) / 1 var(--sans);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition:
+    background-color var(--t-base) var(--ease),
+    border-color var(--t-base) var(--ease),
+    color var(--t-base) var(--ease),
+    transform var(--t-base) var(--ease),
+    box-shadow var(--t-base) var(--ease);
+}
+
+/* #run — the hard-shadow object, quackd-web's .button-yellow at full 7px. The same physics
+   appears again at keycap scale on <kbd>: one object, two sizes. */
+#run {
+  background: var(--duck);
+  color: var(--gold-ink);
+  border: 0;
+  padding: 0.7rem 1.1rem;
+  border-radius: var(--r-md);
+  font-weight: 800;
+  font-size: var(--t-body);
+  box-shadow: 0 7px 0 var(--gold-deep), 0 12px 25px rgba(227, 169, 34, 0.18);
+}
+#run::after { content: " ›"; }   /* pseudo, so it survives textContent Run ↔ Send */
+#run:hover:not(:disabled) {
+  transform: translateY(-2px);
+  background: var(--gold-hi);
+  box-shadow: 0 9px 0 var(--gold-press), 0 16px 28px rgba(227, 169, 34, 0.22);
+}
+#run:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 4px 0 var(--gold-press);
+}
+
+/* With the language layer off the button is a PINK object, not a pink face on a gold shelf.
+   `--duck: var(--off)` swaps the background alone, and the rest of #run stayed gold: --gold-ink
+   on pink is 1.99:1, the 7px plinth stayed #d59f18, and the hover flipped the whole thing back
+   to gold under the cursor. A custom property cannot express a four-part object, so the object
+   is spelled out. These sit BEFORE #run:disabled on purpose — equal specificity, and the
+   disabled state must stay the same grey in both worlds. */
+body.no-quackd #run {
+  color: #fff;                                   /* 5.6:1 on #a34a72 */
+  box-shadow: 0 7px 0 var(--pink-deep), 0 12px 25px rgba(163, 74, 114, 0.18);
+}
+body.no-quackd #run:hover:not(:disabled) {
+  background: var(--pink-hi);
+  box-shadow: 0 9px 0 var(--pink-deep), 0 16px 28px rgba(163, 74, 114, 0.22);
+}
+body.no-quackd #run:active:not(:disabled) { box-shadow: 0 4px 0 var(--pink-deep); }
+
+#run:disabled {
+  background: #f0e6d3;
+  color: #9a8c74;
+  box-shadow: 0 4px 0 #ddd0b8;
+  transform: none;
+  cursor: not-allowed;
+}
+
+/* .btn only. The one `.button` on the page is #share, and it lives inside .record-buttons,
+   whose own rules (0-2-0) beat every declaration here — so a `.button` arm added nothing but
+   the impression that it did. `.button:disabled` could never match at all: #share is an <a>. */
+.btn {
+  color: var(--btn-ink);
+  border: 1px solid #c9aede;
+  background: rgba(255, 253, 247, 0.65);
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--r-sm);
+}
+.btn:hover:not(:disabled) { border-color: #a874cf; background: var(--tint); transform: translateY(-1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 .share { text-decoration: none; }
-.camera-buttons button.on { border-color: var(--duck); color: var(--duck); }
-.link { background: none; border: none; color: var(--dim); padding: 0; font-size: 0.85rem; text-decoration: underline; }
 
-.panel > * + * { margin-top: 0.9rem; }
-.panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 0.9rem; }
-.row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.camera-buttons button, .record-buttons button, .record-buttons .button {
+  color: var(--btn-ink);
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--r-pill);
+  font-size: var(--t-ui);
+}
+.camera-buttons button:hover:not(:disabled),
+.record-buttons button:hover:not(:disabled),
+.record-buttons .button:hover { background: var(--tint); border-color: var(--edge-soft); }
+.camera-buttons button:disabled, .record-buttons button:disabled { opacity: 0.45; cursor: not-allowed; }
+.camera-buttons button.on {
+  background: #f1e6fd;
+  border-color: #b98cd7;
+  color: var(--btn-ink);
+  box-shadow: inset 0 0 0 1px var(--edge-soft);
+}
+#record.live {
+  color: var(--bad);
+  border-color: #e6b3b1;
+  background: #fdf0ef;
+}
+
+.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--pink);
+  font: 600 var(--t-fine) / 1 var(--sans);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link:hover { color: var(--pink-deep); }
+
+/* form fields */
+input, select {
+  width: 100%;
+  font: 400 var(--t-input) / 1.3 var(--sans);
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--field);
+  border-radius: var(--r-sm);
+  padding: 0.55rem 0.7rem;
+}
+#goal { border-radius: var(--r-md); box-shadow: inset 0 1px 2px rgba(62, 41, 78, 0.05); }
+#key, #base-url, #model { font-family: var(--mono); }
+#provider {
+  appearance: none;
+  padding-right: 1.9rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%236b5875' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 12px 8px;
+}
+/* IN ADDITION TO the global :focus-visible ring, never instead of it: this gives a mouse
+   user a visible active field without weakening the keyboard ring. */
+input:focus, select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(138, 92, 196, 0.18);
+  outline: none;
+}
+input:focus-visible, select:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+/* No opacity: --body at 0.65 composites to #a396a9 on white, which is 2.95:1 and fails AA.
+   --meta is the dimmest ink on the page that still passes against a white field. */
+::placeholder { color: var(--meta); opacity: 1; }
+
+label {
+  display: block;
+  font: 600 var(--t-fine) / 1.4 var(--sans);
+  color: var(--body);
+  margin-bottom: 0.35rem;
+}
+
+.row { display: flex; gap: var(--s-2); }
 .row > * { flex: 1; min-width: 0; }
-label { display: block; font-size: 0.85rem; color: var(--dim); margin-bottom: 0.3rem; }
-#goal, #key, #base-url, #model { width: 100%; }
-.fine { color: var(--dim); font-size: 0.82rem; margin: 0.4rem 0 0; }
-.examples { margin-top: 0.6rem; font-size: 0.82rem; color: var(--dim); }
-.chip { font-size: 0.8rem; padding: 0.2rem 0.5rem; margin: 0.2rem 0.2rem 0 0; }
-summary { cursor: pointer; font-size: 0.9rem; }
-details { border-top: 1px solid var(--edge); padding-top: 0.7rem; }
+/* flex-start and the extra bottom margin are what keep #run's 7px plinth off .examples. */
+.row.actions {
+  align-items: flex-start;
+  margin: var(--s-2) 0 var(--s-1);
+}
+.row.actions > * { flex: 0 0 auto; }
 
-/* ── the switch ──────────────────────────────────────────────────────────────────── */
-.toggle-row { display: flex; gap: 0.75rem; align-items: flex-start; }
-.switch { position: relative; display: inline-block; width: 3rem; height: 1.6rem; flex: none; }
-.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1);
+  font-size: var(--t-fine);
+  color: var(--body);
+}
+
+/* chip.textContent is copied VERBATIM into #goal, so the visible label is the sentence that
+   gets typed. A ::before glyph is safe — generated content is not a text node and never
+   appears in textContent. A nested <span> or <img> is not. Never nest anything in a .chip. */
+.chip {
+  display: inline-block;
+  border-radius: var(--r-pill);
+  padding: 0.3rem 0.7rem;
+  font: 600 var(--t-fine) / 1.2 var(--sans);
+  border: 1px solid;
+  cursor: pointer;
+  transition: transform var(--t-base) var(--ease), border-color var(--t-base) var(--ease);
+}
+.chip::before { content: "›"; margin-right: 0.35rem; opacity: 0.55; }
+.chip:hover { transform: translateY(-1px); }
+.chip:nth-of-type(1) { background: var(--lilac); border-color: var(--lilac-edge); color: var(--primary-ink); }
+.chip:nth-of-type(2) { background: #fbf1da; border-color: #eddcb6; color: var(--gold-ink-warm); }
+.chip:nth-of-type(3) { background: #fbe9f1; border-color: #efd2df; color: var(--pink-deep); }
+
+/* the switch — the language layer, and nothing else. It never gates the keyboard. */
+.toggle-row { display: flex; gap: 0.8rem; align-items: flex-start; }
+.switch { position: relative; width: 2.75rem; height: 1.5rem; flex: none; }
+.switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
 .slider {
-  position: absolute; inset: 0; border-radius: 99px; background: #3a4049; transition: background 0.15s;
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-pill);
+  background: #e0d0ec;
   pointer-events: none;
+  transition: background-color var(--t-base) var(--ease);
 }
 .slider::before {
-  content: ""; position: absolute; width: 1.2rem; height: 1.2rem; left: 0.2rem; top: 0.2rem;
-  border-radius: 50%; background: var(--ink); transition: transform 0.15s;
+  content: "";
+  position: absolute;
+  width: 1.1rem;
+  height: 1.1rem;
+  left: 0.2rem;
+  top: 0.2rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(79, 55, 85, 0.35);
+  transition: transform var(--t-base) var(--ease);
 }
 .switch input:checked + .slider { background: var(--duck); }
-.switch input:checked + .slider::before { transform: translateX(1.4rem); background: #1a1400; }
-.toggle-row strong { display: block; }
-body.no-quackd { --duck: var(--off); }
-body.no-quackd #run { background: transparent; color: var(--ink); border-color: var(--edge); font-weight: 400; }
+.switch input:checked + .slider::before { transform: translateX(1.25rem); }
+/* NEW. The switch had no visible focus at all — a keyboard bug the redesign closes. */
+.switch input:focus-visible + .slider { outline: 2px solid var(--ring); outline-offset: 3px; }
+/* textContent-owned: no child elements, no aria-live wrapper inside either of these. */
+#toggle-label { display: block; font: 700 var(--t-body) / 1.3 var(--sans); color: var(--ink); }
+#toggle-note { margin-top: 0.2rem; }
 
-.keys { font-size: 0.85rem; color: var(--dim); margin-top: 0.5rem; }
+/* ── the cockpit ─────────────────────────────────────────────────────────────────────── */
+
+/* quackd-web's .guard-card, whole: its gradient, its #e4d3ee border and its shadow. Two of
+   the three were dropped on the way over, which left the same object reading flat here. */
+.cockpit {
+  background: linear-gradient(150deg, #fbf5ff, #fff6f3);
+  border: 1px solid var(--edge-guard);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-guard);
+  padding: var(--s-3);
+  transition:
+    background-color var(--t-slow) var(--ease),
+    border-color var(--t-slow) var(--ease),
+    box-shadow var(--t-slow) var(--ease);
+}
+/* The ONE place "controls recede" is broken on purpose: with the language layer off, the
+   keyboard strip is the only thing on the page that still does anything, so it says so. */
+body.no-quackd .cockpit {
+  border-color: #e0b93f;
+  box-shadow: 0 0 0 3px rgba(245, 197, 51, 0.22), var(--shadow-guard);
+}
+
+.keycaps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  align-items: start;
+  margin-top: var(--s-2);
+}
+/* A literal 3×2 keyboard grid, so the map is read off the shape rather than off a sentence:
+   top row is the head and forward (Q W E), bottom row is the feet (A S D), Space spans them. */
+.cluster { display: grid; grid-template-columns: repeat(3, 2.1rem); gap: 0.3rem; }
+.cluster-2 { grid-template-columns: repeat(2, 2.1rem); }
+
 kbd {
-  font: 12px ui-monospace, monospace; background: #232830; border: 1px solid var(--edge);
-  border-bottom-width: 2px; border-radius: 4px; padding: 0.05rem 0.35rem; margin-right: 0.15rem;
+  display: grid;
+  place-items: center;
+  min-width: 2.1rem;
+  height: 2rem;
+  padding: 0 0.35rem;
+  font: 500 var(--t-micro) / 1 var(--mono);
+  color: #4e3b5c;
+  background: linear-gradient(180deg, #fff, #f7f1fb);
+  border: 1px solid var(--field);
+  border-radius: var(--r-sm);
+  box-shadow: 0 3px 0 #d9c6e6;    /* #run's physics, at keycap scale */
+  transition:
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast),
+    box-shadow var(--t-fast);
+}
+kbd.wide { grid-column: span 3; width: 100%; font-size: 0.6875rem; letter-spacing: 0.04em; }
+/* transition-duration:0s is the whole trick — a key that lights up 140 ms late feels broken.
+   The release is still eased, because that is where the softness belongs. */
+/* `kbd.down` and nothing else: a bare `.down` was a global that would paint any element on the
+   page gold, and paintKeycaps() only ever toggles the class on a <kbd>. */
+kbd.down {
+  background: linear-gradient(180deg, #f8cf4d, #f2be24);
+  color: var(--gold-ink);
+  border-color: var(--gold-deep);
+  box-shadow: 0 1px 0 var(--gold-press);
+  transform: translateY(2px);
+  transition-duration: 0s;
 }
 
-/* ── transcript ──────────────────────────────────────────────────────────────────── */
-.transcript-box { border-top: 1px solid var(--edge); padding-top: 0.7rem; }
-.transcript-box h3 { font-size: 0.9rem; margin: 0 0 0.5rem; display: flex; justify-content: space-between; }
-.transcript {
-  list-style: none; margin: 0; padding: 0; max-height: 20rem; overflow-y: auto;
-  font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+.legend {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--s-2);
+  row-gap: 0.3rem;
+  margin: 0.9rem 0 0;
+  font-size: var(--t-fine);
 }
-.transcript li { padding: 0.3rem 0.1rem; border-bottom: 1px solid #23272e; overflow-wrap: anywhere; }
-.transcript .call { color: var(--duck); }
-.transcript .result { color: var(--dim); }
-.transcript .result.bad, .transcript .end.error, .transcript .end.failure { color: var(--bad); }
-.transcript .end.success { color: var(--good); }
-.transcript .refused { color: var(--off); font-family: inherit; font-size: 13px; }
-.transcript .goal { color: var(--ink); font-family: inherit; }
-.transcript code { background: #232830; padding: 0 0.25rem; border-radius: 3px; }
+.legend dt {
+  font: 500 var(--t-micro) var(--mono);
+  color: var(--primary-ink);
+  white-space: nowrap;
+}
+.legend dd { margin: 0; color: var(--ink-2); max-width: 62ch; }
 
-footer { border-top: 1px solid var(--edge); padding: 0.8rem 1.1rem; }
-footer p { margin: 0; color: var(--dim); font-size: 0.8rem; max-width: 70ch; }
-footer a { color: var(--dim); }
+.touch-note {
+  display: none;
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-fine);
+  color: var(--meta);
+}
+@media (pointer: coarse) { .touch-note { display: block; } }
+
+/* ── the key box ─────────────────────────────────────────────────────────────────────────
+   Deliberately the ONE component with no gold, no animation and no hard shadow: playfulness
+   lives everywhere else, the credential field stays sober. It also stays a real
+   <details>/<summary>, because the keydown guard's selector lists `summary` and that is what
+   keeps Space activating it (WCAG 2.1.1). */
+
+details { border: 0; }
+summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  font-size: var(--t-input);
+}
+summary::-webkit-details-marker { display: none; }
+summary::after {
+  content: "▸";
+  color: var(--pink);
+  font-size: 0.8em;
+  margin-left: auto;
+  transition: transform var(--t-base) var(--ease);
+}
+details[open] summary::after { transform: rotate(90deg); }
+details[open] summary { margin-bottom: var(--s-2); }
+summary .num { font: 500 var(--t-micro) var(--mono); color: var(--pink); letter-spacing: 0.04em; }
+summary .rule { display: block; width: 1.5rem; height: 1px; background: var(--pink-rule); flex: none; }
+#key-box > * + * { margin-top: var(--s-2); }
+#provider-note a {
+  color: var(--pink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── the terminal ────────────────────────────────────────────────────────────────────── */
+
+.terminal-window {
+  background: var(--plum);
+  border-radius: var(--r);
+  overflow: hidden;
+  box-shadow: var(--shadow-term);
+  min-width: 0;
+}
+.term-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--plum-edge);
+}
+.term-head h2 { margin: 0; display: flex; align-items: center; gap: var(--s-1); }
+.term-head .num { font: 500 var(--t-micro) var(--mono); color: #bda6bd; }
+.term-head .eyebrow { color: #d79ac2; }   /* 4.8:1 on plum */
+.term-head::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(241, 198, 66, 0.95), transparent);
+  opacity: 0.5;
+}
+.terminal-window .link { color: #d6c3d8; }
+.terminal-window .link:hover { color: #fff; }
+.terminal-window :focus-visible { outline-color: var(--ring-dark); }
+
+/* NEVER add scroll-behavior:smooth here. app.js sets scrollTop = scrollHeight synchronously
+   on every append, and smooth makes a fast run's log lag permanently behind its own tail.
+   The <ol> ITSELF is the scroll container — app.js scrolls this element, so moving max-height
+   or overflow onto a wrapper silently stops the auto-scroll. */
+#transcript {
+  list-style: none;
+  margin: 0;
+  padding: var(--s-1) 0.85rem 0.85rem;
+  max-height: clamp(14rem, 40vh, 30rem);
+  overflow-y: auto;
+  font: 400 var(--t-mono) / 1.55 var(--mono);
+  color: var(--log-ink);
+  font-variant-numeric: tabular-nums;
+  scrollbar-width: thin;
+  scrollbar-color: #6b5375 var(--plum);
+}
+#transcript::-webkit-scrollbar { width: 8px; }
+#transcript::-webkit-scrollbar-thumb { background: #6b5375; border-radius: var(--r-pill); }
+/* --log-dim is 3.35:1 on the plum, which is enough for the 6px dots below (3:1 non-text) and
+   not enough for 13px prose. This is the one sentence that teaches dual control, so it takes
+   --log-meta at 5.04:1. */
+#transcript:empty::after {
+  content: "nothing yet — take the keys, or type a sentence.";
+  display: block;
+  padding: 0.6rem 0 1rem;
+  color: var(--log-meta);
+  font: 400 var(--t-fine) var(--sans);
+  font-style: italic;
+}
+/* CLASS-scoped, never `#transcript li`. Every row modifier below is a class selector (0-2-0)
+   and an id-scoped base rule (1-0-1) silently outranks all of them: the refusal panel lost its
+   padding and kept a hairline through it, .handover lost its indent, .goal and .end lost the
+   air that brackets a run. Keep the base row at class weight so a modifier can win. */
+.transcript li {
+  position: relative;
+  padding: 0.32rem 0 0.32rem 1.1rem;
+  border-bottom: 1px solid var(--plum-rule);
+  overflow-wrap: anywhere;
+  animation: row-in 0.28s var(--ease) both;
+}
+.transcript li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.62em;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+}
+
+/* R3 again, and this is where a later pass is most tempted to "fix" it: the verb calls and
+   results are the machine talking, so they are mono. The goal line and the refusal are the
+   human's own words read back, so they are sans. No test covers any of these rows — dropping
+   one is a silent regression that makes success and failure indistinguishable. */
+.transcript .fine { color: var(--log-meta); font-size: var(--t-micro); }
+.transcript code {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--lilac);
+  padding: 0 0.25rem;
+  border-radius: var(--r-xs);
+}
+.transcript kbd {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.25);
+  display: inline-grid;
+  height: auto;
+  min-width: 1.4rem;
+  padding: 0.05rem 0.3rem;
+}
+
+.transcript .goal {
+  color: var(--log-gold-soft);
+  font: 700 var(--t-ui) / 1.5 var(--sans);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin-top: 0.35rem;
+  padding-top: var(--s-1);
+}
+.transcript .goal::before { background: var(--log-gold); }
+.transcript .call { color: var(--log-ink); }
+.transcript .call::before { background: var(--log-purple); }
+.transcript .call b { color: #d9b6f5; }
+.transcript .result { color: var(--log-green); }
+.transcript .result::before { background: var(--log-green-dot); }
+.transcript .result.bad { color: var(--log-bad); }
+.transcript .result.bad::before { background: var(--log-bad-dot); }
+.transcript .note { color: var(--log-meta); }
+.transcript .note::before { background: var(--log-dim); }
+
+/* the human's discrete acts: kick, stand up, stop, read state */
+.transcript .hand { color: var(--log-purple-soft); }
+.transcript .hand::before { box-shadow: inset 0 0 0 2px var(--log-gold); }
+.transcript .hand b { color: var(--log-gold); }
+/* the moment the robot changed hands mid-run */
+.transcript .handover {
+  color: var(--log-gold-soft);
+  border-left: 2px solid var(--log-gold);
+  padding-left: 0.6rem;
+  background: rgba(241, 198, 66, 0.06);
+}
+.transcript .handover::before { background: var(--log-gold); }
+
+/* the payoff line, and it must NOT read as a log row */
+.transcript .refused {
+  color: #f4e6c9;
+  font: 400 var(--t-fine) / 1.6 var(--sans);
+  background: rgba(241, 198, 66, 0.08);
+  border-left: 2px solid var(--log-gold);
+  border-bottom: 0;              /* a card, not a row: no rule across its foot */
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--r-sm);
+}
+.transcript .refused::before { display: none; }
+
+/* every run is visually bracketed: a top rule opens it at .goal and closes it at .end */
+.transcript .end {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin-top: 0.35rem;
+  padding-top: var(--s-1);
+}
+.transcript .end.success { color: var(--log-green-soft); }
+.transcript .end.success::before { background: var(--log-green-dot); }
+.transcript .end.failure, .transcript .end.error { color: var(--log-bad); }
+.transcript .end.failure::before, .transcript .end.error::before { background: var(--log-bad-dot); }
+.transcript .end.aborted { color: var(--log-meta); }
+.transcript .end.aborted::before { background: var(--log-dim); }
+.transcript .end.budget { color: var(--log-gold-soft); }
+.transcript .end.budget::before { background: var(--log-gold); }
+
+/* ── footer ──────────────────────────────────────────────────────────────────────────── */
+
+/* The band is full-bleed; its TEXT is not. The inline padding resolves to the same left edge
+   .wrap has — (100% − 1180px) / 2 on a wide screen, 1.25rem once the column is narrower than
+   its own maximum — so the footer, the console and the nav all start on one line. */
+.footer-shell {
+  border-top: 1px solid #e9d9e7;
+  background: rgba(255, 253, 247, 0.8);
+  padding: var(--s-5) max(1.25rem, (100% - 1180px) / 2);
+}
+.footer-shell p { margin: 0; max-width: 78ch; font-size: 0.75rem; color: var(--body); }
+.footer-shell a { color: var(--pink); }
+
+/* ── keyframes ───────────────────────────────────────────────────────────────────────── */
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(217, 154, 18, 0.25); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 6px rgba(217, 154, 18, 0); }
+}
+@keyframes rec-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(163, 49, 47, 0.28); }
+  50% { box-shadow: 0 0 0 5px rgba(163, 49, 47, 0); }
+}
+@keyframes row-in {
+  from { opacity: 0; transform: translateX(-6px); }
+}
+@keyframes nudge {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+/* Every state these carry is ALSO carried by a colour and by a word, so the reduced-motion
+   page loses only the flourish. */
+@media (prefers-reduced-motion: no-preference) {
+  #owner[data-state="hand"]::before { animation: pulse-dot 2s ease-in-out infinite; }
+  #record.live { animation: rec-pulse 1.8s ease-in-out infinite; }
+  /* #run.textContent silently becomes "Send" when the switch flips off; this wobble is the
+     only thing that makes that change perceptible. */
+  body.no-quackd #run { animation: nudge 0.45s var(--ease) 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  kbd.down { transform: none; }   /* colour still carries the state */
+  #run:hover, #run:active, .btn:hover, .chip:hover { transform: none; }
+}
+
+/* ── responsive ──────────────────────────────────────────────────────────────────────── */
+
+@media (min-width: 62rem) {
+  .deck { grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr); align-items: start; }
+  .lane { padding: var(--s-4); }
+  .lane + .lane { border-left: 1px solid var(--edge-3); }
+}
+
+@media (max-width: 61.99rem) {
+  /* display:contents dissolves the lane boxes so BOTH columns' children become direct grid
+     items of .deck and stack in one column. Safe here: both lanes are plain <div>s with no
+     implicit ARIA role and no border or background of their own below 62rem.
+     WARNING: anything later given .lane as a visual box will silently vanish at this width.
+
+     NO `order` here, and that is the point. Document order already reads 01 Say it, 02 Drive
+     it, 03 Your API key, 04 Transcript — the numbers in their own sequence, with the sentence
+     box and the keycaps adjacent, which is R2. `order` had it running 01 → 04 → 02 → 03 with
+     the log wedged between the two halves of the dual-control argument, and it moved only the
+     paint: Tab still followed the DOM, so focus jumped from the last chip to the visually last
+     block and then back up to the transcript's clear button (WCAG 2.4.3). */
+  .lane { display: contents; }
+  /* Not `* + *`: a sibling combinator reads the DOM, so the transcript — the first child of
+     the second lane — would be the only block in the stack with no rule above it. */
+  .deck > .lane > * {
+    padding: var(--s-3) var(--gutter);
+    margin-top: 0;
+    border-top: 1px solid var(--edge-3);
+  }
+  /* Both carry an id, so the 0-2-0 rule above cannot reach the margins their base rules set. */
+  #manual, #key-box { margin-top: 0; padding: var(--s-3) var(--gutter); }
+  .lane-a > .lane-label { border-top: 0; }   /* .deck already draws the rule above it */
+}
+
+/* Un-floating the stage chrome is a design decision, not a fallback: a glass pill over a
+   320px-wide arena covers the duck. */
+@media (max-width: 48rem) {
+  .stage-bar {
+    position: static;
+    padding: var(--s-2);
+    border-top: 1px solid var(--edge-3);
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: none;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .glass {
+    border: 0;
+    box-shadow: none;
+    background: none;
+    border-radius: 0;
+    flex-wrap: wrap;
+    padding: 0;
+  }
+  canvas#view { height: clamp(15rem, 42vh, 22rem); }
+  /* The stage is ~269px tall on a 360×640 phone and the overlay's content is taller than that.
+     Centred content inside `.console { overflow: hidden }` overflows symmetrically and gets
+     scissored at BOTH ends — the duck mark off the top, "Nothing is uploaded" off the bottom.
+     Start-aligned and scrollable, it loses neither. */
+  .overlay { place-content: start center; padding: var(--s-3); overflow-y: auto; }
+}
+
+@media (max-width: 60rem) {
+  /* The pill's claim is not lost with it: the key box repeats "The key stays in this tab" in
+     full, one screen down, where the field it is about actually lives. */
+  .status-pill { display: none; }
+}
+/* Short screens lose the lede, never the eyebrow: a 1366×768 laptop is about 660px of viewport
+   after browser chrome, and dropping both left the page with no brand voice at all above the
+   fold. The eyebrow is one 11px line and it says what this is. */
+@media (max-height: 46rem) { .brandline .lede { display: none; } }
+@media (max-width: 30rem) {
+  .legend { grid-template-columns: 1fr; }
+  .legend dt { margin-top: 0.35rem; }
+  .row.actions { flex-wrap: wrap; }
+}
+@media (max-width: 26rem) {
+  .nav-shell h1 small { display: none; }
+  /* .cluster-2 also carries .cluster, and both selectors weigh 0-1-0, so a bare `.cluster`
+     override here won on source order and reflowed the 2×3 block into 3×2 — K R G / O 1 2.
+     kbd's own min-width has to come down with the track or every cap overflows it. */
+  .cluster { grid-template-columns: repeat(3, 1.9rem); }
+  .cluster-2 { grid-template-columns: repeat(2, 1.9rem); }
+  kbd { min-width: 1.9rem; }
+}
+
+/* A finger is not a mouse pointer. */
+@media (pointer: coarse) {
+  button, .button, select, input, summary { min-height: 2.75rem; }
+}

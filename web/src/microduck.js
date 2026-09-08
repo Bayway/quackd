@@ -61,6 +61,37 @@ const DEAD_FRACTION = 1 / 3;
 // ── the arena, the same as quackd/sim3d/scene.py ───────────────────────────────────────
 export const ARENA_HALF = 1.0;
 const BALL_R = 0.05, PERSON_R = 0.12, PERSON_H = 0.5, WALL_H = 0.08;
+/**
+ * The person marker looks different here, and only here. Python's is a flat-topped blue
+ * cylinder because its blue is load-bearing: `quackd/sim3d/scene.py` picks that exact hue
+ * for the HSV detector in `render.py`, which is how the Python duck sees a person at all.
+ * The browser's perception is geometric — `observe()` measures against `this.person`, never
+ * a pixel — so nothing here reads the colour, and the marker can be shaped and coloured
+ * like the rest of quackd instead of like a detector target.
+ *
+ * It is still one static body called "person", still a metre tall, still standing on a
+ * footprint of PERSON_R: a plinth the width of the old cylinder, a slimmer post, and a
+ * sphere for a head. The FOOTPRINT is unchanged — the plinth is the old cylinder's radius —
+ * but only for its first 6 cm. placeBody puts the duck's trunk at z = 0.125, so what a
+ * walking duck meets at trunk height is the 0.075 m post, not the 0.12 m tube it met before:
+ * the feet hit the same obstacle, the body brushes past a slimmer one.
+ *
+ * A capsule would say "post with a rounded cap" in one geom, and it is the wrong one: the
+ * CAPSULE branch in `view.js` builds three.js's capsule without the rotation the CYLINDER
+ * branch applies, and three.js runs both along y where MuJoCo runs them along z, so a
+ * capsule here would be drawn lying on the floor. Cylinder and sphere are drawn upright.
+ */
+const PERSON_POST_R = 0.075;                         // the post, slimmer than its footprint
+const PERSON_HEAD_R = 0.09;                          // the cap, a shade wider than the post
+const PERSON_BASE_H = 0.03;                          // half-height of the plinth
+const PERSON_POST_H = PERSON_H - PERSON_HEAD_R / 2;  // half-height: floor to the head's centre
+const PERSON_HEAD_Z = +(PERSON_H - PERSON_HEAD_R).toFixed(4); // so the head's top is the marker's
+// Three steps of one hue (~270 degrees), quackd's purple: the ink #3e294e under the primary
+// hsl(272 45% 56%) under a lit tint of it. Held a little deeper than the CSS values because
+// the headlight in this scene is bright enough to wash a literal #8a5cc4 out to lavender.
+const PERSON_BASE_RGBA = "0.28 0.19 0.36 1";
+const PERSON_POST_RGBA = "0.45 0.28 0.68 1";
+const PERSON_HEAD_RGBA = "0.62 0.44 0.80 1";
 const DEADMAN_S = 0.3;
 const KICK_RANGE = 0.30, KICK_CONE_DEG = 35, KICK_SPEED = 1.2;
 const FALL_TILT = -0.5, FALL_HEIGHT = 0.06, FALL_DEBOUNCE = 10;
@@ -107,7 +138,12 @@ function arenaXml(ball, person) {
             mass="0.05" friction="0.8 0.005 0.002"/>
     </body>
     <body name="person" pos="${person[0]} ${person[1]} ${PERSON_H}">
-      <geom name="person_body" type="cylinder" size="${PERSON_R} ${PERSON_H}" rgba="0.24 0.35 0.86 1"/>
+      <geom name="person_base" type="cylinder" size="${PERSON_R} ${PERSON_BASE_H}"
+            pos="0 0 ${PERSON_BASE_H - PERSON_H}" rgba="${PERSON_BASE_RGBA}"/>
+      <geom name="person_body" type="cylinder" size="${PERSON_POST_R} ${PERSON_POST_H}"
+            pos="0 0 ${-PERSON_HEAD_R / 2}" rgba="${PERSON_POST_RGBA}"/>
+      <geom name="person_head" type="sphere" size="${PERSON_HEAD_R}"
+            pos="0 0 ${PERSON_HEAD_Z}" rgba="${PERSON_HEAD_RGBA}"/>
     </body>
   </worldbody>
 </mujoco>`;
@@ -255,6 +291,11 @@ export class Microduck {
     q[this.ballQ + 3] = 1; q[this.ballQ + 4] = 0; q[this.ballQ + 5] = 0; q[this.ballQ + 6] = 0;
     this.t = 0;
     this.kicks = 0; this.kicksConnected = 0; this.kickOrigin = null;
+    // The head is a standing command, not part of the state mj_resetData clears, and it does
+    // NOT belong in placeBody — standUp() reuses that mid-run and must not re-centre a gaze.
+    // Without this line the transcript said "back where it started" while buildObs fed the
+    // pre-reset yaw straight back in on the next tick and observe() went on reporting it.
+    this.head = [0, 0];
     this.placeBody(...this.spawn);
   }
 
