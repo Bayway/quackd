@@ -165,6 +165,11 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    # The only tests allowed to read the developer's own asset cache, and the only ones the
+    # conftest does not redirect to a throwaway one. They never fetch: an empty cache skips.
+    "real_duck: needs upstream's Microduck model and policies already cached",
+]
 # A single test that runs five minutes has hung: the slowest here, a ten-seed sweep, takes
 # well under one. pytest then dumps every thread's stack to stderr and carries on, so the
 # job timeout in ci.yml ends a hang with the blocked frame in the log rather than nothing.

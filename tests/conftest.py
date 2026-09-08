@@ -46,6 +46,26 @@ def _memory_in_tmp(
 
 
 @pytest.fixture(autouse=True)
+def _asset_cache_in_tmp(
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The physics backend's downloaded model lives in `~/.quackd/cache`, and a developer who
+    has one was running a different suite from CI: `ensure_microduck(offline=True)` found it
+    and the tests that skip everywhere else ran here. Everything gets a throwaway cache and no
+    checkout override, so a skip is a skip on both machines.
+
+    Except the `real_duck` tests, whose whole purpose is the developer's real cache. They
+    still never fetch — an empty one skips them — so this decides which machine they run on,
+    not whether they download."""
+    if request.node.get_closest_marker("real_duck") is not None:
+        return
+    monkeypatch.setenv("QUACKD_CACHE_DIR", str(tmp_path_factory.mktemp("quackd-cache")))
+    monkeypatch.delenv("QUACKD_MICRODUCK_ASSETS", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _trace_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """The trace is on by default and goes to stderr, which CliRunner folds into `output`,
     so every CLI and acceptance test would carry pages of it in its failure message and its

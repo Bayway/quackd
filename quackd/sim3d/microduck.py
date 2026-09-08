@@ -34,6 +34,13 @@ from numpy.typing import NDArray
 
 from quackd.sim3d import upstream_api as up
 from quackd.sim3d.assets import MicroduckAssets, ensure_microduck
+from quackd.sim3d.gait import (
+    ACHIEVED_FRACTION,
+    GAIT_FLOOR_VX,
+    GAIT_FLOOR_VY,
+    GAIT_FLOOR_WZ,
+    usable_twist,
+)
 from quackd.sim3d.world import NotSupported, Posture
 from quackd.transport.base import TransportError
 
@@ -44,22 +51,6 @@ PHYSICS_DT = 0.005  # upstream's timestep; four substeps per control tick
 OBS_LEN = 61
 ACTION_LEN = 14
 STAND_SWITCH = 0.05  # below this twist norm the standing policy runs (upstream's default)
-
-#: The command envelope the walking policy actually uses, measured here (see
-#: `upstream_api.GAIT_THRESHOLD`). Below the floor it stands; above the ceiling is outside
-#: what it trained on.
-GAIT_FLOOR_VX = 0.22
-GAIT_FLOOR_VY = 0.30
-GAIT_FLOOR_WZ = 1.00
-CMD_MAX_VX = 0.40
-CMD_MAX_VY = 0.30
-CMD_MAX_WZ = 1.50
-#: A twist below a third of the floor is dropped rather than raised: a steering loop that
-#: asks for a two-degree correction should get nothing, not a full-rate lurch.
-DEAD_FRACTION = 1 / 3
-
-#: Roughly what fraction of a command the body achieves, for the honest line in the state.
-ACHIEVED_FRACTION = 0.42
 
 FALL_TILT = -0.5  # projected gravity z above this (upright is -1) is on its side
 FALL_HEIGHT = 0.06  # trunk metres above the floor
@@ -204,7 +195,7 @@ class MicroduckBody:
         self, cmd: tuple[float, float, float], _dt: float, _rng: np.random.Generator
     ) -> None:
         self.commanded = cmd
-        twist = self._usable_twist(cmd)
+        twist = usable_twist(cmd, standing=self.posture == "standing")
         self.sent = twist
         obs = self._observe(twist, self.head)
         policy = self.stand if float(np.linalg.norm(twist)) <= STAND_SWITCH else self.walk
@@ -212,29 +203,6 @@ class MicroduckBody:
         self.last_action = np.asarray(action, dtype=np.float32)
         self._data.ctrl[:] = self.default_pose + self.last_action * self.action_scale
         self._update_posture()
-
-    def _usable_twist(self, cmd: tuple[float, float, float]) -> tuple[float, float, float]:
-        """The commanded twist, mapped onto what the gait can actually do.
-
-        The floor belongs to the twist as a whole, not to each axis: a duck already walking
-        forward turns happily at a rate that would not start a turn on its own. So the
-        measure is how close the twist is to stepping at all, and a twist that is not there
-        yet is scaled up bodily. Scaling keeps the ratio between the axes, which is what
-        makes an arc an arc: raising `wz` alone would turn "walk in a circle" into a spin.
-        """
-        if self.posture != "standing":
-            return (0.0, 0.0, 0.0)
-        floors = (GAIT_FLOOR_VX, GAIT_FLOOR_VY, GAIT_FLOOR_WZ)
-        activity = max(abs(v) / floor for v, floor in zip(cmd, floors, strict=True))
-        if activity < DEAD_FRACTION:
-            return (0.0, 0.0, 0.0)  # too small to step: standing still is the honest answer
-        gain = 1.0 / activity if activity < 1.0 else 1.0
-        ceilings = (CMD_MAX_VX, CMD_MAX_VY, CMD_MAX_WZ)
-        scaled = [
-            math.copysign(min(abs(v) * gain, ceiling), v)
-            for v, ceiling in zip(cmd, ceilings, strict=True)
-        ]
-        return (scaled[0], scaled[1], scaled[2])
 
     def _observe(self, twist: tuple[float, float, float], head: tuple[float, float]) -> Any:
         d = self._data

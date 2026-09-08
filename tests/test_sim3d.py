@@ -310,7 +310,9 @@ async def test_the_recorder_draws_the_physics_panes(tmp_path: Path) -> None:
 
 #: The Microduck body needs upstream's model and policies, which are fetched at run time and
 #: never shipped. Tests must not reach the network, so these run only when a previous run
-#: (or a developer) has already filled the cache, and are skipped everywhere else.
+#: (or a developer) has already filled the cache, and are skipped everywhere else. Every
+#: caller carries `@pytest.mark.real_duck`, which is what exempts it from the conftest's
+#: throwaway cache; without the marker this would look in an empty directory and always skip.
 def _cached_microduck() -> Any:
     from quackd.sim3d.assets import AssetError, ensure_microduck
 
@@ -320,26 +322,7 @@ def _cached_microduck() -> Any:
         pytest.skip(f"upstream's Microduck model is not cached: {e}")
 
 
-def test_the_gait_floor_scales_a_twist_instead_of_dropping_or_lurching() -> None:
-    from quackd.sim3d.microduck import GAIT_FLOOR_VX, GAIT_FLOOR_WZ, MicroduckBody
-
-    body = MicroduckBody(_cached_microduck())
-    # too small to step at all: standing still beats a lurch nobody asked for
-    assert body._usable_twist((0.02, 0.0, 0.0)) == (0.0, 0.0, 0.0)
-    assert body._usable_twist((0.0, 0.0, 0.1)) == (0.0, 0.0, 0.0)
-    # below the floor: raised, keeping the ratio, so an arc stays an arc
-    vx, _vy, wz = body._usable_twist((0.11, 0.0, 0.5))
-    assert vx == pytest.approx(GAIT_FLOOR_VX)
-    assert wz == pytest.approx(0.5 * GAIT_FLOOR_VX / 0.11)
-    # already walking: passed through untouched, however small the turn
-    assert body._usable_twist((0.25, 0.0, 0.3)) == pytest.approx((0.25, 0.0, 0.3))
-    # a turn on its own is raised to the turning floor
-    assert body._usable_twist((0.0, 0.0, 0.6))[2] == pytest.approx(GAIT_FLOOR_WZ)
-    # a fallen duck is sent nothing at all
-    body.posture = "fallen"
-    assert body._usable_twist((0.3, 0.0, 0.0)) == (0.0, 0.0, 0.0)
-
-
+@pytest.mark.real_duck
 def test_the_real_duck_walks_turns_and_stays_upright() -> None:
     assets = _cached_microduck()
     from quackd.sim3d.microduck import MicroduckBody
@@ -371,6 +354,7 @@ def test_the_real_duck_walks_turns_and_stays_upright() -> None:
     w.close()
 
 
+@pytest.mark.real_duck
 def test_the_real_duck_refuses_to_sit_and_stands_itself_up() -> None:
     from quackd.sim3d.microduck import MicroduckBody
     from quackd.sim3d.world import NotSupported
