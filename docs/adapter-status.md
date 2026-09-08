@@ -142,13 +142,12 @@ sha256, and neither shipped: the 3D model files are CC BY-NC-SA
 [`quackd/sim3d/upstream_api.py`](../quackd/sim3d/upstream_api.py), and
 [ADR-0030](adr/0030-mujoco-physics-backend.md) is the reasoning.
 
-**What that ✅ rests on.** The seeded `find-and-kick` sweep runs on the stand-in body, which is
-where ten of ten comes from. The real duck's own tests, that it walks, turns, stays upright,
-refuses to sit and stands itself up, run only where somebody has already filled the cache,
-because a test must not reach the network, and the rendering tests need an OpenGL context. None
-of it runs in CI: `quackd[mujoco]` is not in the `dev` extra CI installs, so `tests/test_sim3d.py`
-and `tests/test_acceptance_mujoco.py` skip on every runner. This row is one machine's word, the
-same standing as the gait numbers below.
+**What that ✅ rests on.** Two `find-and-kick` sweeps over the same ten seeds: one on the
+kinematic stand-in, which CI's `physics` job runs on every push against a software rasteriser,
+and one on the trained gait, which needs upstream's model and so runs nightly, fetched the way a
+first run fetches it. The real duck's other tests — that it walks, turns, stays upright, refuses
+to sit and stands itself up — go with the second. The gait numbers below are still one machine's
+word; the sweeps are not.
 
 Read: 2026-09-07, pinned at
 [`2b25a48`](https://github.com/pollen-robotics/microduck_rl/tree/2b25a48b08f1f17bc38c90bb03144c81fbd9ed07)

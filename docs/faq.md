@@ -38,8 +38,10 @@ a real Microduck may track commands directly.
 **Do I need a GPU for the physics simulator?** No. MuJoCo steps on the CPU and the policy runs
 under onnxruntime's CPU provider. Upstream needs CUDA to *train* that policy, never to run it.
 What the head camera needs is an OpenGL context to render into: a laptop has one, a bare server
-may not, and the frames are what fails first there, which is why the acceptance sweep skips
-itself when it cannot make a renderer. Rendering is this backend's real cost, not physics.
+may not, and the frames are what fails first there. On a headless Linux box, install `libosmesa6`
+and set `MUJOCO_GL=osmesa`, which renders into process memory and needs no display, no GPU and no
+`/dev/dri` — it is what CI's own physics job does. quackd names both in the error rather than
+letting an OpenGL traceback out. Rendering is this backend's real cost, not physics.
 
 **Does `uvx quackd run … --provider anthropic` work with no extras?** The default install
 is light on purpose (no vendor SDKs). Use `uvx --from "quackd[anthropic]" quackd run …`, or
