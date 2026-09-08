@@ -32,6 +32,15 @@ HTML = (WEB / "index.html").read_text(encoding="utf-8")
 CSS = (WEB / "style.css").read_text(encoding="utf-8")
 MODULES = sorted(SRC.glob("*.js"))
 
+# The path the page is served from: www.quackd.org/simulator, and /simulator on this project's
+# own deployment. Every local reference in the HTML is absolute under it.
+MOUNT = "/simulator"
+
+
+def _unmount(reference: str) -> str:
+    """A reference as the browser sees it, back to a path inside `web/`."""
+    return reference[len(MOUNT) + 1 :] if reference.startswith(MOUNT + "/") else reference
+
 
 def _js(name: str) -> str:
     return (SRC / name).read_text(encoding="utf-8")
@@ -114,24 +123,52 @@ def test_the_header_wears_the_vendored_duck_mark_and_not_an_emoji() -> None:
     )
     header = re.search(r"<header\b.*?</header>", HTML, re.S)
     assert header, "index.html has no <header>, so this test cannot see what it wears"
-    assert re.search(r'<img[^>]+src="assets/duck-mark\.png"', header.group(0)), (
+    assert re.search(rf'<img[^>]+src="{MOUNT}/assets/duck-mark\.png"', header.group(0)), (
         "the header does not carry web/assets/duck-mark.png"
     )
     icon = re.search(r'<link[^>]*rel="icon"[^>]*>', HTML)
-    assert icon and "assets/favicon-96.png" in icon.group(0), (
+    assert icon and f"{MOUNT}/assets/favicon-96.png" in icon.group(0), (
         "the tab icon is not the vendored PNG favicon"
     )
-    assert 'href="assets/apple-touch-icon.png"' in HTML, "nothing links the home-screen icon"
+    assert f'href="{MOUNT}/assets/apple-touch-icon.png"' in HTML, "nothing links the home-screen icon"
 
 
 def test_every_asset_the_page_asks_for_is_a_file_in_this_directory() -> None:
     """The deploy is a copy of `web/` and nothing reads the HTML on the way out, so a mistyped
     `src` is a broken mark in production and a green build here. Every local reference the page
-    makes has to resolve on disk, relative to this directory."""
+    makes has to resolve on disk, under the mount prefix the deploy serves it from."""
     referenced = set(re.findall(r'(?:src|href)="(?!https?:|data:|mailto:|#)([^"]+)"', HTML))
     assert referenced, "the regex found no local references, so this test is not testing anything"
-    missing = sorted(ref for ref in referenced if not (WEB / ref.split("?")[0]).is_file())
+    missing = sorted(
+        ref for ref in referenced if not (WEB / _unmount(ref).split("?")[0]).is_file()
+    )
     assert not missing, f"index.html points at files that web/ does not hold: {missing}"
+
+
+def test_every_local_reference_is_absolute_under_the_mount() -> None:
+    """The page is served at www.quackd.org/simulator, and quackd-web sets `trailingSlash: false`
+    — so the browser lands on `/simulator` with no slash, and a *relative* `style.css` resolves
+    to `/style.css`, which is the landing page's root and not this directory at all. The HTML
+    would arrive and every asset under it would 404. Relative paths cannot come back."""
+    referenced = set(re.findall(r'(?:src|href)="(?!https?:|data:|mailto:|#)([^"]+)"', HTML))
+    assert referenced, "the regex found no local references, so this test is not testing anything"
+    relative = sorted(ref for ref in referenced if not ref.startswith(MOUNT + "/"))
+    assert not relative, (
+        f"these references are relative and will break behind the /simulator mount: {relative}"
+    )
+
+
+def test_the_deploy_answers_on_the_mount_it_tells_the_browser_to_use() -> None:
+    """Two projects serve this page: quackd-web proxies /simulator/* through to this one, and
+    this one is also reachable on its own deployment URL. The HTML asks for /simulator/... in
+    both cases, so this project has to answer there as well as at its root, or the direct
+    deployment serves an unstyled page with no script."""
+    config = json.loads((REPO / "vercel.json").read_text(encoding="utf-8"))
+    sources = {rule["source"] for rule in config.get("rewrites", [])}
+    assert f"{MOUNT}/:path*" in sources, (
+        f"vercel.json must rewrite {MOUNT}/:path* to /:path*, or every asset 404s on the "
+        f"deployment's own URL: {sorted(sources)}"
+    )
 
 
 # ── two ways to drive, and both of them always live ─────────────────────────────────────
@@ -381,7 +418,7 @@ def test_each_module_parses_as_javascript(module: Path) -> None:
 
 def test_the_page_loads_every_module_it_ships() -> None:
     """A module nothing imports is dead weight nobody will notice has rotted."""
-    entry = re.search(r'<script[^>]*src="(src/[\w.]+)"', HTML)
+    entry = re.search(rf'<script[^>]*src="{MOUNT}/(src/[\w.]+)"', HTML)
     assert entry, "index.html loads no module"
     reachable = {entry.group(1).split("/")[-1]}
     frontier = list(reachable)
