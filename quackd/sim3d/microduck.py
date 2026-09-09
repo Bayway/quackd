@@ -73,8 +73,10 @@ ASSUMPTIONS = (
     "the sideways floor is not measured, unlike the forward and turning ones, so any lateral "
     "request is sent at full scale",
     "the head camera sees a grey floor and no sky, while every other view shows upstream's "
-    "blue scene: its checker and its skybox are the same blue as the person marker, and the "
-    "detector cannot tell them apart",
+    "blue scene: its checker and its skybox are the blue the detector calls a person, and it "
+    "cannot tell them apart",
+    "nobody is in this arena: there is no person to find here, so a `person` detection is the "
+    "scenery and not somebody standing there",
 )
 
 

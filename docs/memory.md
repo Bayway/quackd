@@ -34,7 +34,8 @@ same `adapter:backend` share a file. That is the same rule that keeps `microduck
 `microduck:jsonrpc` apart, read the other way round.
 
 `microduck:sim2d` and `microduck:mujoco` are the pair that catches people out. They share an
-arena, a seed and a `.duck` file by design, and they still keep separate files, because what a
+arena (bar the cartoon's person, who is not in the physics one), a seed and a `.duck` file by
+design, and they still keep separate files, because what a
 pilot learns about how far to walk before kicking comes from the body, and only one of the two
 has a gait.
 

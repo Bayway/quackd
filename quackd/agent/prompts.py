@@ -143,9 +143,17 @@ above.
         # both describe themselves in the stand-ins block below. Saying it here as well
         # contradicted one of them: this told the model it was driving "a real biped on its
         # own learned gait" even when it was driving the puppet.
+        # Nobody is in this arena, and the model has to be told so outright. `search_scan`
+        # still offers `person` as a target, because one shared verb registry serves the
+        # cartoon (which has a person), a real camera through YOLO, and this; and the head
+        # camera's colour detector still carries the person hue band for the same reason. So
+        # a model left to infer it would reasonably scan for somebody and never stop.
         sim_note = (
-            "\nYou are in the physics simulator (MuJoCo): a 2 m arena with low walls, an orange "
-            "ball that rolls when kicked, and a blue person marker. Distances are metres.\n"
+            "\nYou are in the physics simulator (MuJoCo): a 2 m arena with low walls and an "
+            "orange ball that rolls when kicked. Nobody is in the arena with you: there is no "
+            "person here to find, follow or walk up to, so do not scan for one, and treat any "
+            "`person` detection as scenery misread rather than somebody standing there. "
+            "Distances are metres.\n"
         )
     return f"""You are the brain of {blurb}. You are a high-level pilot:
 you choose ONE verb per turn; the robot's own controllers handle balance and gait, and composite

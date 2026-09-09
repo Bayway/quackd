@@ -185,8 +185,8 @@ every id the JavaScript looks up exists in the page, nothing it hides is pinned 
 rule, no module reached from the page imports a CDN statically, the key is stored nowhere,
 each module parses under `node --check`, every asset the page asks for is on disk here, the
 header carries the vendored mark rather than an emoji, the keydown handler reads nothing
-about the switch, and the person marker is neither the old blue nor renamed. It is not the
-same as driving the page.
+about the switch, and nobody has crept back into the arena — no `person` body, no `person`
+label out of `observe()`, no copy that promises one. It is not the same as driving the page.
 
 ## Where this differs from the Python backend
 
@@ -202,20 +202,12 @@ Deliberately, and none of it is a bug. This list is the canonical one: `README.m
 - **The arena is not upstream's scene.** `sim3d` builds upstream's own `scene*.xml` palette —
   a blue-grey edge-marked checker, a gradient skybox, upstream's lights. The browser fetches
   `robot_walk.xml` and none of the `scene*.xml` wrappers, so it draws a flat pale plane under
-  a headlight with no sky. Same dimensions, same walls, same ball; a screenshot of one does
-  not look like `docs/assets/hero.gif`.
+  a headlight with no sky. Same dimensions, same walls, same ball, and nobody in either of
+  them; a screenshot of one does not look like `docs/assets/hero.gif`.
 - **Perception is geometric.** The bearing and distance in each observation are read from the
-  simulator's ground truth inside a 90 degree cone out to 1.6 m, with no occlusion, so a ball
-  behind the person is still seen. Python renders the head camera and runs a colour detector
-  over the pixels. The page says so in the transcript as well as here.
-- **The person marker is purple here and blue in Python.** `quackd/sim3d/scene.py` picks that
-  blue because `render.py`'s HSV detector looks for it: over there the colour is how the duck
-  sees a person at all. Nothing in the browser reads a pixel, so the marker is a plinth, a
-  slimmer post and a spherical head in quackd's own purple instead of a detector target. It
-  is still one static body called `person`, still a metre tall, still standing on a footprint
-  the width of the old cylinder and still measured from the body's own position, so
-  `observe()`, the `person` label and the "walk to the person and quack" example all aim at
-  exactly what they did.
+  simulator's ground truth inside a 90 degree cone out to 1.6 m, with no occlusion modelled at
+  all. Python renders the head camera and runs a colour detector over the pixels. The page says
+  so in the transcript as well as here.
 - **Nothing fetched is hash-checked.** Python verifies all 41 files against a recorded sha256
   before MuJoCo or onnxruntime sees a byte. The browser trusts the two hosts and the transport.
 - **A seed means the same distributions, not the same layout.** The arena here is laid out by a

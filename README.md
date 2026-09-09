@@ -350,7 +350,7 @@ Cloud or local, same command.
 | LM Studio (local) | `quackd[openai]` | none | `uvx --from "quackd[openai]" quackd run find-and-kick --provider lmstudio` |
 | any OpenAI compatible server | `quackd[openai]` | optional | `uvx --from "quackd[openai]" quackd run find-and-kick --provider local --base-url http://host:8000/v1` |
 
-Every row above runs the cartoon, which is the default robot. To put the same model on the physics simulator instead, ask for both extras and name the backend: `uvx --from "quackd[mujoco,anthropic]" quackd run find-and-kick --provider anthropic --robot microduck:mujoco`. The extras are independent, so `quackd[anthropic]` alone gives you the model and no physics.
+Every row above runs the cartoon, which is the default robot. To put the same model on the physics simulator instead, ask for both extras and name the backend: `uvx --from "quackd[mujoco,anthropic]" quackd run find-and-kick --provider anthropic --robot microduck:mujoco`. The extras are independent, so `quackd[anthropic]` alone gives you the model and no physics. Nobody stands in the physics arena, so `follow-me`, whose whole task is to follow somebody, cannot succeed there and nothing stops you pointing it at that backend anyway.
 
 The four cloud providers see the camera frame as an image. Local models get the text detections by default and the frame too with `--vision`. The scripted pilot only reads the detection summary. Local setup, tool calling flags per server and what to expect from small models: [docs/local-llms.md](docs/local-llms.md).
 
@@ -406,8 +406,8 @@ requires: [search_scan, walk_to, kick]  # the honest minimum a body must provide
 |---|---|---|
 | `hello-world` | quack, one step forward, quack | the smoke test |
 | `find-and-kick` | find the ball and kick it | the flagship, ground truth checked in tests |
-| `patrol-and-quack` | wander, quack twice on a person or pet | the scripted pilot quacks at the sighting but hits its budget on seeds 0 to 9, no pilot has completed it yet |
-| `follow-me` | keep a person in view and follow at 0.5 m | the scripted pilot has no strategy for it and declares success after two steps without a single `walk_to`, no real model run yet |
+| `patrol-and-quack` | wander, quack twice on a person or pet | the scripted pilot quacks at the sighting but hits its budget on seeds 0 to 9, no pilot has completed it yet. Nobody is in the physics arena, so on `microduck:mujoco` it is a patrol with nobody to announce |
+| `follow-me` | keep a person in view and follow at 0.5 m | **cartoon only**, nobody stands in the physics arena and this task is to follow somebody, so it cannot succeed on `microduck:mujoco`. The scripted pilot has no strategy for it and declares success after two steps without a single `walk_to`, no real model run yet |
 | `fetch` | scoop the ball up and bring it back | **experimental**, the scoop is open loop and fails about 40 % of the time in sim, by design, and the scripted pilot has no strategy for it either, no real model run yet |
 | `flock-kick` | multiple ducks split the search, the closest one kicks | **flock mode**, cooperation over a bus and an auction |
 | `reachy-spotter` | find the ball with your gaze and say where it is | **Reachy Mini** (`--robot reachy_mini:sim2d` is its default), a stationary head with no legs |
@@ -535,7 +535,7 @@ Underneath there are exactly two learned policies, `alpha_walking` and `alpha_st
 quackd's own scripted impulse rather than a policy, as it is in `sim3d`, because upstream's
 episodic one did nothing from a standing pose. Seven verbs are implemented and none of the
 composites, so the model steers with `move` and reads the pose it actually reached. Where else
-this differs from the Python backend (the arena, perception, the person marker, the missing hash
+this differs from the Python backend (the arena, perception, the missing hash
 check, what a seed means, the absent scripted pilot) is one list in
 [`web/README.md`](web/README.md), with the API key handling. That list is the canonical one, and
 this section deliberately does not keep a second copy of it.

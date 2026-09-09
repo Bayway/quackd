@@ -42,7 +42,6 @@ class MujocoTransport:
         *,
         live: bool = False,
         realtime: bool | None = None,
-        person: bool = True,
         frame_size: int = 256,
         battery_start: float = 100.0,
         body: str = DEFAULT_BODY,
@@ -53,7 +52,6 @@ class MujocoTransport:
         self.seed = seed
         self.live = live
         self.realtime = live if realtime is None else realtime
-        self.person = person
         self.frame_size = frame_size
         self.battery_start = battery_start
         self.body = body
@@ -109,9 +107,7 @@ class MujocoTransport:
         self._closed = False
         # Building a MicroduckBody loads two ONNX sessions and may download ten megabytes
         # of upstream model on first use. Off the event loop, so the heartbeat keeps beating.
-        self.world = await asyncio.to_thread(
-            MujocoWorld, seed=self.seed, person=self.person, body=self.body
-        )
+        self.world = await asyncio.to_thread(MujocoWorld, seed=self.seed, body=self.body)
         self.clock = FlockClock(self.world, dt=CONTROL_DT, realtime=self.realtime)
         if self.live:
             # fail BEFORE registering with the clock, as sim2d does: a dead registration

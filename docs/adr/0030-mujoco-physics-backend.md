@@ -47,6 +47,14 @@ Apple Silicon, and no GPU. There is no Intel Mac wheel.
   drawing: same arena, same seeded spawn order, same 0.3 s deadman, same kick cone, same
   unreliable scoop, and the same `extras` keys, so a `.duck` written for one runs on the
   other unchanged.
+
+  *Since 0.8:* the arenas are no longer the same in one respect. The cartoon's person marker
+  was removed from the physics world, and from the browser demo with it, so nobody stands in
+  either 3D arena. The cartoon draws its person from the RNG after the duck and the ball, so
+  dropping that draw leaves every seeded duck and ball position bit-identical between the two
+  and the parity above still holds for everything they share. What it costs is one starter:
+  `follow-me` is a task about following somebody and cannot succeed on `microduck:mujoco`.
+  `people` has left the 3D `extras`; the cartoon still publishes it.
 - **The robot is upstream's, all the way down.** `robot_walk.xml` and its 38 meshes come
   from `microduck_rl` at a pinned commit; `alpha_walking.onnx` and `alpha_stand.onnx` come
   from the Hub at a pinned revision; the 50 Hz loop around them is `infer_policy.py`'s,
@@ -124,6 +132,13 @@ Apple Silicon, and no GPU. There is no Intel Mac wheel.
   and it is in `extras.assumptions` with the rest. The defence of it is that upstream's blue
   tiles are a viewer texture and upstream's policies are blind: nothing in `microduck_rl` ever
   looks at its own floor, and a real Microduck's camera sees a room rather than a scene file.
+
+  *Since 0.8:* the person marker is gone from this arena, and the colourless floor stayed. It
+  is not dead code and it must not be cleaned up as such. The detector keeps its person hue
+  band because the cartoon still has a person to find, and that band is what upstream's blue
+  checker forges — so with nobody here to see, every person the pretty floor could produce
+  would be a phantom and there would be no true one to weigh it against. The test that guards
+  it got stricter rather than retiring: it now counts a phantom at any range.
 - CI never fetches the model, so the `microduck:mujoco` row's ✅ rests on the puppet's sweep
   plus tests that skip where the cache is empty. The real duck's numbers in this ADR were
   measured on one machine, and `GAIT_THRESHOLD` is tagged UNVERIFIED for that reason.
@@ -166,8 +181,9 @@ Apple Silicon, and no GPU. There is no Intel Mac wheel.
   asset the page asks for is a file in this repository, that the header wears the vendored mark
   rather than an emoji, that the keydown handler reads nothing about the switch, that a motor
   key barges in while a read-only key does not, that a focused control keeps its own keys, that
-  the abort reaches the request in flight, that the person marker is neither the old blue nor
-  renamed, and that the page claims no more policies than it downloads. The last sentence no
+  the abort reaches the request in flight, that nobody is in the arena — no `person` body, no
+  `person` label, no copy promising one — and that the page claims no more policies than it
+  downloads. The last sentence no
   longer stands as written: the page was opened in a real browser while this work was done, and
   it boots clean, wears its fonts and its mark, and walks the duck under a held `W`. What has
   still never been watched is a model driving a whole run, a key barging in out of one, and the

@@ -72,6 +72,10 @@ export class View {
         sphere.scale(size[0], size[1], size[2]);
         return sphere;
       }
+      // Known wrong, and harmless only while nothing in the arena is a capsule: this builds
+      // three.js's capsule without the rotateX the CYLINDER branch below applies, and three.js
+      // runs both along y where MuJoCo runs them along z. A capsule geom would be drawn lying
+      // on the floor. Rotate it the same way when one first appears.
       case CAPSULE: return new THREE.CapsuleGeometry(size[0], size[1] * 2, 6, 12);
       case CYLINDER: {
         const cylinder = new THREE.CylinderGeometry(size[0], size[0], size[1] * 2, 20);

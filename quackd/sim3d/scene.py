@@ -1,9 +1,11 @@
-"""The arena as MJCF text: floor, walls, a ball, a person, and a body dropped in.
+"""The arena as MJCF text: floor, walls, a ball, and a body dropped in.
 
-The arena is the cartoon's, 2 m across with the same orange ball and the same blue person,
-so the colour detector that reads `sim2d`'s frames reads these unchanged. The floor, the sky
-and the lighting are upstream's, taken from the `scene*.xml` wrappers in `microduck_rl`, so a
-Microduck here stands in the scene a Microduck stands in there.
+The arena is the cartoon's, 2 m across with the same orange ball, so the colour detector that
+reads `sim2d`'s frames reads this one unchanged. Nobody stands in it: the cartoon puts a person
+marker in its arena and this one has none, which is the single place the two worlds differ and
+the reason `follow-me` is a 2D task. The floor, the sky and the lighting are upstream's, taken
+from the `scene*.xml` wrappers in `microduck_rl`, so a Microduck here stands in the scene a
+Microduck stands in there.
 
 That palette and that detector cannot both have the head camera, which is why there are two
 floors and why the head camera renders no sky: see `FLOOR_GROUP`.
@@ -26,8 +28,6 @@ import os
 
 ARENA_HALF = 1.0  # metres; the arena is [-1, 1]², as in sim2d
 BALL_R = 0.05
-PERSON_R = 0.12
-PERSON_H = 0.5  # half-height of the cylinder: a metre-tall marker, as tall as a duck sees
 WALL_H = 0.08
 HEADCAM_FOV_DEG = 90.0  # the cartoon's, and the detector's default
 OFFSCREEN_PX = 1024  # the largest --gif-size the offscreen buffer allows
@@ -44,24 +44,26 @@ SHADOWSIZE = 4096  # what upstream's viewer uses when shadows are on
 
 #: There are two floors, and which one you see depends on who is looking.
 #:
-#: Upstream's blue-grey checker is the scene every human view shows, because it is what a
+#: Upstream's blue-grey checker is the scene every operator view shows, because it is what a
 #: Microduck's own `scene*.xml` looks like. It is also, to an HSV detector hunting a blue
 #: person marker, a person: measured off a rendered frame, the floor sits at hue 105 with
-#: saturation up to 185 and value up to 229, against the person's hue 114, saturation 185,
-#: value 197. They overlap on all three, so with only the pretty floor the detector reported
-#: somebody standing 0.12 m ahead in every frame of every heading.
+#: saturation up to 185 and value up to 229, against the hue 114, saturation 185, value 197
+#: that detector calls a person. They overlap on all three, so with only the pretty floor the
+#: detector reported somebody standing 0.12 m ahead in every frame of every heading.
 #:
-#: So the head camera renders the same checker with the colour taken out, and nothing else
-#: changes. It is a stand-in and it is listed as one. The honest defence of it is that
-#: upstream's blue tiles are a *viewer* texture: the policies that ship with this robot are
-#: blind, they never look at the floor, and a real Microduck's camera sees a room rather than
-#: a scene file. Group 3 is hidden by MuJoCo everywhere by default, the live viewer included,
-#: so only `render_headcam` ever turns it on.
+#: No person stands in this arena now, and that makes the floor worse rather than harmless:
+#: the detector still carries the person target, because the cartoon still has a person to
+#: find, so every person it could report from here is a phantom and there is no true one to
+#: weigh it against. So the head camera renders the same checker with the colour taken out,
+#: and nothing else changes. It is a stand-in and it is listed as one. The honest defence of
+#: it is that upstream's blue tiles are a *viewer* texture: the policies that ship with this
+#: robot are blind, they never look at the floor, and a real Microduck's camera sees a room
+#: rather than a scene file. Group 3 is hidden by MuJoCo everywhere by default, the live
+#: viewer included, so only `render_headcam` ever turns it on.
 FLOOR_GROUP = 1
 FLOOR_CAM_GROUP = 3
 
 BALL_RGBA = "1 0.55 0 1"  # (255, 140, 0): H≈16 in OpenCV, inside the detector's ball range
-PERSON_RGBA = "0.24 0.35 0.86 1"  # (60, 90, 220): H≈112, the detector's person range
 DUCK_RGBA = "0.98 0.82 0.16 1"  # the cream colorway
 
 #: Where a held ball is parked: outside the walls, beyond what a 256 px frame can resolve.
@@ -98,7 +100,6 @@ def arena_xml(
     body_xml: str,
     *,
     ball: tuple[float, float],
-    person: tuple[float, float] | None,
     timestep: float = 0.005,
     include: str = "",
     shadows: bool | None = None,
@@ -123,14 +124,6 @@ def arena_xml(
             ("south", 0.0, -lim, lim, 0.02),
         )
     )
-    person_xml = (
-        f'    <body name="person" pos="{person[0]} {person[1]} {PERSON_H}">\n'
-        f'      <geom name="person_body" type="cylinder" size="{PERSON_R} {PERSON_H}" '
-        f'rgba="{PERSON_RGBA}"/>\n'
-        "    </body>"
-        if person is not None
-        else ""
-    )
     return f"""
 <mujoco model="quackd arena">
 {include}
@@ -152,7 +145,8 @@ def arena_xml(
     <material name="quackd_floor" texture="quackd_floor" texuniform="true" texrepeat="5 5"
               reflectance="0.2"/>
     <!-- The same checker with the colour taken out, for the head camera alone. See
-         FLOOR_GROUP below: a blue floor and a blue person are one blob to an HSV detector. -->
+         FLOOR_GROUP below: to an HSV detector this blue floor is a person, and with nobody
+         standing here every person it could report would be that floor. -->
     <texture name="quackd_floor_cam" type="2d" builtin="checker" mark="edge" width="300"
              height="300" rgb1="0.62 0.62 0.62" rgb2="0.50 0.50 0.50" markrgb="0.85 0.85 0.85"/>
     <material name="quackd_floor_cam" texture="quackd_floor_cam" texuniform="true"
@@ -175,7 +169,6 @@ def arena_xml(
       <geom name="ball_geom" type="sphere" size="{BALL_R}" rgba="{BALL_RGBA}" condim="6"
             mass="{BALL_MASS}" friction="0.8 0.005 {BALL_ROLLING}"/>
     </body>
-{person_xml}
 {body_xml}
   </worldbody>
 </mujoco>
