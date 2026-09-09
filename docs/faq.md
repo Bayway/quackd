@@ -9,8 +9,9 @@ model in MuJoCo, walking on `alpha_walking.onnx`, the policy Pollen trained, at 
 CPU. The ball rolls, the duck undershoots what you asked for, and a pilot that works there has
 met a robot that does not do what it is told. Same arena, same seeded layout, same verbs, so a
 `.duck` written for one runs on the other ([ADR-0030](adr/0030-mujoco-physics-backend.md)).
-Neither one installed? [`web/`](../web/README.md) is the same physics and the same policy in a
-page.
+Neither one installed? [`web/`](../web/README.md) is the same physics and the same two policies
+in a page, and it does one thing neither Python simulator does: the sentence box and the
+keyboard drive the same duck at the same time.
 
 **How do I run the physics simulator, and what does it download?**
 `uvx --from "quackd[mujoco]" quackd run find-and-kick --robot microduck:mujoco --provider fake`.
@@ -23,6 +24,37 @@ because the model files are CC BY-NC-SA and quackd ships none of them ([licenses
 `QUACKD_MICRODUCK_ASSETS` points at a `microduck_rl` checkout of your own instead,
 `QUACKD_CACHE_DIR` moves the cache, and `QUACKD_MUJOCO_BODY=puppet` runs a kinematic stand-in
 that downloads nothing and is the body the tests build directly.
+
+**How do I run the browser demo, and is it live anywhere?** `python web/serve.py`, then open
+<http://localhost:8000/simulator/>. Nothing to build, and no quackd to install: that server is
+one stdlib file. It still needs a server, for two reasons: browsers refuse ES modules over
+`file://`, and the page expects to be mounted at `/simulator`, so every local reference in
+`index.html` is absolute. That is why a plain `python -m http.server --directory web` no longer
+works — it serves the HTML and then 404s the stylesheet and the script, because nothing answers
+on `/simulator` at the root. `web/serve.py` takes an optional port. The page is meant to live at
+`www.quackd.org/simulator`, where the separate quackd-web project fetches this directory into
+its own build, and it is not there yet, which is why that address is text here rather than a
+link. The browser fetches
+about 45 MB the first time and caches it: MuJoCo's WebAssembly build, onnxruntime-web and
+three.js from jsDelivr, upstream's model at the same pinned commit Python uses, and
+`alpha_walking.onnx` and `alpha_stand.onnx` — the same two policies Python fetches, with the
+kick a scripted impulse in both. It is more megabytes than the answer above because the browser
+pulls `robot_walk.xml` and 38 separate meshes uncompressed, 22 MB of it, where Python pulls one
+compressed archive. Nothing fetched is hash checked, which Python does and the page admits
+([web/README.md](../web/README.md)).
+
+**Can I drive the browser demo myself?** Yes, at the same time as the model, which is the
+argument the page exists to make. The keyboard is never handed over because it is never taken
+away: `W`/`S` walk, `A`/`D` turn, `Shift` with `A`/`D` strafes, `Q`/`E` look, `G` centres the
+head, `Space` stops, `K` kicks, `R` stands the duck up, `O` prints the raw state the model's
+observation is built from, `1`/`2` change camera and `Esc` hands the keyboard back to the arena.
+A key that would *move* the robot takes it mid-run — the run is aborted and the request to the
+model is aborted with it, so nothing keeps running against your key and no answer arrives after
+you took the duck back, and the transcript records the handover with the key that did it. A key
+that only reads (`O`, the camera keys) never interrupts. There is no key
+for `say`, deliberately: a key carries a command, and a sentence needs something to read it.
+The `quackd is on` switch decides only that last part — whether anything reads English — and no
+longer decides whether you may drive.
 
 **Why does the duck in the physics simulator not go the speed I asked for?** Because the walking
 policy has a floor and quackd will not hide it. Under the model's own actuators the gait does

@@ -7,9 +7,11 @@ two ways of driving a robot sit a centimetre apart. It is the same idea as
 `quackd run --goal "..." --robot microduck:mujoco`, with the same physics and the same
 walking policy, in six modules of plain JavaScript with no build step instead of Python.
 
-It is meant to live at **<https://www.quackd.org/simulator>**, and it is not there yet.
-That domain is served by quackd-web, a separate Vercel project, which proxies `/simulator/*`
-through to this one; read the address as where this is going rather than where it is. There
+It is meant to live at **`www.quackd.org/simulator`**, and it is not there yet — which is why
+that address is written here as text and not as a link. That domain is served by quackd-web, a
+separate Vercel project, whose build would fetch this directory into its own `/simulator` at a
+pinned commit once the pull request that adds that step lands; read the address as where this is
+going. There
 is no build step either way: `vercel.json` at the repository root serves `web/` as it stands,
 because everything heavy here is a CDN URL the page fetches at run time.
 
@@ -95,9 +97,14 @@ and `Esc` hands the keyboard back to the arena from wherever focus is. The legen
 page is that same list, and the keycaps
 light up as you hold them.
 
+There is deliberately **no key for `say`**. Every other verb the model can pick has a key
+beside it, and that one cannot: a key carries a command, and a sentence needs something to
+read it. The absence is the argument the page is making, and it is the reason the keyboard
+sits a centimetre from the box rather than behind a mode.
+
 Underneath there are exactly two learned policies: `alpha_stand` stands the duck up and
-`alpha_walking` walks it. The kick is quackd's own scripted impulse and not a policy. None of
-it reads English.
+`alpha_walking` walks it. The kick is quackd's own scripted impulse and not a policy, exactly
+as in `sim3d`. None of it reads English.
 
 ## The switch, and what it decides now
 
@@ -107,8 +114,9 @@ ends the run whatever the model thinks.
 
 `quackd is off` removes that layer, and only that layer. The physics, the robot and its two
 policies are identical; what is gone is anything that reads English, so typing a sentence
-gets the honest answer — this robot takes three numbers and a head angle, and it has never
-seen your words. It is not a rigged comparison against a worse model: there is no model,
+gets the honest answer the page prints — this robot understands a twist, three numbers, and a
+walking policy that turns them into steps, and it has never seen your words. It is not a
+rigged comparison against a worse model: there is no model,
 because before quackd there was nowhere to put one.
 
 What the switch no longer decides is whether you may drive. It used to: the cockpit was
@@ -119,10 +127,12 @@ gated on the layer any more.
 ## Barge-in
 
 A key that would move the robot takes it, mid-run, at once. The run is aborted, the request
-to the model is aborted with it — the signal reaches `fetch`, so an abandoned turn stops
-being billed — and the transcript records the handover with the key that did it. A key that
-only reads (`O`, and the camera keys) never barges in: you can inspect the state or change
-the view without stopping the run. That is the whole rule — a key takes control if and only
+to the model is aborted with it — the signal reaches `fetch`, so nothing keeps running against
+your key and no answer arrives after you took the duck back — and the transcript records the
+handover with the key that did it. What that abort cannot promise is your bill: these are plain
+non-streaming POSTs, so closing the connection stops the transfer, not necessarily a completion
+the vendor has already generated. A key that only reads (`O`, and the camera keys) never barges
+in: you can inspect the state or change the view without stopping the run. That is the whole rule — a key takes control if and only
 if it would move the robot.
 
 The handover itself is one flag, not a negotiation. `Runtime.start` re-asserts the hand's
@@ -141,10 +151,18 @@ repository, so those four results are one measurement on one machine rather than
 you or CI can re-run — and both files have changed since, in the abort path and in the
 arena's geometry, with nothing in this repository able to re-run it.
 
-The rendering, the DOM and the recording have only been read, not run: they need a browser,
-and the first person to open the page is the test. That now covers the newest work as well —
-the dual control, the barge-in, the keycaps, the restyled page and the vendored mark have all
-been reasoned about rather than watched. Nobody has yet held `W` in a real browser.
+The page has been opened in a real browser twice, both times on the machine that wrote it and
+neither time recorded. The first (commit `8d72a2a`): it boots with no page errors and a held
+`W` walks the duck — `twist_sent [0.3, 0, 0]`, the pose moving with it. The second (commit
+`a9fea18`), at `http://localhost:8020/simulator/`: it boots with no page errors and no failed
+request, Nunito Sans applied and the duck mark loaded. So the rendering has run, the mount and
+the restyle were watched rather than reasoned about, and somebody has held `W`.
+
+What those two sessions did not cover is most of it. Nobody has watched a full model-driven
+run, a barge-in *out of* a live run, the recording (Record, Save clip, Share), the switch
+thrown mid-run, or the page on any browser, screen or machine but the one. Two clean boots are
+not a browser test, and none of it was recorded, so the honest reading is that the page starts
+and the hand works, and everything downstream of a model answering is still only read.
 
 `tests/test_web.py` is the floor under that. It runs in the ordinary suite, with no browser:
 every id the JavaScript looks up exists in the page, nothing it hides is pinned visible by a
@@ -152,10 +170,24 @@ rule, no module reached from the page imports a CDN statically, the key is store
 each module parses under `node --check`, every asset the page asks for is on disk here, the
 header carries the vendored mark rather than an emoji, the keydown handler reads nothing
 about the switch, and the person marker is neither the old blue nor renamed. It is not the
-same as opening the page.
+same as driving the page.
 
-Four things here are deliberately not what the Python backend does, and none is a bug:
+## Where this differs from the Python backend
 
+Deliberately, and none of it is a bug. This list is the canonical one: `README.md` and
+`PLAN.md` point here rather than keeping counts of their own.
+
+- **Seven verbs, and a contract of its own.** `pilot.js` implements `move`, `stop`,
+  `report_state`, `gaze`, `kick`, `say` and `stand_up`, plus the two declarations — seven of
+  the manifest's fifteen and none of the three composites, which is what Python's own prompt
+  tells a model to prefer. `DEFAULT_CONTRACT` allows exactly those seven with 18 steps and 3
+  minutes, so it is the same verb definitions and the same allowlist-and-budget machinery as
+  Python, not the same allowlist and not the same budget as any `.duck` in `ducks/`.
+- **The arena is not upstream's scene.** `sim3d` builds upstream's own `scene*.xml` palette —
+  a blue-grey edge-marked checker, a gradient skybox, upstream's lights. The browser fetches
+  `robot_walk.xml` and none of the `scene*.xml` wrappers, so it draws a flat pale plane under
+  a headlight with no sky. Same dimensions, same walls, same ball; a screenshot of one does
+  not look like `docs/assets/hero.gif`.
 - **Perception is geometric.** The bearing and distance in each observation are read from the
   simulator's ground truth inside a 90 degree cone out to 1.6 m, with no occlusion, so a ball
   behind the person is still seen. Python renders the head camera and runs a colour detector
@@ -173,12 +205,16 @@ Four things here are deliberately not what the Python backend does, and none is 
 - **A seed means the same distributions, not the same layout.** The arena here is laid out by a
   xorshift and in Python by numpy's PCG64. The spawn ranges and the rejection rules match; the
   stream does not, so seed 3 is a different arena in each.
+- **There is no scripted pilot.** Python's `--provider fake` walks the whole task with no
+  model. Here the pre-filled goal still needs a key, or a local server, before anything
+  happens.
 
 ## Layout
 
 | File | What it is |
 |---|---|
 | `index.html` | the page: the fonts, the onnxruntime tag, the copy, the keycap legend |
+| `serve.py` | the mount, locally: stdlib only, serves this directory under `/simulator` the way the deploy does |
 | `style.css` | hand-authored, in the quackd-web design language |
 | `assets/` | quackd's own mark: the header logo, the favicon, the touch icon |
 | `src/microduck.js` | the robot: MJCF, the 50 Hz loop, the policy, the gait floor |

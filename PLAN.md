@@ -46,21 +46,25 @@ not before.
 
 ## Open here
 
-- 🔨 **Somebody has to open `web/` in a browser.** `tests/test_web.py` checks what can be
-  checked without one, and that is not the same as opening the page. The rendering, the DOM
-  and the recording still need a person with a browser, and the four measured claims in
-  `web/README.md` still come from a scratch harness that is not in the repository.
+- 🔨 **Somebody has to drive `web/` in a browser, and record it.** The page itself is no longer
+  unopened: it booted clean twice on the machine that wrote it (`8d72a2a`, `a9fea18`), with the
+  fonts and the mark loaded and a held `W` walking the duck. What that leaves is everything past
+  the boot — a full model-driven run, a key barging in out of one, the Record button, the switch
+  thrown mid-run, and any browser or machine but that one. None of it was recorded, so there is
+  no asset and nothing anybody else can check. Separately, the four measured claims in
+  `web/README.md` come from a scratch harness that is not in the repository, and both files it
+  measured have changed since, in the abort path and in the arena's geometry, so nothing here can
+  re-run it. Locally it is `python web/serve.py`, then <http://localhost:8000/simulator/>.
 - ⬜ Flock mode does not know `open_duck` yet (`flock/runner.py` knows two adapters), and a
   hardware flock waits on Microducks shipping.
 - ⏸ **A real model recording**, in either simulator, to replace a scripted-pilot asset and drop
   the label (see [docs/assets](docs/assets/README.md)). Needs a key.
-- ⬜ **The browser demo is not at parity with the backend.** It has seven of the manifest's
-  fifteen verbs and none of the three composites, which is what Python's own prompt tells a
-  model to prefer; perception is geometric rather than the colour detector over a rendered
-  frame; nothing it fetches is hash-checked, where Python checks all 41 files; and there is no
-  scripted pilot, so the pre-filled goal still needs a key before anything happens. All four
-  are disclosed in `web/README.md` and in the page's own observations rather than left to be
-  discovered.
+- ⬜ **The browser demo is not at parity with the backend.** Seven of the manifest's fifteen
+  verbs and none of the three composites, a contract of its own, an arena that is not upstream's
+  scene, geometric perception, no hash check on anything it fetches, a seed that means the same
+  distributions and not the same layout, and no scripted pilot. `web/README.md` holds that list
+  in full and is the one place it is kept; this bullet is the reminder that it is a list of open
+  gaps and not just a disclosure.
 - ⬜ **`GAIT_FLOOR_VY` was never measured.** The forward and turning floors were; the sideways
   one is assumed equal to the training maximum, so every lateral request is sent at full
   scale. The assumption is in `GAIT_THRESHOLD`'s note and in the state's `assumptions`, and
@@ -75,6 +79,19 @@ not before.
   overridable with `QUACKD_MODEL`.
 - ⏸ Upload `docs/assets/social-preview.png` under Settings → Social preview. There is no API
   for it.
+
+## Open elsewhere
+
+One item, and it is the only one: nothing in this repository can finish it.
+
+- ⬜ **The quackd-web pull request, which is what puts the page on the web.** `web/` is meant to
+  be reached at `www.quackd.org/simulator`, and it is not there: that address belongs to
+  quackd-web, a separate Vercel project serving the landing page, and its build has to fetch this
+  directory into its own `/simulator`. This repository's half is done — `vercel.json` answers on
+  the mount and every local reference in `index.html` is absolute under it, both pinned by
+  `tests/test_web.py` — so the PR over there is the whole of what is left. Until it lands, no
+  document here writes that address as a link, only as text, and [LAUNCH.md](LAUNCH.md) waits
+  on it.
 
 ## Release checklist
 
