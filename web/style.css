@@ -21,11 +21,11 @@
        real 1366×768 laptop — 641px of viewport once the browser has taken its chrome, which
        is the number to test against, not 768. Adjacency was a proxy for simultaneity; this is
        the thing itself. Do not restore the vertical stack.
-       The bay numbers 01–04 are NAMES, not a sequence: reading order is 03, the arena, 01,
-       04, 02. They were numbered when the page was one column and they stay numbered so the
-       copy can point at a bay ("the sentence box, bay 01") from anywhere on the page.
+       The bays are named, not numbered. They were numbered when the page was one column
+       and the numbers read down it; in this layout the eye goes key, arena, sentence, log,
+       keycaps, so a number on each heading only claimed an order that is not there.
    R3  Machine speech is mono, human speech is sans. Verb calls, results, #readout, keycaps,
-       eyebrows and bay numbers are DM Mono; the goal line, the refusal paragraph and every
+       eyebrows and bay names are DM Mono; the goal line, the refusal paragraph and every
        .fine are Nunito Sans. This is deliberate — do not "fix" the mixed-family log.
 
    Exactly ONE dark surface exists on this page: .terminal-window (#483652). The log is
@@ -607,8 +607,9 @@ canvas#view:focus-visible { outline: 3px solid var(--ring); outline-offset: -3px
    62rem and `.deck > .lane > * { margin-top: 0 }` below it, where the rule between bays does
    the separating instead. A base `* + *` rule here would be overridden at every width. */
 
-/* Four numbered bays are the page's entire heading system:
-   01 Say it · 02 Drive it · 03 Your API key · 04 Transcript. */
+/* Four named bays are the page's entire heading system:
+   Your API key · Command the duck · Drive the duck · Transcript. The first two are
+   deliberately parallel: one sentence, one set of keys, the same duck. */
 /* No `font-size: 0` here. It was carried over to "kill the whitespace between the inline
    spans", but a flex container already drops whitespace-only anonymous items — `summary`
    below uses the same span pattern without it and renders identically. */
@@ -617,18 +618,6 @@ canvas#view:focus-visible { outline: 3px solid var(--ring); outline-offset: -3px
   align-items: center;
   gap: var(--s-1);
   margin: 0 0 var(--s-2);
-}
-.lane-label .num {
-  font: 500 var(--t-micro) var(--mono);
-  color: var(--pink);
-  letter-spacing: 0.04em;
-}
-.lane-label .rule {
-  display: block;
-  width: 1.5rem;
-  height: 1px;
-  background: var(--pink-rule);
-  flex: none;
 }
 .lane-label .eyebrow { margin: 0; }
 .lane-label .tag {
@@ -999,8 +988,6 @@ summary::after {
 }
 details[open] summary::after { transform: rotate(90deg); }
 details[open] summary { margin-bottom: var(--s-2); }
-summary .num { font: 500 var(--t-micro) var(--mono); color: var(--pink); letter-spacing: 0.04em; }
-summary .rule { display: block; width: 1.5rem; height: 1px; background: var(--pink-rule); flex: none; }
 #key-box > * + * { margin-top: var(--s-2); }
 #provider-note a {
   color: var(--pink);
@@ -1028,7 +1015,6 @@ summary .rule { display: block; width: 1.5rem; height: 1px; background: var(--pi
   border-bottom: 1px solid var(--plum-edge);
 }
 .term-head h2 { margin: 0; display: flex; align-items: center; gap: var(--s-1); }
-.term-head .num { font: 500 var(--t-micro) var(--mono); color: #bda6bd; }
 .term-head .eyebrow { color: #d79ac2; }   /* 4.8:1 on plum */
 .term-head::after {
   content: "";
@@ -1328,9 +1314,10 @@ summary .rule { display: block; width: 1.5rem; height: 1px; background: var(--pi
     border-color: #e0b93f;
     box-shadow: inset 0 0 0 2px rgba(245, 197, 51, 0.55), var(--shadow-guard);
   }
-  #manual > .lane-label .rule { display: none; }   /* "02 DRIVE IT … ALWAYS LIVE" measures
-                                                      ~208px against 215px of content; the
-                                                      24px rule is what makes it wrap */
+  /* "DRIVE THE DUCK … ALWAYS LIVE" is a longer string than the numbered version it
+     replaced, but it also lost the 24px separator rule that used to be hidden here for
+     exactly this reason. The two roughly cancel. Verified not to wrap in the column at
+     this tier; if a longer name is ever given to this bay, check it again. */
   .keycaps { gap: var(--s-2); }
   .legend { font-size: var(--t-micro); row-gap: 0.3rem; margin-top: 0; }
   .legend dd { max-width: none; }
