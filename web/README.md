@@ -9,9 +9,9 @@ walking policy, in six modules of plain JavaScript with no build step instead of
 
 It lives at <https://www.quackd.org/simulator>. That domain is served by quackd-web, a separate
 Vercel project, whose build fetches this directory into its own `/simulator` at a pinned commit,
-so the page you are reading about is the one deployed there. There is no build step either way:
-`vercel.json` at the repository root serves `web/` as it stands, because everything heavy here
-is a CDN URL the page fetches at run time.
+so the bytes a visitor gets are that project's build output rather than anything this repository
+deploys. There is no build step at either end: what ships is `web/` as it stands, because
+everything heavy here is a CDN URL the page fetches at run time.
 
 ### Why the paths are absolute
 
@@ -21,8 +21,10 @@ redirected to `/simulator`, and from *that* URL a relative `style.css` resolves 
 `/style.css` — the landing page's root, not this directory. The HTML would arrive and every
 asset under it would 404. `tests/test_web.py` fails if a relative path comes back.
 
-The same `vercel.json` also rewrites `/simulator/*` to `/*` here, so this project answers on
-the mount as well as at its own root and the direct deployment URL is not a broken page.
+`vercel.json` at the repository root carries the same mount, rewriting `/simulator/*` to `/*`,
+so this directory would answer on the mount as well as at its own root if it were ever deployed
+on its own. It is not today: quackd-web is the only Vercel project, and this config is here so
+that a standalone deploy would not serve an unstyled page.
 
 ### The link back
 

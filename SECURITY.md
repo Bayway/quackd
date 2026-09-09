@@ -40,22 +40,29 @@ Also in scope:
 - An adapter sending a body's "go limp" call (`robot.relax`, `disable_motors`,
   `disable_torque`, an XLeRobot `disconnect()`, a ToddlerBot torque-off) as if it were
   `stop`. Stop means stop, never collapse.
-- **The browser demo** (`web/`). It asks a visitor to paste an API key into a web page. The key
-  is read from an input, sent from the browser straight to the vendor, and never stored, never
-  logged and never proxied: there is no server here to proxy it through, and nothing in
-  `web/src` writes to browser storage. What that leaves is the page itself. It loads three
-  payloads from `cdn.jsdelivr.net` at pinned versions, plus a stylesheet from
+- **The browser demo** (`web/`), which is now publicly reachable at
+  <https://www.quackd.org/simulator> rather than only a directory you serve yourself. That
+  changes the assessment: anybody can be linked to a page that asks them to paste an API key.
+  The key is read from an input, sent from the browser straight to the vendor, and never
+  stored, never logged and never proxied: there is no server here to proxy it through, and
+  nothing in `web/src` writes to browser storage. What that leaves is the page itself. It
+  loads three payloads from `cdn.jsdelivr.net` at pinned versions, plus a stylesheet from
   `fonts.googleapis.com` and the two webfonts it names from `fonts.gstatic.com`, all with no
   subresource integrity and no content security policy, and any script running in the page can
   read that input. Google Fonts serves CSS and font files rather than script, so it cannot
   execute in the document the way the jsDelivr tags can — but it is still an origin that sees
-  every visit. So the risk
-  is not quackd holding your key, it is a third party executing in the same document as it: a
-  bad CDN response, an injected script, or a copy of the page served from somewhere you do not
-  control. Anthropic's `anthropic-dangerous-direct-browser-access` header, which the page sends,
-  is opting out of the vendor's own guard against exactly this. Use a key with a spend cap, or
-  pick Local and nothing leaves the machine. What the demo cannot do: it is a simulation with no
-  transport to any robot, so nothing in it moves hardware.
+  every visit. So the risk is not quackd holding your key, it is a third party executing in the
+  same document as it: a bad CDN response, an injected script, or a copy of the page served
+  from somewhere you do not control. <https://www.quackd.org/simulator> is the one copy quackd
+  controls, and `/simulator/source.json` names the commit it was built from, so you can check
+  it against this repository; the same files served from anywhere else are somebody else's and
+  can differ from what is here. Being deployed adds nowhere for a key to be kept: the deployed
+  copy is the same static files, fetched into quackd-web's build at a pinned commit, so no
+  quackd server sits between the input and the vendor there either. Anthropic's
+  `anthropic-dangerous-direct-browser-access` header, which the page sends, is opting out of
+  the vendor's own guard against exactly this. Use a key with a spend cap, or pick Local and
+  nothing leaves the machine. What the demo cannot do: it is a simulation with no transport to
+  any robot, so nothing in it moves hardware.
 - **The model and the policies the physics backend fetches** (`quackd/sim3d/assets.py`).
   `--robot microduck:mujoco` downloads upstream's MJCF and 38 meshes from codeload.github.com
   and two ONNX policies from huggingface.co, both pinned, and then runs the policy. The defences

@@ -107,7 +107,15 @@ run states in `report_state` ([ADR-0030](adr/0030-mujoco-physics-backend.md)).
 
 [`web/`](../web/README.md) is a static page that runs the physics simulator through MuJoCo's
 WebAssembly build and drives it from any OpenAI compatible server, so a local model can pilot
-the duck with no key and no `pip install`. It still wants a server in front of it, for two
+the duck with no key and no `pip install`. It is live at <https://www.quackd.org/simulator>, and
+that copy asks nothing of you first: same page, same Local option, same base-URL box, no checkout.
+
+If your model server is on the same machine, a checkout is still the more reliable route, because
+that live copy is served over https and your server is not. Browsers disagree about that pairing:
+`http://localhost` counts as a trustworthy origin, so some of them let an https page call a
+plaintext server on your own machine and others refuse it as mixed content or want a permission
+first. A copy you serve yourself is plain http at both ends, so there is no such argument to have,
+and it is also what you run when you are changing the page. The page wants a server in front of it, for two
 reasons: browsers refuse ES modules over `file://`, and the page expects to be mounted at
 `/simulator`, so every local reference in it is absolute. `web/serve.py` is that server —
 stdlib only, so it is Python but not quackd:
@@ -121,11 +129,11 @@ python web/serve.py            # then open http://localhost:8000/simulator/
 the root. If port 8000 is already a vLLM, which the table above assumes it is, then
 `python web/serve.py 8001` moves the page rather than the model server.
 
-Pick Local in the page and give it your base URL. Ollama has to be told to accept the page
-(`OLLAMA_ORIGINS=* ollama serve`), and llama.cpp, vLLM and LM Studio need the same CORS
-permission. Browsers treat `http://localhost` as trustworthy, so an https page may still call
-it. The keyboard beside the sentence box is live at the same time as the model, so you can take
-the duck off a stalled local model mid-run with `W` and the transcript records the handover.
+Either copy is driven the same way. Pick Local in the page and give it your base URL. Ollama has
+to be told to accept the page (`OLLAMA_ORIGINS=* ollama serve`), and llama.cpp, vLLM and LM
+Studio need the same CORS permission, whichever copy you opened. The keyboard beside the sentence
+box is live at the same time as the model, so you can take the duck off a stalled local model
+mid-run with `W` and the transcript records the handover.
 What the page has and has not been run against is in [web/README.md](../web/README.md).
 
 ## Honest notes
