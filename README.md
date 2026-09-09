@@ -104,13 +104,14 @@ uvx --from "quackd[openai]" quackd run find-and-kick --provider ollama --model q
 open runs/*/run.gif                                                                 # a GIF in either simulator, a transcript every time
 ```
 
-**Or run the browser demo and install no quackd at all** ([`web/`](web/): clone this repository,
-run `python web/serve.py` and open <http://localhost:8000/simulator/>. That server is one stdlib
-file, Python but not quackd). Same physics, the same two upstream policies, seven of the same
-verbs and a contract of its own, in a page. Type a sentence, paste your own API key or point it
-at Ollama, and watch what the model chose. The keyboard beside the box is live at the same time,
-so a key can take the duck off the model mid-run. It is live at
-<https://www.quackd.org/simulator>: [The browser demo](#the-browser-demo).
+**Or open the browser demo and install no quackd at all.** It is live at
+<https://www.quackd.org/simulator>, with the same physics, the same two upstream policies, seven
+of the same verbs and a contract of its own, in a page. Type a sentence, paste your own API key or
+point it at Ollama, and watch what the model chose. The keyboard beside the box is live at the
+same time, so a key can take the duck off the model mid-run. To run that same page from a
+checkout, clone this repository, run `python web/serve.py` and open
+<http://localhost:8000/simulator/>. That server is one stdlib file, Python but not quackd. The
+page is [`web/`](web/), and [The browser demo](#the-browser-demo) says what it does.
 
 Put keys in the environment or in a `.env` file (copy [`.env.example`](.env.example)). `quackd doctor` tells you what is missing. Needs Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/), nothing else.
 
@@ -484,6 +485,11 @@ You bring the key, or point it at Ollama and bring none. About 45 MB arrives the
 libraries from jsDelivr and the model and the policies from upstream's own repositories at the same
 pins Python uses, and the browser caches it afterwards. Nothing upstream is vendored here.
 
+**It is live at <https://www.quackd.org/simulator>**, served there by quackd-web, a separate
+repository, whose build fetches this directory at a pinned commit, so a change here reaches the
+page on that project's next build. `/simulator/source.json` records which commit the deployed copy
+came from. To run the same page from a checkout instead:
+
 ```bash
 python web/serve.py                 # stdlib only, no dependencies, no build step
 # then open http://localhost:8000/simulator/
@@ -492,10 +498,7 @@ python web/serve.py                 # stdlib only, no dependencies, no build ste
 The page is mounted at `/simulator` rather than at a root, so every local reference in
 `index.html` is absolute and `python -m http.server --directory web` no longer works: it serves
 the HTML and then 404s the stylesheet and the script. `web/serve.py` is that missing mount, and
-[`web/README.md`](web/README.md) explains why the mount is not a style choice. It is served at
-<https://www.quackd.org/simulator> by quackd-web, a separate repository, whose build fetches this
-directory at a pinned commit, so a change here reaches the page on that project's next build.
-`/simulator/source.json` records which commit the deployed copy came from.
+[`web/README.md`](web/README.md) explains why the mount is not a style choice.
 
 **Both ways of driving are live at once.** The sentence box and the keyboard hold the same duck at
 the same time, and neither takes turns with the other: there is no mode to flip before you can

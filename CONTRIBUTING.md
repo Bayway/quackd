@@ -47,11 +47,22 @@ directory itself, not with `http.server`:
 python web/serve.py            # then open http://localhost:8000/simulator/
 ```
 
-The page is mounted at `/simulator` in production — www.quackd.org belongs to quackd-web, a
-separate project whose build fetches this directory into its own `/simulator` — so every local
-reference in `index.html` is absolute under that prefix, and a plain `python -m http.server --directory web`
-serves the HTML and then 404s the stylesheet and the script. `web/serve.py` is stdlib only and
-mounts the directory the way the deploy does, so what you test is what ships.
+The page is mounted at `/simulator` in production, and that mount is live:
+<https://www.quackd.org/simulator> is what a visitor sees today. That domain belongs to
+quackd-web, a separate project whose build fetches this directory into its own `/simulator` at a
+pinned commit — so every local reference in `index.html` is absolute under that prefix, and a
+plain `python -m http.server --directory web` serves the HTML and then 404s the stylesheet and
+the script. `web/serve.py` is stdlib only and mounts the directory the way the deploy does, so
+the local mount is what you compare your change against, and what you test there is what ships.
+
+Merging is not shipping here. Because the deployed copy is pinned, a change to `web/` on `main`
+does not reach a visitor until quackd-web builds again. Asking it to is the whole job of
+`.github/workflows/refresh-the-simulator.yml`, which pings a Vercel deploy hook on pushes to
+`main` that touch `web/` or the workflow file itself, and on a manual `workflow_dispatch`. The
+hook is a secret (`VERCEL_DEPLOY_HOOK`), and until it exists the job says so and exits green
+rather than failing. A fork never gets that far: the job is guarded on the repository name, so
+it does nothing at all there. `/simulator/source.json` records which commit the live copy was
+built from, which is how you tell whether your change is on it yet.
 
 `tests/test_web.py` gates the directory from the ordinary suite with no browser: the ids the
 script looks up, the mount, the assets, the key that is stored nowhere, the rule that a key
