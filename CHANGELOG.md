@@ -7,79 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-09-09
+
+Two things, mainly. A run narrates itself now: the system prompt once, then per turn the
+observation the model was given, what it reasoned, the verb it chose, every executor gate that
+fired, every intent that actually reached the robot and what came back — on the terminal as it
+happens, in a `trace` list on every MCP result, and replayable afterwards with `quackd trace`.
+And there is a physics simulator, `--robot microduck:mujoco`, which is MuJoCo with upstream's
+own Microduck in it: its meshes, its trained walking policy, its 50 Hz loop and now its scene,
+with quackd supplying a twist and a head pose and writing no gait at all. A third strand landed
+in the last day: the browser demo is live at <https://www.quackd.org/simulator>, rebuilt in the
+quackd-web design language, with the keyboard and a model driving one duck at the same time and
+neither taking turns with the other.
+
+Still nothing has run on a robot, on any of the eight adapters, and the Microduck's own hardware
+ships Christmas 2026. The physics is a simulator walking on upstream's policy, not a duck, and
+nobody is in either 3D arena any more, which makes `follow-me` a cartoon-only starter. The
+browser demo has been booted in a browser, a held `W` walks the duck, a real model has been
+handed it, and a key has taken the duck back out of a live run — all of it on the machine that
+wrote it. What nobody has watched there is a run through to its own end, or the recording.
+Known limitations, below, says what each of those leaves open.
+
 ### Added
 
-- **A physics simulator, with the Microduck's own legs in it** (`--robot microduck:mujoco`,
-  needs `quackd[mujoco]`). The cartoon in `sim2d` has always said what it is: it tests the
-  agent loop, not the robot, and it will never tell you whether a gait works. `sim3d` is
-  MuJoCo, and the duck in it is upstream's: `robot_walk.xml` and its 38 meshes from
-  `microduck_rl` at a pinned commit, the `alpha_walking` and `alpha_stand` ONNX policies from
-  the Hugging Face Hub at a pinned revision, and upstream's own 50 Hz loop around them. quackd
-  supplies a twist and a head pose, which is what a gamepad supplies on the real robot, and
-  writes no gait at all. `find-and-kick` succeeds on 10 of 10 seeds with the scripted pilot
-  while the duck walks on its trained policy, ground truth checked, and on the same ten seeds
-  with the kinematic stand-in. Both are named tests; the trained-gait one needs the model in
-  the cache, and CI installs no physics extra, so it runs neither. Design:
-  `docs/adr/0030-mujoco-physics-backend.md`.
-- **Nothing of upstream's is shipped.** The 3D model files are CC BY-NC-SA, so the first run
-  downloads them into `~/.quackd/cache`, checks every file against the sha256 it was read at,
-  and writes the licence notice beside them. `QUACKD_MICRODUCK_ASSETS` points at your own
-  checkout instead, and `QUACKD_MUJOCO_BODY=puppet` runs a kinematic stand-in that needs no
-  download and is the body the tests build. CI installs no physics extra, so it runs
-  neither body; a new `physics` job is what changes that.
-- **The gait floor is in the open.** Under the model's own actuators the walking policy does
-  not step below about 0.22 m/s or 1.0 rad/s and achieves about 0.42 of what it is asked,
-  while `move` defaults to 0.15 m/s. A twist that would produce nothing is scaled up bodily,
-  keeping the ratio between its axes so an arc stays an arc; one below a third of the floor is
-  dropped rather than amplified into a lurch; and the floor, what was asked and what was sent
-  are all in the state, in the system prompt and in `extras.assumptions`. Four skills are
-  named stand-ins there too: `kick` and `grab` use the cartoon's contact rules, `sit` is
-  refused, and a fall is recovered by standing the model up, because upstream's episodic
-  policies did nothing from a standing pose and it ships no get-up policy.
-- **A browser demo, so trying quackd costs nobody an install** (`web/`, a static page with no
-  build step, live at `www.quackd.org/simulator`, which quackd-web, the separate project that owns
-  that domain, builds by fetching this directory at a pinned commit; `vercel.json` here rewrites
-  `/simulator/*` so this project also answers on the mount if it is ever deployed on its own).
-  Locally it is
-  `python web/serve.py`, then <http://localhost:8000/simulator/> — a stdlib server that mounts
-  the directory the way the deploy does. `python -m http.server --directory web` no longer
-  serves it: every local reference in `index.html` is absolute under the mount, so a root server
-  hands over the HTML and 404s the stylesheet and the script. The same physics and the same two
-  policies through MuJoCo's official WebAssembly build and onnxruntime-web, with seven of the
-  verbs, a contract of its own and the one-tool-per-turn loop in six modules of plain JavaScript.
-  Bring your own key for Anthropic, OpenAI or Gemini, or point it at Ollama and keep everything
-  on your machine. Both ways of driving a robot are live at once, and neither takes turns with
-  the other: the keyboard writes
-  the twist the hardware actually takes — `W`/`S` walk, `A`/`D` turn, `Shift` strafes, `Q`/`E`
-  look, `Space` stops, `K` kicks, `R` stands it up — while the box above it hands the same
-  robot to a model. A drive key pressed during a run takes the duck back at once, aborts the
-  run and the request in flight with it, and leaves the key that did it in the transcript;
-  `O` and the camera keys read without interrupting. The switch keeps the one job that is the
-  demo's whole argument — whether anything here reads English — and no longer decides whether
-  you may drive at all. The page wears quackd's own mark instead of an emoji, in the
-  quackd-web design language, and the arena's person marker is quackd's purple rather than the
-  blue that Python's colour detector needs and nothing in the browser reads. Runs can be
-  recorded from the canvas and shared. `tests/test_web.py` gates all of it that can be gated
-  without a browser, which is not the rendering.
-- **`walk in a square` and `walk in a circle` need no API key.** The scripted pilot learned
-  two shapes, and both close the loop on the pose the robot reports rather than on a
-  stopwatch, so a body that delivers half of what it was asked still walks the shape. That is
-  also the correction a model makes, which is the point of them being here.
-
-- **quackd narrates itself now, on both surfaces, on by default.** Ask it to walk in a circle
-  and the terminal used to print a header, an outcome and a run directory. It now shows the
-  whole conversation as it happens: the system prompt once, then per turn the observation the
-  model was given, what it reasoned, the tool it chose with its parameters, the tokens and the
-  latency, every executor gate that fired and why, every intent that actually went to the
-  robot, and what came back. A steering loop's burst becomes one line with real ranges
-  (`-> move x26 over 0.5 s (vx 0.1..0.2, wz -0.01..0.88)`), because `go_to` recomputes its
-  twist every 100 ms and a line per intent would be two hundred lines. Over MCP, where the
-  pilot is the client and its reasoning is not quackd's to see, every call that reaches an
-  executor comes back with a `trace` list of the same lines, capped at thirty, with the
-  uncapped version on the server's stderr. `--no-trace` or `QUACKD_TRACE=0` turns the views
-  off. The transcript is unaffected either way: it is the record, and it now carries
-  `llm_request`, `verb_start`, `gate`, `intent`, `verb_end` and `note` alongside the kinds it
-  always had ([ADR-0029](docs/adr/0029-tracing.md),
+- **quackd narrates itself now, on both surfaces, on by default.** Ask it to walk in a circle and
+  the terminal used to print a header, an outcome and a run directory. It now shows the whole
+  conversation as it happens: the system prompt once, then per turn the observation the model was
+  given, what it reasoned, the tool it chose with its parameters, the tokens and the latency,
+  every executor gate that fired and why, every intent that actually went to the robot, and what
+  came back. A steering loop's burst becomes one line with real ranges (`-> move x26 over 0.5 s
+  (vx 0.1..0.2, wz -0.01..0.88)`), because `go_to` recomputes its twist every 100 ms and a line
+  per intent would be two hundred lines. Over MCP, where the pilot is the client and its reasoning
+  is not quackd's to see, every call that reaches an executor comes back with a `trace` list of
+  the same lines, capped at thirty, with the uncapped version on the server's stderr. `--no-trace`
+  or `QUACKD_TRACE=0` turns the views off, and `QUACKD_TRACE_THINKING` caps how much reasoning
+  each turn prints — 2000 characters by default, `all` for everything, `0` for none — because on a
+  thinking model the reasoning is otherwise longer than everything else on the screen put
+  together. Every knob this release adds is in `.env.example` — the tracing
+  ones, the physics ones, and `QUACKD_OPENAI_API` and `QUACKD_OPENAI_REASONING_EFFORT`, which
+  the Responses entry under Fixed explains — bar three that only the test suite reads:
+  `QUACKD_REQUIRE_GL`, `QUACKD_LIVE_LLM` and `QUACKD_LIVE_LLM_MODEL`. The transcript is unaffected either
+  way: it is the record, and it now carries `llm_request`, `verb_start`, `gate`, `intent`,
+  `verb_end` and `note` alongside the kinds it always had ([ADR-0029](docs/adr/0029-tracing.md),
   [docs/architecture.md](docs/architecture.md#trace)).
 - **A flock narrates itself too, one robot per column.** `docs/flock.md` promised a per robot
   transcript and the file held nothing but frames: a member built its executor with no tracer,
@@ -97,9 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--thinking all|N` sets how much reasoning to show, and `--frames` adds a line per camera
   frame. It prints on stdout, because a replay is what you pipe. A flock run replays every
   member under its own name.
-- **A switch for the system prompt.** It is forty to sixty lines, worth reading once and
-  tiresome on the fiftieth run of an afternoon. `--no-trace-prompt` or `QUACKD_TRACE_PROMPT=0`
-  drops it and keeps everything else; the transcript has it either way.
+- **A switch for the system prompt.** It is forty to seventy lines — measured across the
+  fourteen shipped ducks on `microduck:sim2d`, and longer again with memory lines or on
+  `microduck:mujoco`, where ten assumptions and a longer note about the arena join it — worth
+  reading once and tiresome on the fiftieth run of an afternoon. `--no-trace-prompt` or
+  `QUACKD_TRACE_PROMPT=0` drops it and keeps everything else; the transcript has it either way.
 - **A long burst is shown as it happens.** A twenty second `go_to` used to print nothing until
   it ended, because a burst of intents is coalesced into one line and the line was only written
   when something else happened. A burst still going after two seconds is now flushed as it
@@ -121,6 +92,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not separate. Every one degrades on its own: a model that rejects the request parameter gets
   one retry without it and the run carries on with no thinking text. Reasoning token counts
   ride along in `usage` where the vendor reports them.
+- **A physics simulator, with the Microduck's own legs in it** (`--robot microduck:mujoco`,
+  needs `quackd[mujoco]`). The cartoon in `sim2d` has always said what it is: it tests the
+  agent loop, not the robot, and it will never tell you whether a gait works. `sim3d` is
+  MuJoCo, and the duck in it is upstream's: `robot_walk.xml` and its 38 meshes from
+  `microduck_rl` at a pinned commit, the `alpha_walking` and `alpha_stand` ONNX policies from
+  the Hugging Face Hub at a pinned revision, and upstream's own 50 Hz loop around them. quackd
+  supplies a twist and a head pose, which is what a gamepad supplies on the real robot, and
+  writes no gait at all. `find-and-kick` succeeds on 10 of 10 seeds with the scripted pilot
+  while the duck walks on its trained policy, ground truth checked, and on the same ten seeds
+  with the kinematic stand-in. Both are named tests, and both run in CI on the two schedules
+  under Changed. Design: `docs/adr/0030-mujoco-physics-backend.md`.
+- **Nothing of upstream's is shipped.** The 3D model files are CC BY-NC-SA, so the first run
+  downloads them into `~/.quackd/cache`, checks every file against the sha256 it was read at,
+  and writes the licence notice beside them. `QUACKD_MICRODUCK_ASSETS` points at your own
+  checkout instead, and `QUACKD_MUJOCO_BODY=puppet` runs a kinematic stand-in that needs no
+  download and is the body the tests build. `QUACKD_CACHE_DIR` puts the cache somewhere other
+  than `~/.quackd`.
+- **The gait floor is in the open.** Under the model's own actuators the walking policy does
+  not step below about 0.22 m/s or 1.0 rad/s and achieves about 0.42 of what it is asked,
+  while `move` defaults to 0.15 m/s. A twist that would produce nothing is scaled up bodily,
+  keeping the ratio between its axes so an arc stays an arc; one below a third of the floor is
+  dropped rather than amplified into a lurch; and the floor, what was asked and what was sent
+  are all in the state, in the system prompt and in `extras.assumptions`. Four skills are
+  named stand-ins there too: `kick` and `grab` use the cartoon's contact rules, `sit` is
+  refused, and a fall is recovered by standing the model up, because upstream's episodic
+  policies did nothing from a standing pose and it ships no get-up policy.
+- **You can watch the physics, and record it.** `--gif` on `microduck:mujoco` writes the same
+  two-pane recording the cartoon writes, except both panes are MuJoCo renders and the recorder
+  samples half as often, because drawing a physics world is what costs. `--gif-size` stopped
+  being a sim2d-only flag — its help says "Simulators" now, and it is bounded 64 to 1024 against
+  the offscreen buffer the scene actually allocates. `--live` opens MuJoCo's own passive viewer
+  rather than the pygame window: orbit, pan and the contact overlay, kept in step with the
+  robot's clock, its close button raising the same interrupt. On macOS that viewer must own the
+  main thread, so it fails with a sentence telling you to run the same command under `mjpython`
+  instead of `python`.
+- **A real model driving the physics simulator, opt-in twice.** This is the first time an actual
+  LLM has been put in front of this arena at all, which is why it sits here rather than among the
+  verification work under Changed. Everything else in the suite fakes the brain: `FakeProvider`
+  scripts the verbs and proves the loop, the executor and the world, and nothing showed that a
+  model handed this arena gets anywhere in it. `tests/test_llm_in_the_simulator.py` runs one
+  against MuJoCo: `hello-world` end to end, and a goal asking for the person who is no longer
+  there — which is the one worth the tokens, because without the arena note in the prompt the
+  honest reading of `search_scan(target="person")` is to keep scanning, and the run spends its
+  whole budget on a lap of an empty room. The live tests cost money and need the network, so
+  they are opt-in twice, by a `live_llm` marker and `QUACKD_LIVE_LLM=1`; CI sets neither and a
+  bare `pytest` runs neither. They read `.env` the way the CLI does, and `QUACKD_LIVE_LLM_MODEL`
+  is what points them at a second model, which is how both of the OpenAI API paths under Fixed
+  get exercised. The third test, that the prompt tells the model the arena is empty, needs no key
+  and no network — and it is gated behind the `mujoco` extra and named in no CI job, so today it
+  runs on a developer's machine and nowhere else. None of this makes a real model part of a
+  build: no job in this repository sends a request to a provider, and the release is still tested
+  with a scripted pilot.
+- **`walk in a square` and `walk in a circle` need no API key, on the command line.** The
+  scripted pilot learned two shapes, and both close the loop on the pose the robot reports
+  rather than on a stopwatch, so a body that delivers half of what it was asked still walks the
+  shape. That is also the correction a model makes, which is the point of them being here.
+- **A browser demo, so trying quackd costs nobody an install** (`web/`, a static page with no
+  build step, live at `www.quackd.org/simulator`). quackd-web, the separate project that owns
+  that domain, builds it by fetching this directory at a pinned commit, and `vercel.json` here
+  rewrites `/simulator/*` so this project also answers on the mount if it is ever deployed on
+  its own. Locally it is `python web/serve.py`, then <http://localhost:8000/simulator/> — a
+  stdlib server that mounts the directory the way the deploy does. `python -m http.server
+  --directory web` no longer serves it: every local reference in `index.html` is absolute under
+  the mount, so a root server hands over the HTML and 404s the stylesheet and the script.
+- **The same physics and the same two policies, in a tab.** MuJoCo's official WebAssembly build
+  and onnxruntime-web run `alpha_walking` and `alpha_stand`, with seven of the verbs, a contract
+  of its own and the one-tool-per-turn loop in six modules of plain JavaScript. Bring your own
+  key for Anthropic, OpenAI or Gemini, or point it at Ollama and keep everything on your
+  machine. A run can be recorded from the canvas and shared.
+- **Both ways of driving are live at once, and neither takes turns with the other.** The
+  keyboard writes the twist the hardware actually takes — `W`/`S` walk, `A`/`D` turn, `Shift`
+  strafes, `Q`/`E` look, `G` centres the head, `Space` stops, `K` kicks, `R` stands it up —
+  while the box above it hands the same robot to a model. A drive key pressed during a run
+  takes the duck back at once, aborts the run and the request in flight with it, and leaves the
+  key that did it in the transcript; `O` and the camera keys read without interrupting, and
+  `Esc` hands the keyboard back to the arena from wherever focus is. The switch keeps the one
+  job that is the demo's whole argument — whether anything here reads English — and no longer
+  decides whether you may drive at all.
+- **The page wears quackd's own mark, and points back at what it is a demo of.** It is in the
+  quackd-web design language rather than an emoji and a default stylesheet. The brand lockup is
+  the way home, and "What is this?" answers with the product page rather than a build guide.
+  Both are absolute `https://www.quackd.org/` URLs rather than a bare `/`, because this file is
+  fetched into another project's build and `web/serve.py` redirects the local root straight back
+  to `/simulator/`.
+- **The demo is one screen, and its bays have names.** A first-time visitor landed, saw the
+  arena, typed a sentence, pressed Run and got an error about a credential the page had never
+  shown them: the key box and the key map were both below the fold, and no wording fixes that.
+  The switch and the key box are a full-width band across the top now, the arena takes what is
+  left of the viewport rather than a fixed fraction of it, and the keycaps run down its right
+  side, so both ways of driving are on screen from the first frame. Checked by resizing one
+  browser on the machine that wrote it, at 1920x1080, 1440x900, 1366x768, 1366x641 and
+  1280x720, with no horizontal scroll down to 360. The numbered bays 01-04 are headings that
+  say what they are: `Your API key`, `Command the duck`, `Drive the duck` and `Transcript`.
 
 ### Changed
 
@@ -131,7 +195,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is never returned by any model. `QUACKD_THINKING_DISPLAY=omitted` opts out.
 - **Gemini's thought parts no longer land in the answer.** They were appended to `text`
   regardless, so with thoughts on they would have been replayed to the model next turn as
-  things it had said.
+  things it had said. `QUACKD_GEMINI_THOUGHTS=0` stops quackd asking for them at all.
 - **The transcript flushes on events, not on every intent.** The flush was a syscall on the
   event loop between two deadman resends of a steering verb. Loss on a hard kill is now bounded
   by the text buffer and ends at every `verb_end`.
@@ -147,31 +211,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end with an outcome, through a `finally`. Seven exits used to leave nothing behind, among
   them the two that matter most: a verb cancelled mid-flight by a kill switch or a heartbeat
   failure, and the repeat-failure abort.
-
-- **A documentation pass for 0.7.0, for fewer words rather than more.** The README lost about
-  a fifth of its length: the table that listed all eight bodies a third time is gone, the bullet
-  list that repeated the status table is gone, the "since 0.4" release narration is gone, and
-  the tagline no longer names four bodies out of eight. Every count and claim in the living
-  docs was then read against the code, twice, and the second read is where the value was.
-- **Three documented commands could not run, all the same way.** `quackd list-verbs` takes only
-  `--robot`, so the one line on `docs/adapters/lerobot.md` and on `docs/adapters/rosbridge.md`
-  that reaches a real robot exits 2 on an unknown option, and step 7 of the ToddlerBot checklist
-  did too. Worse than failing, that step could not have done its job even without the flag:
-  `list-verbs` builds its table from the static description, so `move` is absent whether or not
-  a walk checkpoint is staged. All three are `quackd doctor --robot X --address Y` now, which is
-  the command that connects and reports what the robot itself said.
-- **Two safety claims were the wrong way round.** `docs/adapters/xlerobot.md` told an owner that
-  when a camera takes down the observation stream "the arms keep holding their last goal under
-  torque, which is what you want". Upstream's host at the pin calls `get_observation()` outside
-  its inner `try`, so that exception leaves the loop and reaches `finally: robot.disconnect()`,
-  which is the torque-off path: the arms go limp and drop what they hold, and the watchdog never
-  fires because the loop that checks it is gone. The hour-mark exit takes the same path, which
-  the XLeRobot checklist now says at the step about the clock. And the README claimed a verb
-  timeout aborts the run; the executor stops the robot and returns a failed result, which the
-  model then sees.
+- **The arena is upstream's own scene, and the head camera is the one place it cannot go.**
+  `sim3d` no longer draws a world quackd invented. It builds upstream's: the blue-grey checker
+  with edge marks, the gradient skybox, the haze, the headlight at ambient 0.3 and the
+  directional light overhead, and the viewer's own azimuth 160 and elevation -20, all taken from
+  the `scene*.xml` wrappers in `microduck_rl`, so a duck here stands where a duck there stands.
+  Shadows are upstream's default and the largest render cost there is, so they are a switch,
+  `QUACKD_MUJOCO_SHADOWS`, rather than a constant. The head camera is the exception, for a
+  measured reason under Fixed: it keeps the same checker with the colour taken out, in a geom
+  group hidden from every human view including the live viewer, and no skybox. That split is a
+  stand-in like the others, so it is a ninth line in `extras.assumptions` and in
+  [ADR-0030](docs/adr/0030-mujoco-physics-backend.md), and it is worth saying plainly that the
+  model's camera does not see what any recording of the same run shows. The README hero was
+  re-recorded in the new scene at the same seed, and again once the arena emptied so that the
+  picture shows the world this release ships: 2.72 m walked, the square closed 0.14 m from where
+  it started, both times. `MicroduckBody` draws nothing from the world's shared generator, so
+  removing the person moved neither number.
+- **Nobody is in the 3D arena, and the cartoon is the only simulator with a person in it.** The
+  marker is gone from both 3D worlds — the MuJoCo one in `quackd/sim3d/` and the browser demo —
+  while `sim2d` keeps its own, so this is the single place the two arenas differ. What it costs
+  is a starter: `follow-me` is a task about following somebody and cannot succeed on
+  `microduck:mujoco`, and `patrol-and-quack` still runs there with its person clause gone
+  vacuous, leaving three walk legs. Both `.duck` files are untouched, because their hashes are
+  pinned in the goldens and they are right for the cartoon they were written for, so nothing
+  stops you pointing `follow-me` at the physics backend and nothing pretends it will get
+  anywhere; the README and `docs/faq.md` say which starter is now cartoon-only. What it does not
+  cost is the seed: the cartoon draws its person from the RNG after the duck and the ball, so
+  dropping that draw leaves every seeded duck and ball position bit-identical between the two
+  simulators, checked at all ten seeds, and the parity test was not loosened for it: it still
+  holds both arenas to the same duck pose and the same ball, the ball to the millimetre it always
+  allowed. What did move is everything downstream of that draw on the shared generator — the
+  puppet's gait noise, the kick skew, the scoop coin-flip — so the ten-seed `find-and-kick`
+  sweep was re-run under `QUACKD_STRICT_SEEDS=1` on both bodies and still passes 10 of 10. The
+  model is told outright rather than left to infer it: the mujoco branch of the system prompt
+  says nobody is in the arena and that a `person` detection is scenery misread, and the demo's
+  own contract says the same. `search_scan` still offers `person` as a target and the head
+  camera's detector still carries the person hue band, because one verb registry and one
+  detector serve the cartoon, YOLO on a real camera and this, which is why the colourless floor
+  under Fixed stays and why its guard got stricter. `people` has left the 3D snapshot and
+  `extras`, the `person` flag has left the world's constructor, and a tenth line joins
+  `extras.assumptions` ([ADR-0030](docs/adr/0030-mujoco-physics-backend.md) and
+  [docs/faq.md](docs/faq.md) amended).
+- **`quackd doctor` reports the physics backend's upstream too.** Every run of the command now
+  ends with a `microduck_rl` table: the UNVERIFIED count with each one's note, the `microduck_rl`
+  pin and the policy revision with the date they were read at, the VERIFIED count, and the line
+  that the model and the policies are fetched at run time and never shipped. It is the one place
+  that limit is stated in the tool rather than in a document — and it is a different limit from
+  the hardware adapters', because this upstream is measured here, on one machine, rather than
+  never run at all. `mujoco` joins doctor's list of optional extras, and the `microduck` row in
+  `list-adapters` gained the `mujoco` backend with the extra named in its status line.
+- **A documentation pass over everything 0.7.0 shipped, for fewer words rather than more.** The
+  README lost about a fifth of its length: the table that listed all eight bodies a third time is
+  gone, the bullet list that repeated the status table is gone, the "since 0.4" release narration
+  is gone, and the tagline no longer names four bodies out of eight. Every count and claim in the
+  living docs was then read against the code, twice, and the second read is where the value was.
+  What it found that would have stopped a reader dead — four commands that could not run and two
+  safety claims printed the wrong way round — is under Fixed, with the other things that were
+  broken rather than merely wordy.
 - **The rest of what reading found.** The README said the AlohaMini's arm verbs appear only with
   quackd's host wrapper, when they exist and refuse without it, which is the distinction the
-  Open Duck row two lines up exists to make. The Open Duck's camera capability comes from
+  README's own Open Duck row exists to make. The Open Duck's camera capability comes from
   `--camera-url` and not from `duck_config.json`, so the checklist's abort note stopped an owner
   at a correctly built duck; `FALL_SIGNAL` described an IMU read the daemon does not do; the
   sound row said the bridge resolves a mood to a file when it presses the pad's random-sound
@@ -190,16 +289,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that de-torque on disconnect when there are four, and `SECURITY.md` claimed a version
   handshake and a `doctor` read-out that the AlohaMini wrapper and `doctor` do not do. The rest
   is release-history narration deleted from pages that describe quackd as it is now.
+- **A second reading, and the three claims a user would have acted on.** `docs/mcp.md` told an
+  operator that after a transport failure every later call to that robot is refused. `stop` is
+  exempt and still runs, which the refusal text itself says, so the page took the brake away at
+  exactly the moment a pilot reaches for it. `docs/flock.md` offered a duck falling in
+  `microduck:mujoco` as the way to exercise fall handling, when both the CLI and the runner
+  refuse a flock member that is not `sim2d`, so the route landed the reader on an error naming
+  that very page — a flock is still simulator-only and still cartoon-only, and the physics
+  backend does not fly in one. And the README's status table said the trained-gait sweep runs on
+  a developer's machine when it runs nightly in CI, which undersold what is actually verified.
+  Fourteen smaller ones behind them, across eleven files: the loop's fifth outcome (`error`)
+  missing from two documents; `trace` still absent from `docs/architecture.md`'s command list, an
+  edit written during the tracing work that silently did nothing because the script asserted on
+  the aggregate rather than per replacement; the README intro promising the cartoon to "the other
+  seven bodies" when the LeRobot arm, a rosbridge base and the XLeRobot ship a mock and nothing
+  else; the replay row never saying stdout while the configuration row two sections down says the
+  trace is on stderr, which points a reader at `2>` and an empty file; and a prose list of the
+  transcript's kinds above `docs/architecture.md`'s own table of them, drifted by six kinds.
 - **CI ends a hung test run in minutes, with every thread's stack.** A 20 minute job timeout,
   pytest's own `faulthandler_timeout` at 300 s, and an exit watchdog in `tests/conftest.py`
   that dumps every thread and forces the exit if the interpreter has not gone two minutes after
   pytest is done, flushing first so the failure report survives. The first hang it caught had
   run for six hours three times and named nothing; with it, the same hang failed in five
   minutes with the frame in the log.
-
 - **CI runs the physics backend, and the browser demo has a floor under it.** A `physics` job
   installs `quackd[mujoco]` and runs the two sim3d modules against a software rasteriser, so
-  about 1,200 lines that skipped on all six runners now execute somewhere. It sets
+  36 tests that skipped on all six runners now execute somewhere. It sets
   `QUACKD_REQUIRE_GL=1`, because a job whose purpose is to run tests that skip has to fail
   when they skip. A nightly `microduck-assets` job fetches upstream's real model the way a
   user's first run does, into a runner that is then destroyed, and runs the trained-gait
@@ -207,6 +322,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   those meshes. `tests/test_web.py` checks the browser demo without a browser: the ids the
   script looks up, the rule that was hiding nothing, static CDN imports, key storage, the pins
   and gait numbers shared with Python, and `node --check` on each module.
+- **The demo's deployment moved off GitHub Pages, and a merge to `web/` does not reach a visitor
+  by itself.** `.github/workflows/pages.yml` is deleted. It was the one thing on this repository
+  that stayed permanently red, failing at configure-pages on a repository where Pages was never
+  enabled, and it was never the deployment this project uses: the address it promised was a
+  github.io one that would have 404ed. `vercel.json` replaces it, with the install and the build
+  stubbed out because there is nothing to build — every dependency in that directory is a CDN URL
+  the page fetches at run time. And because quackd-web fetches this directory at build time, a
+  push to `main` touching `web/` pings a deploy hook
+  (`.github/workflows/refresh-the-simulator.yml`) asking that site to rebuild. It is inert until
+  `VERCEL_DEPLOY_HOOK` exists — a missing secret says so and exits zero, rather than showing a
+  fork a red mark for a deployment nobody configured — it runs only on this repository, and
+  `curl --fail` is deliberate, so a hook that has quietly died cannot look like a working one.
+  That last part is the one a contributor needs: for this directory, merging is not shipping.
 - **The 10 of 10 claim has a test.** `test_find_and_kick_on_the_real_duck` runs the same ten
   seeds on upstream's trained gait rather than the stand-in, and asserts the body really is
   the trained one first, because a silent fall back to the puppet passing it is the point.
@@ -241,6 +369,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   measured on the real model, a duck facing +x that goes onto its nose reads as yaw 3.14. It
   now comes from the trunk's own forward axis, the duck is pushed clear of anything it landed
   on, and the twist that put it down is cleared rather than resumed.
+- **The duck reported a person standing in front of it, in every single frame.** Upstream's floor
+  and the person marker that was then in the arena could not share a camera. Measured off a
+  rendered frame, the checker sits at hue 105 with saturation to 185 and value to 229 and the
+  marker at hue 114, saturation 185, value 197: they overlapped on all three channels, so no
+  threshold separated them, and the skybox does the same thing above an 8 cm wall. With the scene
+  as upstream ships it the colour detector reported somebody standing 0.12 m ahead in 48 frames
+  out of 48, whichever way the duck faced. The head camera now looks at the same checker with the
+  colour taken out, in a geom group hidden from every human view, and at no sky: phantoms went 48
+  of 48 to 0 of 32 on the sweep that now guards it, and both seeded sweeps still pass 10 of 10.
+  Nothing caught it before because the parity test only ever asserted about the ball; three tests
+  do now, one sweeping four seeds by eight headings and counting every person reported at any
+  range, where it used to excuse anything beyond a duck's own radius, one pinning which floor the
+  camera collides with, and one holding this arena to having nobody in it. That the marker left
+  the physics world in the same pass is why the two floors stay and why the guard could tighten:
+  upstream's checker is still the blue the detector calls a person, that band still has to be
+  there for the cartoon, and with nobody left to weigh a detection against, every person reported
+  from here is scenery.
 - **The stand-ins were told to the transcript and not to the model.** `extras.assumptions` is
   what a backend says quackd stands in for, and only `FakeProvider` ever read it: every real
   provider sends `obs.text`, built from `DuckState.summary()`, and neither had a branch for it.
@@ -300,6 +445,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The three thinking fallbacks match the errors they were written for.** A 400 about a
   replayed thinking block disabled thinking and retried the same request, and Gemini retried
   any error whose text happened to contain the word.
+- **A model that will not take function tools on Chat Completions can still drive the robot.**
+  Some reasoning models refuse function tools on `/v1/chat/completions` and say so in a 400 that
+  offers two remedies, of which only one exists: `reasoning_effort="none"` comes back from
+  `gpt-6-astra` as an unsupported value for that model, and the tools are refused at `low`,
+  `medium`, `high` and `xhigh` alike and with no effort field at all. Probed directly,
+  chat/completions with tools fails four ways there while `/v1/responses` with tools returns a
+  clean `function_call`. Every verb quackd has is a function tool, so for such a model Chat
+  Completions is not a degraded path, it is no path: before this, pointing quackd at one ended
+  the run at the first call with a `ProviderError` and nothing but a different model to try. The
+  provider now reads that 400, moves the whole run to the Responses API and stays there rather
+  than paying a failed call every turn, and it matches on what the API said rather than on a
+  model name, so an unrelated 400 still surfaces. The two APIs agree on almost no field name, so
+  Responses gets its own renderer and parser beside the existing pair: tools go flat, the system
+  prompt becomes `instructions`, history becomes `function_call` and `function_call_output` items
+  keyed by `call_id` — the item `id` is a 400 — images are `input_image`, and the usage counts
+  live under different names. `QUACKD_OPENAI_API=responses` starts there without waiting to be
+  told; `QUACKD_OPENAI_REASONING_EFFORT` sets the effort on either API and is sent only when set,
+  so `gpt-5` and every OpenAI-compatible server are untouched. Verified on the physics simulator
+  end to end rather than at the first call: `gpt-6-astra` runs `hello-world` to
+  `declare_success` and gives up correctly on the person who is no longer in the arena, with
+  images and tool results flowing over Responses throughout.
 - **The MCP server logs each call as one block when it ends**, so two calls at once are two
   readable blocks rather than an interleaving, and the heartbeat's own note and stop reach
   stderr the moment they happen instead of being attributed to whichever call was open. A
@@ -312,10 +478,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   summary recorded a default string, and the CLI printed a traceback. The call that failed is
   now in the transcript with its error and its latency, `run_end` says what happened, and the
   CLI answers in one line like every other failure.
+- **Three documented commands could not run, all the same way.** `quackd list-verbs` takes only
+  `--robot`, so the one line on `docs/adapters/lerobot.md` and on `docs/adapters/rosbridge.md`
+  that reaches a real robot exits 2 on an unknown option, and step 7 of the ToddlerBot checklist
+  did too. Worse than failing, that step could not have done its job even without the flag:
+  `list-verbs` builds its table from the static description, so `move` is absent whether or not
+  a walk checkpoint is staged. All three are `quackd doctor --robot X --address Y` now, which is
+  the command that connects and reports what the robot itself said.
+- **A fourth could not run, for a different reason.** The sixty-second block's
+  `uvx --from "quackd[anthropic]" ... --robot microduck:mujoco` is the one line in the repository
+  joining bring-your-own-key to the trained gait, which is the thing in this release most worth
+  trying, and it installs the SDK and no physics: the extras are independent, so the backend
+  refuses before anything happens. It asks for both now. The provider table below it had the same
+  gap — every row ran the cartoon, because no row named a robot — and it now says how to put the
+  same model on the physics simulator.
+- **Two safety claims were the wrong way round.** `docs/adapters/xlerobot.md` told an owner that
+  when a camera takes down the observation stream "the arms keep holding their last goal under
+  torque, which is what you want". Upstream's host at the pin calls `get_observation()` outside
+  its inner `try`, so that exception leaves the loop and reaches `finally: robot.disconnect()`,
+  which is the torque-off path: the arms go limp and drop what they hold, and the watchdog never
+  fires because the loop that checks it is gone. The hour-mark exit takes the same path, which
+  the XLeRobot checklist now says at the step about the clock. And the README claimed a verb
+  timeout aborts the run; the executor stops the robot and returns a failed result, which the
+  model then sees.
 - **`--dry-run` never showed the intents it promised.** `docs/safety.md` has always said it
   prints every intent a model would send; the dry-run branch logged a verb name, and only
   under `--verbose`. The trace now names the verb and the parameters it would have sent.
-
 - **A failed ZeroMQ test could hold the interpreter's exit forever.** pyzmq's `Context.__del__`
   closes each surviving socket with its own linger, which defaults to forever, and a test that
   fails never reaches its `close()`, so one flaky assertion held three macOS CI jobs for six
@@ -326,6 +514,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a loaded runner cannot keep and could read the fake's last observation as fresh; it uses the
   host's own window now and drains the socket once after the host stops, so the silence it
   asserts is silence.
+- **Two SVGs shipped in every published package.** The sdist excluded `docs/assets/*.gif` and
+  `*.png` under a comment saying no published artefact needs those images, and `contributors.svg`
+  and `logo.svg` matched neither pattern, so both went out in every release so far. Only the GIF
+  is licence-critical — it renders upstream's CC BY-NC-SA model, and the published package has to
+  stay wholly Apache-2.0 — but that exclude is the rule keeping it out and nothing tested the
+  rule. Every image under `docs/assets` now has to be matched by a pattern, with the reason in
+  the failure message. The two scripts living beside those images, one of which builds the README
+  hero, were outside ruff and mypy for the same reason and are under both now.
 - **mypy on Python 3.12 rejected the ToddlerBot daemon's fake body.** The lock resolves numpy
   2.2 there, whose stubs infer a fixed one-dimensional shape from `np.full` and refuse the
   `asarray(...).copy()` stored into the same attribute, so it is annotated shape-free now. The
@@ -340,6 +536,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so a jammed joint is not waited on forever. Found because the test that covers this settles a
   full-scale slew inside a wall-clock budget, and a loaded macOS runner is slow enough to miss
   it; that test now uses the real default and a second one checks the rule arithmetically.
+
+### Known limitations
+
+- **Nothing has run on hardware, on any of the eight adapters.** Unchanged since 0.7.0, which
+  lists each one and the lookout task to point at a body first. The Microduck's own hardware
+  ships Christmas 2026. What the physics backend adds is a simulator, not a robot: `sim3d` walks
+  on upstream's trained policy and matches upstream's own numbers, but a duck in MuJoCo is still
+  a duck in MuJoCo.
+- **The browser demo starts, the hand works, and the loop has now been watched once.** The page
+  has been booted in a browser on the machine that wrote it, and a held `W` walks the duck. A
+  real model has been handed the page and answered: `gpt-5` read the arena and returned
+  `move(vx=0.26, duration_s=0.6)` about seven seconds in, one request, no page errors. `W` then
+  took the duck back out of that live run, and the transcript named the key that did it and
+  ended the run as aborted. Both were watched once, headless, on that same machine. Nobody has
+  watched a run reach its own end, the recording, the switch thrown mid-run, or the page on any
+  other browser, screen or machine. `tests/test_web.py` is the floor under that, and
+  a floor is all it is: it runs without a browser, so it cannot watch anything render. The demo
+  also loads exactly two learned policies, `alpha_walking` and `alpha_stand`; its kick is a
+  scripted impulse in the cartoon's cone, not a policy; and it has no scripted pilot, so the
+  pre-filled goal still needs a key or a local server before anything happens.
+- **The physics backend's upstream is measured here, on one machine.** `quackd doctor` prints
+  that table rather than leaving it in a document, because it is a different claim from the
+  hardware adapters': not "never run" but "run once, by one person, on one laptop". Four edges
+  come with it. The head camera deliberately sees a floor no human view shows, so what the model
+  perceives and what the GIF records are not the same picture — and the GIF is one change behind
+  besides: `docs/assets/hero3d.py` stopped drawing a person in this release and
+  `quackd-on-off.gif` was not re-rendered after it, so the animation the README leads with still
+  shows a blue marker in both of its top-down insets, in an arena this release says has nobody in
+  it. Nobody is in the physics arena, so `follow-me` is a cartoon-only starter and
+  `patrol-and-quack` on `microduck:mujoco` is a patrol with nobody to announce. A flock member
+  must be `sim2d`, so the physics backend does not fly in a flock. And `--live` on macOS needs
+  the command run under `mjpython`, because MuJoCo's viewer must own the main thread.
+- **Non-Anthropic default model IDs are unverified.** Override with `QUACKD_MODEL`. One
+  qualification this release earns and no more: `gpt-5`, the OpenAI default, drove whole runs on
+  the physics simulator while the Responses path above was being written, on one machine on one
+  afternoon. That is enough to know the ID answers and takes tools, and not enough to move it out
+  of this bullet; the README's configuration table still lists all three as unverified. Gemini's
+  default and Grok's have never been sent a request.
 
 ## [0.7.0] — 2026-09-07
 
@@ -1378,7 +1612,9 @@ First release: sim-first, honest about hardware.
 - The README hero is a scripted-pilot recording; a real-model recording needs an API key.
 - Non-Anthropic default model IDs are unverified; override with `QUACKD_MODEL`.
 
-[Unreleased]: https://github.com/rokbenko/quackd/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rokbenko/quackd/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/rokbenko/quackd/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/rokbenko/quackd/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rokbenko/quackd/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rokbenko/quackd/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rokbenko/quackd/compare/v0.3.0...v0.4.0

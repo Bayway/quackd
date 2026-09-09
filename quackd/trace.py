@@ -69,7 +69,7 @@ def thinking_limit_default() -> int | None:
 
 def prompt_shown_default() -> bool:
     """Whether the console prints the system prompt once at the start: `QUACKD_TRACE_PROMPT`.
-    It is forty to sixty lines, worth reading once and tiresome on the fiftieth run of an
+    It is forty to seventy lines, worth reading once and tiresome on the fiftieth run of an
     afternoon, and it is in the transcript either way."""
     return os.environ.get("QUACKD_TRACE_PROMPT", "1").strip().lower() not in _OFF
 
