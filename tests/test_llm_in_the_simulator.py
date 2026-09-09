@@ -60,9 +60,17 @@ def _live_or_skip() -> None:
 
 
 def _provider(goal: str | None = None):
+    """`QUACKD_LIVE_LLM_MODEL` points these at another model.
+
+    Worth doing at least once per model family, because the wire is not the same for all of
+    them: `gpt-6-astra` refuses function tools on Chat Completions and the provider moves the
+    whole run to the Responses API, which is a different renderer, a different parser and a
+    different shape of history. These tests are what proves that path carries a real run and
+    not just a first call.
+    """
     from quackd.agent.providers.factory import make_provider
 
-    return make_provider("openai", goal=goal)
+    return make_provider("openai", model=os.environ.get("QUACKD_LIVE_LLM_MODEL"), goal=goal)
 
 
 # ── the prompt, which needs no key ──────────────────────────────────────────────────────
