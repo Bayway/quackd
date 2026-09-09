@@ -6,7 +6,7 @@ A biped falls in 0.3 s; an LLM answers in 3 s. Everything here follows from that
 
 | Layer | Owner | What it guarantees |
 |---|---|---|
-| Body | the robot's own controller | **Whatever that particular body actually offers, which is not the same everywhere.** The Microduck's `robotd` gives joint and thermal clamps, fall detection and a **deadman**: velocity goes to zero when `robot.move` notifications stop. An Open Duck Mini v2 gives *none of those* — no fall detection, no thermal clamp, no deadman of its own (its command source is a local gamepad, which is never silent), and no way to get up if it goes over; its deadman is quackd's own daemon on the Pi, and the human watching is the only fall detector. The body is still the sole safety authority: clients send intents, never motor writes. What each body offers is declared in its manifest's `safety_authority`, and `quackd doctor` prints what the robot itself reported (see "On other bodies"). |
+| Body | the robot's own controller | **Whatever that particular body actually offers, which is not the same everywhere.** The Microduck's `robotd` gives joint and thermal clamps, fall detection and a **deadman**: velocity goes to zero when `robot.move` notifications stop. An Open Duck Mini v2 gives *none of those*: its deadman is quackd's own daemon on the Pi and the human watching is its only fall detector (details under "On hardware"). The body is still the sole safety authority: clients send intents, never motor writes. What each body offers is declared in its manifest's `safety_authority`, and `quackd doctor` prints what the robot itself reported (see "On other bodies"). |
 | Conversation | quackd `Executor` | The LLM and MCP clients can only do what the `.duck` allows, as often as the budget allows, with a human in the loop where the contract says so. |
 | Session | quackd `Heartbeat` + `KillSwitch` | A dead transport or a worried human ends in a `stop` intent. |
 
@@ -17,16 +17,23 @@ this order: abort flag (`stop` is exempt, so the brake still works) → **allowl
 (`verbs.allow`; `stop` always allowed) → param validation (errors are feedback to the
 model, not crashes) → **confirm gate** (`verbs.confirm` or `safety_class` ∈ {confirm,
 dangerous}; y/N in the terminal, `--yes` to auto-accept, MCP refuses unless `--yes`) →
-**budgets** (`max_steps` here; `max_llm_calls` and `max_minutes` in the loop) →
-machine-enforced **`abort_when`** (battery threshold, consecutive failures) →
+**budgets** (`max_steps` and `max_minutes` here, which is what caps an MCP session since
+there is no loop there; `max_llm_calls` is the loop's own) →
+machine-enforced **`abort_when`** (the battery threshold here, consecutive failures once
+the result is in) →
 **preconditions** (not fallen, not sitting) → `--dry-run` → execute, racing the **timeout**
 against the abort, so a kill switch cancels the verb. A verb that times out or raises stops
 the duck and reports a failure.
 
+So does a call whose *caller* goes away: an MCP client dropping the request, or a second
+Ctrl-C. The verb is cancelled and a `stop` goes out, recorded as `gate cancelled`. That path
+used to return at once and leave the legs moving with nothing to halt them, which is the
+failure this page exists to rule out.
+
 ## Heartbeat
 
-A task pings `transport.heartbeat()` every 500 ms (`robot.health` on hardware, a liveness
-check in sim). One failure → `stop` intent → abort flag → the loop ends with
+A task pings `transport.heartbeat()` every 500 ms (`robot.health` on a Microduck, each
+backend's own health call elsewhere, a liveness check in sim). One failure → `stop` intent → abort flag → the loop ends with
 `outcome: aborted`. Upstream's own rationale: "LLMs stall mid-inference".
 
 ## Kill switch
@@ -37,15 +44,69 @@ always sends `stop` and closes the transport. Works on Windows (signal handler, 
 
 ## Dry run
 
-`--dry-run` prints every intent a model *would* send and sends nothing. Read-only verbs
-(`observe`, alias `get_frame`, and `report_state`) still run. Use it the first time you
-point a new `.duck` at hardware.
+`--dry-run` sends nothing, and the trace names every verb a model *would* have run, with the
+parameters it chose:
+
+```
+gate    dry_run: skipped would run search_scan, sent nothing (target='ball', step_deg=45, max_steps=8)
+```
+
+A parameter the model left unset shows as `null` rather than being dropped, because on a dry
+run the omission is the thing you are checking. Read-only verbs (`observe`, alias
+`get_frame`, and `report_state`) still run. Use it the first time you point a new `.duck` at
+hardware.
 
 ## On hardware
 
-Nothing here has run on hardware yet, on any body. When it does, start with `--dry-run`
+Nothing here has run on hardware yet, on any body. If the body is a Microduck, run the contract
+in the physics simulator first (`--robot microduck:mujoco`): it is the only place quackd can
+show you a body that undershoots, refuses and falls over, and nothing there can be hurt. When
+you do reach the robot, start with `--dry-run`
 every time, then a `.duck` whose `allow` list is the smallest thing that could work, then
 widen it. **You are responsible for your robot.**
+
+**An XLeRobot (a 12 kg dual-arm cart):**
+
+- **The watchdog stops the wheels and nothing else.** Upstream's 500 ms deadman calls
+  `stop_base()`, so the fourteen arm and head servos keep holding their last goal under
+  torque. `deadman_scope` says `base_only`, and that is the robot's entire safety authority.
+- **Nothing reports a battery**, so a battery abort can never fire. The power station's
+  switch is the only e-stop and it is not on the network.
+- **The host exits by itself after an hour** with no supervisor anywhere upstream, so a long
+  session ends as a heartbeat failure rather than an error.
+- Blocks under the wheels until you have checked the turn direction: quackd converts rad/s to
+  the deg/s the wire wants, and a wrong conversion is a 57x error.
+- Work through [xlerobot-hardware-checklist.md](xlerobot-hardware-checklist.md).
+
+**An AlohaMini (two arms on a 600 mm motorised lift):**
+
+- **As upstream ships it the arms are limp**, so the safest bring-up is on the stock host,
+  where the base and the lift can be exercised with no arm risk. quackd's own host wrapper is
+  what turns torque on, and upstream's `disconnect()` turns it off again, so a loaded arm
+  falls when that host exits.
+- **The watchdog covers the base and the lift, never the arms** (`base_and_lift_only`).
+- **`home()` leaves the lift travelling** at full speed, because the write that would zero
+  that register is commented out upstream. quackd sends `stop` as its first command after
+  connecting for exactly this reason.
+- Clear the lift's whole travel before powering it. How fast it moves in mm/s is not stated
+  anywhere upstream, so quackd's duration estimate for `lift` is an assumption.
+- Work through [alohamini-hardware-checklist.md](alohamini-hardware-checklist.md).
+
+**A ToddlerBot (a 56 cm, 3 kg humanoid):**
+
+- **It cannot get up.** There is no get-up policy for this body at the pinned commit, so
+  a fall ends the run and needs a human. Every moving verb refuses once it is down.
+- **Work through [toddlerbot-hardware-checklist.md](toddlerbot-hardware-checklist.md) in
+  order.** It keeps the feet off the ground until step 13, and steps 11 and 12 (pull the
+  network cable mid-move, then send `SIGTERM`) are the two that matter most.
+- **The deadman is a slew, not a stop.** There is no velocity at this hardware boundary:
+  the command is an absolute pose. On silence the daemon quackd ships slews to the safe
+  pose at upstream's own rate, waist first, and holds. It never goes limp, because on
+  this body torque off is a fall.
+- **quackd owns the control loop here**, which is true of no other body. Upstream's own
+  `step()` is a no-op, so nothing times out and nothing re-arms without the daemon.
+- A good first contract is the shipped `toddlerbot-lookout`: it moves no leg, no arm and
+  no waist.
 
 **A Microduck (a 25 cm biped):**
 
@@ -116,7 +177,7 @@ widen it. **You are responsible for your robot.**
 
 ## On other bodies
 
-Since 0.4 quackd drives more than the duck, and the honest answer to "what stops it when
+quackd drives more than the duck, and the honest answer to "what stops it when
 quackd goes quiet" differs per body. Each manifest says so
 (`safety_authority: {native, deadman}`), and `stop` always means stop, never collapse:
 
@@ -127,6 +188,9 @@ quackd goes quiet" differs per body. Each manifest says so
 | LeRobot arm (`lerobot:*`) | `torque_limit`: the gripper's torque and current caps, plus `max_relative_target` when configured; no deadman, a position-controlled arm holds its goal | re-sends the present position as the goal (hold) | `disable_torque` (LeRobot's own `disconnect()` does, by its default, at the end of a session) |
 | rosbridge base (`rosbridge:*`) | `none`: neither rosbridge nor the driver has a deadman we verified | publishes a zero Twist; quackd also re-sends the Twist at 10 Hz while a verb runs | silence |
 | Open Duck Mini v2 (`open_duck:*`) | `none` in the robot, but quackd's own bridge daemon runs on it and zeroes the velocity after 300 ms of silence, inside the 50 Hz loop | zero velocity, head held, torque still on | anything that reaches torque, the head-control mode button, any direct servo or IMU read |
+| XLeRobot (`xlerobot:*`) | `none`: the host's own 500 ms watchdog is real but calls `stop_base()`, which zeroes the three wheels and **nothing else**, so the 14 arm and head servos keep holding under torque. `deadman_scope` says `base_only` | zeroes the three velocity keys and leaves every arm goal exactly where it was, deliberately not rebuilding a hold from an unstamped reading that may be cycles old | `disconnect()`, which is upstream's torque-off, and any `enable(on=False)` |
+| AlohaMini (`alohamini:*`) | `none`: the host's 1 s watchdog calls `stop_motion()`, which is the base and the lift and never the arms. `deadman_scope` says `base_and_lift_only` | one payload carrying all three velocity zeros **and** a lift velocity zero, because omitting either leaves the robot travelling | anything that disables arm torque. As shipped the arms are already limp, which is why the arm verbs need quackd's own host wrapper and refuse without it |
+| ToddlerBot (`toddlerbot:*`) | `none` in the robot, and nothing upstream has a watchdog, timeout or e-stop at all. quackd's own daemon runs on it and after 500 ms of silence slews to the safe pose at upstream's own 0.3 rad/s, waist first, and **holds** | holds the last verified-good measured pose. There is no velocity at this hardware boundary, so `stop` cannot mean zero velocity | torque off, ever. Silence on this body means hold forever and torque off means fall, so the deadman is a trajectory rather than a message |
 
 The verbs a body lacks are not gated, they do not exist: a head cannot `kick`, an arm
 cannot `move`, a base cannot `say`, and `validate --robot` says so before a run starts.
@@ -138,7 +202,7 @@ they move the whole body under a controller quackd does not write.
 A model that is *allowed* to `walk` can walk into a wall; the sim has walls, your living
 room has stairs. The allowlist is your tool: a `.duck` for a new space should start small.
 
-Since 0.6 there is one more thing to know about. A robot's memory
+There is one more thing to know about. A robot's memory
 ([memory.md](memory.md)) is text a model wrote, kept on disk, and handed to the *next*
 model as part of its system prompt. The executor never reads it, so a note cannot widen an
 allowlist, lift a budget or open a confirm gate: none of the guarantees above depend on it
@@ -148,5 +212,17 @@ under") will keep telling itself so until somebody deletes the line. That is the
 of the feature and also its whole risk, which is why the file is plain text you can read,
 `quackd memory show` prints exactly what the pilot was told, `quackd memory clear` forgets
 it, and `--no-memory` runs as if it were never there.
+
+There is a second thing that is not about the body. `--robot microduck:mujoco` downloads an
+MJCF, 38 meshes and two ONNX policies from GitHub and the Hugging Face Hub the first time it
+runs, into `~/.quackd/cache`, and then runs those policies in quackd's own process. What guards
+that: the commit and the revision are pinned in `quackd/sim3d/upstream_api.py`, every file is
+checked against a sha256 recorded when it was read and a mismatch is a refusal, and the tarball
+is unpacked by name against a fixed list rather than by whatever it contains. What does not:
+`QUACKD_MICRODUCK_ASSETS` points quackd at a checkout of your own, and there a file that differs
+from the pin is a warning and the run continues, which is deliberate, because a newer export is
+what somebody with a checkout usually wants. The state says which you got
+(`extras.model_pinned`), so the transcript records it. Nothing in this path reaches a robot: the
+physics backend has no address and drives nothing outside the process.
 
 Report anything that lets a model bypass the executor — see [`SECURITY.md`](../SECURITY.md).

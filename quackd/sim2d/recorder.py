@@ -23,9 +23,10 @@ class FrameRecorder:
     def __init__(
         self, transport: Any, *, size: int = 256, every_s: float = 0.25, fps: int = 8
     ) -> None:
-        self.world = getattr(transport, "world", None)
+        self.transport = transport
         self.size = size
-        self.every_s = every_s
+        # a transport whose world is expensive to draw asks for a coarser cadence
+        self.every_s = float(getattr(transport, "recorder_every_s", every_s))
         self.fps = fps
         self.caption = "start"
         self.focus_kind = "duck"
@@ -36,8 +37,14 @@ class FrameRecorder:
         self.frames: list[Image.Image] = []
         self._last_t = -1e9
         hook = getattr(transport, "add_tick_hook", None)
-        if hook is not None and self.world is not None:
+        if hook is not None:
             hook(self._on_tick)
+
+    @property
+    def world(self) -> Any:
+        """Read late, not at construction: the physics transport builds its world in
+        `connect()`, after the CLI has already made the recorder."""
+        return getattr(self.transport, "world", None)
 
     def set_focus(self, duck_index: int, kind: str = "duck") -> None:
         self.focus_kind = kind
@@ -65,20 +72,30 @@ class FrameRecorder:
         return f"duck cam {chr(ord('A') + self.focus_duck)} ({duck.colorway})"
 
     def _append(self) -> None:
-        if self.world is None:
+        world = self.world
+        if world is None:
             return
-        self._last_t = self.world.t
-        top = render_topdown(self.world, self.size)
-        if self.focus_kind == "head":
-            cam = render_headcam(self.world, self.size, head_index=self.focus_duck)
+        self._last_t = world.t
+        # a transport that draws its own world (the physics one) supplies both panes;
+        # the cartoon is drawn here. The CLI hands over the adapter, so look through it
+        panes = getattr(self.transport, "render_panes", None) or getattr(
+            getattr(self.transport, "transport", None), "render_panes", None
+        )
+        if panes is not None:
+            top, cam, label = panes(self.size)
         else:
-            cam = render_duckcam(self.world, self.size, duck_index=self.focus_duck)
+            top = render_topdown(world, self.size)
+            if self.focus_kind == "head":
+                cam = render_headcam(world, self.size, head_index=self.focus_duck)
+            else:
+                cam = render_duckcam(world, self.size, duck_index=self.focus_duck)
+            label = self._cam_label()
         frame = Image.new("RGB", (self.size * 2 + 4, self.size + CAPTION_H), (30, 30, 30))
         frame.paste(top, (0, CAPTION_H))
         frame.paste(cam, (self.size + 4, CAPTION_H))
         draw = ImageDraw.Draw(frame)
-        draw.text((6, 5), f"t={self.world.t:5.1f}s  {self.caption}", fill=(240, 240, 240))
-        draw.text((self.size + 10, 5), self._cam_label(), fill=(180, 180, 180))
+        draw.text((6, 5), f"t={world.t:5.1f}s  {self.caption}", fill=(240, 240, 240))
+        draw.text((self.size + 10, 5), label, fill=(180, 180, 180))
         self.frames.append(frame)
 
     def save_gif(self, path: Path) -> Path:

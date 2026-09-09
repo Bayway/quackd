@@ -1,8 +1,10 @@
 # The quackd daemons for an Open Duck Mini v2
 
-This directory is the only part of quackd that runs on a robot. It is not a Python package,
-it is never imported by quackd, and the bridge needs nothing but the standard library and
-numpy, which your duck's Pi already has.
+This directory was the first part of quackd written to run on a robot, and there are three of
+them now: `bridge/alohamini/` wraps that robot's own host, and `bridge/toddlerbot/` runs a
+humanoid's whole control loop. This one is not a Python package, it is never imported by
+quackd, and it needs nothing but the standard library and numpy, which your duck's Pi already
+has.
 
 Two processes, because they have very different jobs and very different budgets:
 
@@ -85,9 +87,12 @@ python quackd_duck_bridge.py check          # what this duck would advertise, as
 | `--token-file` | `/etc/quackd/duck-bridge.token` | if the file exists, a client must send that token |
 | `--camera-url` | none | the snapshot URL to advertise. **Without it the bridge reports no camera** |
 | `--deadman-ms` | `300` | how long silence is tolerated before the velocities go to zero |
-| `--max-vx`, `--max-vy`, `--max-vyaw` | `0.15`, `0.2`, `1.0` | your own ceilings, applied on top of upstream's |
+| `--max-vx`, `--max-vy`, `--max-vyaw` | `0.15`, `0.2`, `1.0` | your own ceilings. Above upstream's own numbers the bridge refuses to start |
 | `--enable-head` | off | EXPERIMENTAL. Upstream warns head control can break the head |
-| `--head-safety` | `0.8` | the fraction of upstream's head range quackd will use |
+| `--head-safety` | `0.8` | the fraction of upstream's head range quackd will use. Refused outside (0, 1] |
+| `--workdir` | the script's own directory | where upstream's loop runs from. It opens `polynomial_coefficients.pkl` by relative path, so this has to be the directory holding it |
+| `--patch-watchdog-s` | `150` | how long upstream may take to ask for a controller before the bridge exits. `0` disables |
+| `--settle-s` | `0.5` | on SIGTERM or Ctrl-C, hold zero velocity this long before the loop exits, so the duck comes to a stand. Must stay under the unit's `TimeoutStopSec` |
 | `--fake` | off | a synthetic 50 Hz loop, no robot and no runtime needed |
 | `--seconds` | forever | stop after this long. Useful with `--fake` |
 

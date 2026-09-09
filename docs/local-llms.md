@@ -67,9 +67,10 @@ local models sometimes answer with JSON in plain text instead of a native tool c
 call a verb that is not allowed, or add chatter. Three things make that workable:
 
 1. **Text fallback.** If a reply has no native tool call, quackd looks for a JSON object
-   like `{"name": "walk_to", "arguments": {"target": "ball"}}` in the text and uses it. The
-   transcript marks those turns with `stop_reason: "text_fallback"` so you can see how often
-   it happened. The system prompt tells local models this shape exists.
+   like `{"name": "walk_to", "arguments": {"target": "ball"}}` in the text and uses it. Only
+   the answer is read: an inline `<think>...</think>` block is split off first, so a verb the
+   model weighed inside its reasoning and dropped is never executed. The transcript marks a
+   rescued turn with `stop_reason: "text_fallback"` so you can see how often it happened. The system prompt tells local models this shape exists.
 2. **One retry.** A turn with no usable call is re-prompted once, then counts as a failure.
    Budgets still apply.
 3. **The executor never trusts the model.** A disallowed verb or bad parameters come back
@@ -91,6 +92,31 @@ servers reject image parts. The text observation already carries what the camera
 | `--vision` / `QUACKD_VISION` | on, off | off |
 
 `parallel_tool_calls` is never sent to local servers, because some reject unknown fields.
+
+Add physics by asking for both extras and naming the backend:
+
+```bash
+uvx --from "quackd[openai,mujoco]" quackd run find-and-kick --provider ollama --model qwen3:8b --robot microduck:mujoco
+```
+
+The duck then walks on upstream's own trained policy instead of sliding around a cartoon. It
+also undershoots what it is asked for, which is a harder task for a small model and which the
+run states in `report_state` ([ADR-0030](adr/0030-mujoco-physics-backend.md)).
+
+## The same duck in a browser, no Python
+
+[`web/`](../web/README.md) is a static page that runs the physics simulator through MuJoCo's
+WebAssembly build and drives it from any OpenAI compatible server, so a local model can pilot
+the duck with no key and nothing installed:
+
+```bash
+python -m http.server 8000 --directory web    # browsers refuse ES modules over file://
+```
+
+Pick Local in the page and give it your base URL. Ollama has to be told to accept the page
+(`OLLAMA_ORIGINS=* ollama serve`), and llama.cpp, vLLM and LM Studio need the same CORS
+permission. Browsers treat `http://localhost` as trustworthy, so an https page may still call
+it. What the page has and has not been run against is in [web/README.md](../web/README.md).
 
 ## Honest notes
 

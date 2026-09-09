@@ -1,12 +1,22 @@
 """The default install never imports an SDK: every adapter lists, describes and constructs
-with torch, lerobot, roslibpy, reachy_mini, zeroconf and paho all absent."""
+with torch, lerobot, roslibpy, reachy_mini, zmq, zeroconf and paho all absent."""
 
 from __future__ import annotations
 
 import subprocess
 import sys
 
-HEAVY = ("torch", "lerobot", "roslibpy", "reachy_mini", "zeroconf", "paho")
+HEAVY = (
+    "torch",
+    "lerobot",
+    "roslibpy",
+    "reachy_mini",
+    "zmq",
+    "zeroconf",
+    "paho",
+    "mujoco",
+    "onnxruntime",
+)
 
 SCRIPT = f"""
 import sys
@@ -27,6 +37,9 @@ assert [r["name"] for r in rows] == [
     "lerobot",
     "rosbridge",
     "open_duck",
+    "xlerobot",
+    "alohamini",
+    "toddlerbot",
 ], rows
 assert not any(r["installed"] for r in rows if r["extra"] != "built-in"), rows
 for adapter, backends in BACKENDS.items():
@@ -34,6 +47,7 @@ for adapter, backends in BACKENDS.items():
         m = describe(RobotSpec(adapter, backend))
         assert "stop" in m.verb_names(), (adapter, backend)
 make_adapter("reachy_mini:sdk")
+make_adapter("microduck:mujoco")
 make_adapter("lerobot:real", address="COM5")
 make_adapter("rosbridge:ws", address="ws://robot.local:9090")
 for name in {HEAVY!r}:

@@ -26,7 +26,11 @@ backticked in the README.
   intent), not aliases.
 - **Composite verbs choose their strategy from the manifest.** `search_scan` turns in
   place when the robot has twist and mobility (exactly today's loop, also for bare
-  transports) and sweeps the head when it only has gaze. The gaze sweep starts from the
+  transports) and sweeps the head when it only has gaze. An adapter may override that
+  choice for its own body, because the rule is about what the manifest allows rather than
+  what is wise: the ToddlerBot supplies its own `search_scan` that always sweeps the neck,
+  since turning a fall-prone humanoid on the spot to look around is not something to do
+  without a get-up policy (ADR-0028). The gaze sweep starts from the
   current head yaw, alternates outward (`c, c+s, c-s, c+2s, ...`) within
   `limits["gaze_yaw_deg"]`, leaves the head on the target, and reports `gaze_yaw_deg`
   because bearings stay camera-relative on every robot.

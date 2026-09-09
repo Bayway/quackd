@@ -13,10 +13,14 @@ from types import ModuleType
 
 import pytest
 
+from quackd.adapters.alohamini import upstream_api as alohamini_api
 from quackd.adapters.lerobot import upstream_api as lerobot_api
 from quackd.adapters.open_duck import upstream_api as open_duck_api
 from quackd.adapters.reachy_mini import upstream_api as reachy_api
 from quackd.adapters.rosbridge import upstream_api as rosbridge_api
+from quackd.adapters.toddlerbot import upstream_api as toddlerbot_api
+from quackd.adapters.xlerobot import upstream_api as xlerobot_api
+from quackd.sim3d import upstream_api as microduck_rl_api
 from quackd.transport import upstream_api
 
 PKG = Path(__file__).resolve().parents[1] / "quackd"
@@ -70,8 +74,64 @@ UPSTREAMS: list[tuple[ModuleType, set[str], tuple[str, ...]]] = [
             "https://github.com/apirrone/Open_Duck_Mini",
         ),
     ),
+    (
+        xlerobot_api,
+        {
+            "adapters/xlerobot/upstream_api.py",
+            "adapters/xlerobot/zmq_host.py",
+            "doctor.py",
+        },
+        ("https://github.com/Vector-Wangel/XLeRobot",),
+    ),
+    (
+        alohamini_api,
+        {
+            "adapters/alohamini/upstream_api.py",
+            "adapters/alohamini/zmq_host.py",
+            "doctor.py",
+        },
+        (
+            "https://github.com/liyiteng/lerobot_alohamini",
+            "https://github.com/liyiteng/AlohaMini",
+        ),
+    ),
+    (
+        toddlerbot_api,
+        {
+            "adapters/toddlerbot/upstream_api.py",
+            "adapters/toddlerbot/bridge.py",
+            "doctor.py",
+        },
+        ("https://github.com/hshi74/toddlerbot",),
+    ),
+    (
+        microduck_rl_api,
+        {
+            "sim3d/upstream_api.py",
+            "sim3d/assets.py",
+            "sim3d/microduck.py",
+            # the measured gait envelope `GAIT_THRESHOLD` documents; it moved out of
+            # `microduck.py` so it could be tested without the extra, and cites its source
+            "sim3d/gait.py",
+            "doctor.py",
+        },
+        (
+            "https://github.com/pollen-robotics/microduck_rl",
+            "https://huggingface.co/pollen-robotics/microduck-policies",
+        ),
+    ),
 ]
-IDS = ["microduck", "reachy_mini", "lerobot", "rosbridge", "open_duck"]
+IDS = [
+    "microduck",
+    "reachy_mini",
+    "lerobot",
+    "rosbridge",
+    "open_duck",
+    "xlerobot",
+    "alohamini",
+    "toddlerbot",
+    "microduck_rl",
+]
 
 
 def _unverified_identifiers(module: ModuleType) -> list[str]:

@@ -29,12 +29,20 @@ from quackd.flock.transcript import FlockTranscript
 from quackd.perception.color_blob import ColorBlobDetector
 from quackd.sim2d.clock import FlockClock
 from quackd.sim2d.world import World
+from quackd.trace import Sink, Tracer
 from quackd.transport.sim2d import Sim2DTransport, make_flock
 
 DEFAULT_MEMBER = "microduck:sim2d"
 
 BusFactory = Callable[[Callable[[FlockMessage], None]], Bus]
 """`bus_factory(tap) -> Bus`: the seam for `MqttBus`; the in-process bus is the default."""
+
+TraceFactory = Callable[[str], "Sink | None"]
+"""`trace(name) -> Sink | None`: a view per member, by member name, and one more for
+`FLOCK_TRACE`: the flock's own events (the planner's call, the coordinator's story). Return a
+distinct sink per name, or two members' intent bursts fold into one line."""
+
+FLOCK_TRACE = "flock"
 
 
 @dataclass
@@ -53,6 +61,8 @@ class FlockResult:
     spotter: str | None = None
     assignments: dict[str, str] = field(default_factory=dict)
     verdicts: list[dict[str, Any]] = field(default_factory=list)
+    trace_dropped: int = 0
+    """Events a view raised on and never showed. The transcripts have them all."""
 
     @property
     def ok(self) -> bool:
@@ -128,6 +138,7 @@ async def run_flock(
     log: Any = lambda *_: None,
     robots: dict[str, str] | None = None,
     bus_factory: BusFactory | None = None,
+    trace: TraceFactory | None = None,
 ) -> FlockResult:
     flock: FlockSection = duck.frontmatter.flock or FlockSection()
     if n_override is not None:
@@ -154,9 +165,23 @@ async def run_flock(
     if callable(start_bus):
         start_bus()  # inside the event loop, so remote deliveries are marshalled onto it
 
+    def view(name: str) -> Sink | None:
+        return trace(name) if trace is not None else None
+
+    flock_views = [v] if (v := view(FLOCK_TRACE)) is not None else []
+    # the planner's call is recorded here because nothing else records it: there is no
+    # per-member transcript it belongs to, so flock.jsonl is its paper trail
+    planner_trace = Tracer(record=transcript.sink, observers=flock_views)
+
     task_id = uuid.uuid4().hex[:8]
     task, wedges, usage, llm_calls, fallback = await plan_flock_task(
-        duck, members, provider, task_id, log=log, wedge_members=mobile or members
+        duck,
+        members,
+        provider,
+        task_id,
+        log=log,
+        wedge_members=mobile or members,
+        trace=planner_trace,
     )
     frame_hints = flock.frame_hints == "on" or (
         flock.frame_hints == "auto" and all(s.backend == "sim2d" for s in specs.values())
@@ -199,8 +224,12 @@ async def run_flock(
             task,
             hb_period_s=flock.safety.per_duck_heartbeat_s,
             dry_run=dry_run,
+            trace=view(name),
         )
 
+    # no record: every one of the coordinator's kinds is already in flock.jsonl under its
+    # own name, written the line before each `_event`
+    story = Tracer(observers=flock_views)
     coordinator = FlockCoordinator(
         task=task,
         members=flock_members,
@@ -211,6 +240,7 @@ async def run_flock(
         policy=policy,
         success_moved_m=task.success_moved_m,
         log=log,
+        trace=story,
     )
     if on_recorder is not None:
         on_recorder(adapters[ordered[0]], coordinator)
@@ -250,6 +280,11 @@ async def run_flock(
         }
         for name, m in flock_members.items()
     }
+    trace_dropped = (
+        planner_trace.dropped
+        + story.dropped
+        + sum(m.tracer.dropped for m in flock_members.values())
+    )
     summary = {
         "duck": duck.name,
         "outcome": outcome,
@@ -280,6 +315,7 @@ async def run_flock(
         "seed": seed,
         "transport": "sim2d",
         "dry_run": dry_run,
+        "trace_dropped": trace_dropped,
     }
     transcript.write("flock_end", **{k: v for k, v in summary.items() if k != "per_duck"})
     transcript.write_summary(summary)
@@ -302,4 +338,5 @@ async def run_flock(
         spotter=coordinator.spotter,
         assignments=dict(coordinator.assignments),
         verdicts=list(coordinator.verdicts),
+        trace_dropped=trace_dropped,
     )

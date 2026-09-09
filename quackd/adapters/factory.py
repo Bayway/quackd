@@ -20,9 +20,15 @@ DEFAULT_ROBOT = "microduck:sim2d"
 
 # name -> (backends, status line, pip extra for the SDK backends, SDK import to probe)
 _ADAPTERS: dict[str, tuple[tuple[str, ...], str, str | None, str | None]] = {
+    # No extra and no probe, even though `mujoco` needs one: this column asks whether the
+    # *adapter* is usable here, and the Microduck's is built in. Probing for mujoco made
+    # `list-adapters` report the whole robot as missing on a machine that can still run
+    # sim2d, mock and a real duck. The extra is named in the status line, in the transports
+    # table and in `doctor`'s optional extras, which is where a per-backend answer belongs.
     "microduck": (
-        ("sim2d", "mock", "jsonrpc", "websocket"),
-        "✅ built-in: sim2d (default), mock · 🧪 jsonrpc · ⏳ websocket",
+        ("sim2d", "mujoco", "mock", "jsonrpc", "websocket"),
+        "✅ built-in: sim2d (default), mock · ✅ mujoco (physics, needs quackd[mujoco]) · "
+        "🧪 jsonrpc · ⏳ websocket",
         None,
         None,
     ),
@@ -44,11 +50,39 @@ _ADAPTERS: dict[str, tuple[tuple[str, ...], str, str | None, str | None]] = {
         "quackd[rosbridge]",
         "roslibpy",
     ),
-    # Appended last on purpose: the doctor and list-adapters tables are order-sensitive.
-    # No extra: the client is stdlib, and the robot's own runtime is not installable here.
+    # Appended, never inserted: the doctor and list-adapters tables are order-sensitive, and
+    # tests/test_adapters.py pins the order. No extra: the client is stdlib, and the robot's
+    # own runtime is not installable here.
     "open_duck": (
         ("sim2d", "mock", "bridge"),
         "✅ built-in: sim2d, mock · 🧪 bridge (quackd's own daemon on the duck's Pi, "
+        "never run on a robot)",
+        None,
+        None,
+    ),
+    # XLeRobot is not an installable package, so quackd speaks its ZeroMQ host protocol
+    # rather than importing it: the extra is pyzmq and nothing else (ADR-0026).
+    "xlerobot": (
+        ("mock", "zmq"),
+        "✅ built-in: mock · 🧪 zmq (wire format VERIFIED at a pinned commit, exercised "
+        "against a fake host over loopback, never run on a cart)",
+        "quackd[xlerobot]",
+        "zmq",
+    ),
+    # Also not an installable package: a fork of LeRobot that calls itself lerobot and is not
+    # on PyPI, so quackd speaks its ZeroMQ host protocol too (ADR-0027).
+    "alohamini": (
+        ("mock", "sim2d", "zmq"),
+        "✅ built-in: mock, sim2d · 🧪 zmq (wire format VERIFIED at a pinned commit, "
+        "exercised against a fake host over loopback, never run on a robot)",
+        "quackd[alohamini]",
+        "zmq",
+    ),
+    # No network API of any kind upstream: no socket, no daemon, no IPC. So quackd ships
+    # the daemon, as it does for the Open Duck Mini, and the client is stdlib (ADR-0028).
+    "toddlerbot": (
+        ("mock", "sim2d", "bridge"),
+        "✅ built-in: mock, sim2d · 🧪 bridge (quackd's own daemon on the robot, "
         "never run on a robot)",
         None,
         None,

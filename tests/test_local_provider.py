@@ -10,7 +10,12 @@ import pytest
 
 from quackd.agent.providers.base import Exchange, Observation, ProviderError, ToolCall
 from quackd.agent.providers.factory import LOCAL_NAMES, PROVIDER_NAMES, make_provider
-from quackd.agent.providers.local import PRESETS, LocalProvider, parse_tool_call_from_text
+from quackd.agent.providers.local import (
+    PRESETS,
+    LocalProvider,
+    parse_tool_call_from_text,
+    split_thinking,
+)
 from quackd.agent.providers.openai import OpenAIProvider
 
 TOOLS = [
@@ -176,6 +181,40 @@ async def test_no_fallback_when_nothing_parses() -> None:
     p = LocalProvider("m", preset="llamacpp", client=FakeClient(reply(text="I am a duck.")))
     turn = await p.step("S", history(), TOOLS)
     assert turn.tool_calls == [] and turn.stop_reason == "stop"
+
+
+async def test_a_tool_call_the_model_only_contemplated_in_its_thinking_is_not_executed() -> None:
+    """A small model weighs a verb out loud and rejects it. The fallback scans plain text, so
+    unless the reasoning is stripped first it finds the JSON in the discarded thought and the
+    duck kicks."""
+    text = '<think>maybe {"name": "kick", "arguments": {}} but no</think>I will wait.'
+    p = LocalProvider("m", preset="llamacpp", client=FakeClient(reply(text=text)))
+    turn = await p.step("S", history(), TOOLS)
+    assert turn.tool_calls == [] and p.text_fallbacks == 0
+    assert turn.text == "I will wait."
+    assert turn.thinking == 'maybe {"name": "kick", "arguments": {}} but no'
+
+
+async def test_the_json_fallback_reads_the_answer_after_the_thinking() -> None:
+    text = '<think>kick? no</think>{"name": "walk_to", "arguments": {"target": "ball"}}'
+    p = LocalProvider("m", preset="llamacpp", client=FakeClient(reply(text=text)))
+    turn = await p.step("S", history(), TOOLS)
+    assert turn.tool_calls == [ToolCall(id="text-1", name="walk_to", arguments={"target": "ball"})]
+    assert turn.thinking == "kick? no"
+
+
+async def test_an_unterminated_think_tag_is_thinking_to_the_end_not_the_answer() -> None:
+    """max_tokens can cut a reply mid-thought, leaving no `</think>`. Everything after the
+    opening tag is still reasoning: shown as the answer it would be replayed next turn as
+    something the model said, and any verb it was still weighing would be executed."""
+    assert split_thinking("<think>the ball is") == ("the ball is", "")
+    assert split_thinking("ok<think>cut") == ("cut", "ok")
+    assert split_thinking("<think>a</think>b<think>c") == ("a\n\nc", "b")
+    text = '<think>I could {"name": "kick", "arguments": {}}'
+    p = LocalProvider("m", preset="llamacpp", client=FakeClient(reply(text=text)))
+    turn = await p.step("S", history(), TOOLS)
+    assert turn.tool_calls == [] and turn.text is None
+    assert turn.thinking == 'I could {"name": "kick", "arguments": {}}'
 
 
 def test_prompt_hint_only_for_local() -> None:

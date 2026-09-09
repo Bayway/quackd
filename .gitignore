@@ -6,6 +6,11 @@
 # runs are artifacts, not source (the hero GIF lives in docs/assets on purpose)
 runs/
 
+# MuJoCo writes this into the working directory, with no way to redirect it, the first time
+# the physics goes non-finite. `test_a_world_that_mujoco_has_reset_under_us_refuses_to_carry_on`
+# makes that happen on purpose, so every test run produces one.
+MUJOCO_LOG.TXT
+
 # python
 __pycache__/
 *.py[cod]
@@ -25,7 +30,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# optional model weights (never vendor upstream assets)
+# upstream assets, never vendored (docs/licenses.md). A real microduck:mujoco run leaves
+# upstream's CC BY-SA-NC model in ~/.quackd/cache, and a debugging copy next to the checkout
+# is one `git add -A` from being permanent in a public history.
 *.onnx
 *.pt
+*.stl
+robot_walk.xml
 *.stackdump

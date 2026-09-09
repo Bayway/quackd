@@ -8,6 +8,7 @@ transcript run whether the pilot is a rule or a frontier model.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -183,6 +184,271 @@ def microduck_lookout_strategy(obs: Observation, step: int, history: list[Exchan
     return ToolCall(name="gaze", arguments={"bearing_deg": _MICRODUCK_SWEEP[looks]})
 
 
+def xlerobot_lookout_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+    """One frame, then the answer — because this robot has neither a voice nor a head.
+
+    Every other lookout task ends by saying what it saw. There is no speaker in an XLeRobot's
+    bill of materials, so `say` does not exist for it, and there is no documented head axis
+    either, so it cannot look anywhere its owner did not point it. That leaves one frame and
+    one report, and the only place the report can go is the reason it succeeds with.
+    """
+    if _count_calls(history, "observe") == 0:
+        return ToolCall(name="observe", arguments={})
+    if balls := _detections(obs, "ball"):
+        return ToolCall(name="declare_success", arguments={"reason": _where(balls[0])})
+    return ToolCall(
+        name="declare_success",
+        arguments={"reason": "nothing in view, and this robot cannot turn to look further"},
+    )
+
+
+def alohamini_lookout_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+    """One frame, then the answer. Like the XLeRobot, this body has no voice and no head, so
+    the report has nowhere to go but the reason it succeeds with."""
+    if _count_calls(history, "observe") == 0:
+        return ToolCall(name="observe", arguments={})
+    if balls := _detections(obs, "ball"):
+        return ToolCall(name="declare_success", arguments={"reason": _where(balls[0])})
+    return ToolCall(
+        name="declare_success",
+        arguments={"reason": "nothing in view, and this robot cannot turn to look further"},
+    )
+
+
+def toddlerbot_lookout_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+    """Head only, no legs, and no voice to report with.
+
+    This robot cannot get up if it falls, so the strategy never walks, and there is no text
+    to speech on it at all, so the answer goes in the reason it succeeds with."""
+    if balls := _detections(obs, "ball"):
+        return ToolCall(name="declare_success", arguments={"reason": _where(balls[0])})
+    looks = _count_calls(history, "look")
+    if looks >= len(_TODDLER_SWEEP):
+        return ToolCall(
+            name="declare_success",
+            arguments={"reason": "nothing in view after looking left, right and centre"},
+        )
+    if _count_calls(history, "observe") <= looks:
+        return ToolCall(name="observe", arguments={})
+    return ToolCall(name="look", arguments={"yaw_deg": _TODDLER_SWEEP[looks]})
+
+
+#: Gentle on purpose: the neck is two small servos and this body has no fall recovery.
+_TODDLER_SWEEP = (30.0, -30.0, 0.0)
+
+
+#: What the shape walkers ask for. Every body clamps a twist to its own limits, and the
+#: Microduck's gait has a floor besides, so these are requests rather than promises: the
+#: strategies close the loop on the pose the robot reports, which is what a model does too.
+SHAPE_VX = 0.25
+SHAPE_WZ = 0.9
+SHAPE_SIDE_M = 0.5
+_TURN_TOLERANCE = math.radians(10)
+#: How near the start a square has to finish to count as closed.
+#:
+#: One full side, which is loose on purpose. Measured on seed 0: the trained gait ends 0.30 m
+#: from where it started and the kinematic stand-in 0.44 m, because each corner is accepted
+#: within ten degrees and four of those compound. What this bound separates is a loop from a
+#: drift: four legs walked in a straight line finish two metres out and fail. The distance
+#: itself goes in the reason either way, so a run says how square it was rather than only
+#: that it declared success, and `docs/assets/hero3d.py` prints it.
+SHAPE_CLOSURE_M = SHAPE_SIDE_M
+#: One `move` is one sample of the heading: the strategy reads the pose before and after and
+#: nothing in between, so a turn past +/-pi is indistinguishable from its complement and a
+#: whole revolution from standing still. Bounded by the fastest twist a body here accepts
+#: rather than the rate asked for, because the gait floor scales a small twist up.
+SHAPE_MAX_TURN_S = 2.0
+
+
+def _pose(obs: Observation) -> tuple[float, float, float] | None:
+    state = obs.features.get("state") or {}
+    x, y, theta = state.get("x"), state.get("y"), state.get("theta")
+    if x is None or y is None or theta is None:
+        return None
+    return float(x), float(y), float(theta)
+
+
+def _wrap(radians_: float) -> float:
+    return math.atan2(math.sin(radians_), math.cos(radians_))
+
+
+class _Gait:
+    """How much of a commanded twist this body actually delivers, learned as it goes.
+
+    A cartoon duck walks at the speed it is asked for. A real one on an RL gait delivers
+    roughly forty percent of it, and a shape walker that assumes otherwise spends its whole
+    budget creeping up on the first corner. So each move records what it asked for and from
+    where, the next turn measures what happened, and the estimate is the ratio — which is
+    the same correction a model makes when it reads the pose and tries again.
+    """
+
+    def __init__(self) -> None:
+        self.walk = 1.0
+        self.turn = 1.0
+        self._pending: tuple[str, float, float] | None = None  # kind, asked, from
+
+    def expect(self, kind: str, asked: float, mark: float) -> None:
+        self._pending = (kind, asked, mark)
+
+    def observe(self, walked: float, turned: float) -> None:
+        if self._pending is None:
+            return
+        kind, asked, mark = self._pending
+        self._pending = None
+        got = (walked if kind == "walk" else turned) - mark
+        if asked <= 1e-6:
+            return
+        ratio = min(1.5, max(0.15, abs(got) / asked))
+        if kind == "walk":
+            self.walk = 0.5 * self.walk + 0.5 * ratio
+        else:
+            self.turn = 0.5 * self.turn + 0.5 * ratio
+
+    def seconds(self, kind: str, remaining: float, rate: float) -> float:
+        gain = self.walk if kind == "walk" else self.turn
+        # A turn is capped so one move can never carry the heading past half a circle. The
+        # strategy samples the pose once per move, so a longer turn is indistinguishable from
+        # its complement, and the accumulated total quietly loses whole revolutions.
+        cap = SHAPE_MAX_TURN_S if kind == "turn" else 10.0
+        return min(cap, max(0.4, abs(remaining) / (rate * max(gain, 0.15))))
+
+
+def square_strategy(side: float = SHAPE_SIDE_M) -> Strategy:
+    """Walk a square by watching the pose, the way a model would.
+
+    Four legs and four corners, each ended by what the robot reports rather than by a
+    stopwatch, so a body whose gait delivers half of what it was asked still walks a square.
+    Returns a fresh closure per run, so one seed cannot leak into the next.
+    """
+    state: dict[str, Any] = {
+        "leg": 0,
+        "turning": False,
+        "anchor": None,
+        "start": None,  # where leg 0 began, which is what "a square" has to come back to
+        "target": None,
+        "gait": _Gait(),
+        "walked": 0.0,
+        "turned": 0.0,
+        "last": None,
+    }
+
+    def strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+        pose = _pose(obs)
+        if pose is None:
+            return _no_pose("a shape")
+        x, y, theta = pose
+        gait: _Gait = state["gait"]
+        if state["last"] is not None:
+            px, py, pt = state["last"]
+            state["walked"] += math.dist((x, y), (px, py))
+            state["turned"] += _wrap(theta - pt)  # signed: a stride's wag must cancel
+            gait.observe(state["walked"], state["turned"])
+        state["last"] = (x, y, theta)
+        if state["anchor"] is None:
+            state["anchor"] = (x, y)
+            state["start"] = (x, y)
+        if state["leg"] >= 4:
+            # Four legs is a count, not a shape. Each leg ends when the pose says it has gone
+            # far enough, so an overshoot or a corner short of ninety degrees gives four legs
+            # that finish somewhere else entirely. Say how far off, first, because
+            # `docs/assets/hero3d.py` prints the first sixty characters of this and then
+            # decides whether to publish the GIF.
+            closed = math.dist((x, y), state["start"])
+            if closed <= SHAPE_CLOSURE_M:
+                return ToolCall(
+                    name="declare_success",
+                    arguments={
+                        "reason": f"closed the square {closed:.2f} m from where it started, "
+                        f"after four {side:.2f} m legs with a 90 degree turn between each"
+                    },
+                )
+            return ToolCall(
+                name="declare_failure",
+                arguments={
+                    "reason": f"finished {closed:.2f} m from where it started, after four "
+                    f"{side:.2f} m legs: that is not a square"
+                },
+            )
+        if state["turning"]:
+            error = _wrap(float(state["target"]) - theta)
+            if abs(error) < _TURN_TOLERANCE:
+                state["turning"] = False
+                state["leg"] += 1
+                state["anchor"] = (x, y)
+            else:
+                seconds = gait.seconds("turn", error, SHAPE_WZ)
+                gait.expect("turn", SHAPE_WZ * seconds, state["turned"])
+                return ToolCall(
+                    name="move",
+                    arguments={
+                        "vx": 0.0,
+                        "wz": math.copysign(SHAPE_WZ, error),
+                        "duration_s": round(seconds, 2),
+                    },
+                )
+        walked = math.dist((x, y), state["anchor"])
+        if walked >= side:
+            state["turning"] = True
+            state["target"] = _wrap(theta + math.pi / 2)
+            seconds = gait.seconds("turn", math.pi / 2, SHAPE_WZ)
+            gait.expect("turn", SHAPE_WZ * seconds, state["turned"])
+            return ToolCall(
+                name="move",
+                arguments={"vx": 0.0, "wz": SHAPE_WZ, "duration_s": round(seconds, 2)},
+            )
+        seconds = gait.seconds("walk", side - walked, SHAPE_VX)
+        gait.expect("walk", SHAPE_VX * seconds, state["walked"])
+        return ToolCall(
+            name="move", arguments={"vx": SHAPE_VX, "wz": 0.0, "duration_s": round(seconds, 2)}
+        )
+
+    return strategy
+
+
+def circle_strategy(turns: float = 1.0) -> Strategy:
+    """Walk a circle: one twist held until the heading has come all the way round."""
+    state: dict[str, Any] = {"turned": 0.0, "last": None, "gait": _Gait()}
+
+    def strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
+        pose = _pose(obs)
+        if pose is None:
+            return _no_pose("a circle")
+        theta = pose[2]
+        gait: _Gait = state["gait"]
+        if state["last"] is not None:
+            # Signed. A real gait wags the trunk every stride, which an absolute total counts
+            # as turning: `tests/test_sim3d.py` says exactly that about the same measurement.
+            state["turned"] += _wrap(theta - float(state["last"]))
+            gait.observe(0.0, state["turned"])
+        state["last"] = theta
+        target = turns * 2 * math.pi
+        if abs(state["turned"]) >= target:
+            return ToolCall(
+                name="declare_success",
+                arguments={
+                    "reason": f"walked a circle: the heading came round "
+                    f"{abs(math.degrees(state['turned'])):.0f} degrees while walking forward"
+                },
+            )
+        seconds = gait.seconds("turn", target - abs(state["turned"]), SHAPE_WZ)
+        gait.expect("turn", SHAPE_WZ * seconds, state["turned"])
+        return ToolCall(
+            name="move",
+            arguments={"vx": SHAPE_VX, "wz": SHAPE_WZ, "duration_s": round(seconds, 2)},
+        )
+
+    return strategy
+
+
+def _no_pose(shape: str) -> ToolCall:
+    return ToolCall(
+        name="declare_failure",
+        arguments={
+            "reason": f"this robot reports no pose, so it cannot walk {shape} and know it did"
+        },
+    )
+
+
 def generic_strategy(obs: Observation, step: int, history: list[Exchange]) -> ToolCall:
     allowed = obs.features.get("allowed", [])
     if step == 0 and "quack" in allowed:
@@ -202,7 +468,64 @@ STRATEGIES: dict[str, Strategy] = {
     "open-duck-scout": open_duck_scout_strategy,
     "open-duck-lookout": open_duck_lookout_strategy,
     "microduck-lookout": microduck_lookout_strategy,
+    "xlerobot-lookout": xlerobot_lookout_strategy,
+    "alohamini-lookout": alohamini_lookout_strategy,
+    "toddlerbot-lookout": toddlerbot_lookout_strategy,
 }
+
+
+def _seen_label(detection: dict[str, Any]) -> str:
+    """One label, whitespace-collapsed and clipped, so a garbage label cannot run away with
+    the line: perception labels come from whatever model is loaded, not from a fixed list."""
+    return " ".join(str(detection.get("label") or "thing").split())[:24] or "thing"
+
+
+def _seen(detections: list[dict[str, Any]]) -> str:
+    """What the rule saw, as counts per label plus where the nearest thing is."""
+    if not detections:
+        return "nothing it knows"
+    counts: dict[str, int] = {}
+    for d in detections:
+        label = _seen_label(d)
+        counts[label] = counts.get(label, 0) + 1
+    groups = ", ".join(
+        f"{n} {label}{'' if n == 1 or label.endswith('s') else 's'}" for label, n in counts.items()
+    )
+    # Unknown distances sort last, so "nearest" is the nearest thing actually ranged.
+    nearest = min(
+        detections,
+        key=lambda d: (d.get("est_distance_m") is None, d.get("est_distance_m") or 0.0),
+    )
+    dist, bearing = nearest.get("est_distance_m"), nearest.get("bearing_deg")
+    where = f"{dist:.2f} m" if dist is not None else "distance unknown"
+    if bearing is None:
+        where += ", bearing unknown"
+    else:
+        where += f", {abs(bearing):.0f} deg {'left' if bearing >= 0 else 'right'}"
+    return f"{groups} (nearest {where})"
+
+
+def _scripted_thinking(obs: Observation, step: int, call: ToolCall) -> str:
+    """The one line the scripted pilot puts on the trace's `think` row.
+
+    It is not reasoning and must never be mistaken for it, hence the bracketed `[scripted]`
+    prefix: it is the rule reporting the two inputs it actually branched on — what the camera
+    saw and how the last verb ended — and the verb that fell out. Without it every keyless
+    run (which is every runnable example in the README, and every recorded asset) shows a
+    trace whose thinking line is permanently blank, so the headline feature cannot be
+    demonstrated at all without an API key.
+
+    Double quotes are stripped on the way out. `tests/test_cli.py` greps the raw transcript
+    for `"kick"` and `"name": "kick"` to prove the duck really kicked; a quoted verb name in
+    the thinking would satisfy those assertions whether or not it did.
+    """
+    last = _last(obs)
+    verb = last.get("verb")
+    after = f" after {verb} {'ok' if last.get('ok') else 'failed'}" if verb else ""
+    seen = _seen(obs.features.get("detections") or [])
+    return f"[scripted] step {step}: sees {seen}{after}, so the rule picks {call.name}".replace(
+        '"', "'"
+    )
 
 
 class FakeProvider:
@@ -231,6 +554,10 @@ class FakeProvider:
                 strategy, label = find_and_kick_strategy, "goal:find-and-kick"
             elif "patrol" in text or "person" in text or "someone" in text:
                 strategy, label = patrol_strategy, "goal:patrol"
+            elif "square" in text:
+                strategy, label = square_strategy(), "goal:square"
+            elif "circle" in text or "circuit" in text:
+                strategy, label = circle_strategy(), "goal:circle"
         return cls(strategy=strategy or generic_strategy, model=f"scripted:{label}")
 
     async def step(
@@ -249,4 +576,12 @@ class FakeProvider:
         self.calls += 1
         call = call.model_copy(update={"id": f"fake-{self.calls}"})
         usage = Usage(input_tokens=len(system) // 4 + len(obs.text) // 4, output_tokens=16)
-        return ProviderTurn(tool_calls=[call], text=None, usage=usage, stop_reason="tool_use")
+        # No `text` and no `reasoning_tokens`: a rule has nothing to say to the human and
+        # spends nothing thinking, and a made-up count in the token line would be theatre.
+        return ProviderTurn(
+            tool_calls=[call],
+            text=None,
+            usage=usage,
+            stop_reason="tool_use",
+            thinking=_scripted_thinking(obs, decisions, call),
+        )

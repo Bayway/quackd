@@ -48,8 +48,10 @@ lease (6 s), a fixed fuse from the moment it is granted. A miss or an expired le
 releases the claim and the failed duck sits out a cooldown, during which it may keep
 searching but cannot bid. A lost heartbeat also releases the claim, but that duck is
 presumed dead and excluded for good. Either way everyone re-scans the full circle (the
-ball has moved) and the auction runs again. Ducks cannot fall in the 2D simulator, so
-fall handling waits for hardware.
+ball has moved) and the auction runs again. Ducks cannot fall in the 2D
+simulator, which is the only place a flock runs, so fall handling is untested. A duck can fall in
+`microduck:mujoco`, but every flock member has to be a `sim2d` robot, so nothing exercises
+that path yet.
 
 ## Roles
 
@@ -67,7 +69,7 @@ preempts it cleanly and does not count as a failure.
 
 ## Heterogeneous roles (0.4)
 
-A `duck: 1` file may declare `flock.roles`, and 0.4 knows exactly two:
+A `duck: 1` file may declare `flock.roles`, and quackd knows exactly two:
 
 ```yaml
 flock:
@@ -165,6 +167,43 @@ Three annotated lines from a real `flock.jsonl`, and three more from a heterogen
 {"sim_t": 9.4, "kind": "bus", "msg": {"kind": "VERDICT", "src": "reachy-01", "kicker": "duck-01", "verdict": "moved", "moved_m": 0.38}}
 ```
 
+## Watching a flock run
+
+A flock is traced like a solo run, and on by default. Each robot gets its own view with its
+name on every line, so three robots moving at once stay three readable columns rather than
+one interleaving, and the coordinator's own decisions print under `flock`.
+
+```
+duck-2  verb    search_scan(target='ball', step_deg=45, max_steps=3)
+duck-2  ->      look(x=1, y=0, z=0)
+duck-2  <-      search_scan ok: ball found: ball at bearing 28° left ~0.81 m (after 2 turn steps) (1.8 s sim, 0.1 s wall, 19 intents)
+flock   auction first bid duck-2 0.81 m
+flock   claim   duck-2 (0.81 m)
+duck-0  <-      search_scan PREEMPTED: duck-0: role change to YIELD (2.2 s sim, 0.1 s wall, 23 intents)
+duck-2  end     stopped after 5 steps
+```
+
+That is a real `--seed 3` run, trimmed. The duck that wins the claim keeps searching, and the
+two that lose are preempted mid-verb and yield, which is the moment a flock is hardest to
+read from `flock.jsonl` alone. `PREEMPTED` is its own outcome rather than an error, because
+a role change is the coordinator working, not a fault.
+
+The `auction`, `claim` and `verdict` lines are the words the GIF captions use, so a line on
+screen and a frame in `run.gif` say the same thing about the same moment.
+
+Each robot's `ducks/<name>/transcript.jsonl` is its own record and gets every event whether
+or not anyone is watching, exactly as a solo run's transcript does. `flock.jsonl` keeps the
+coordinator's story as it always has, under its own names, so nothing is written twice.
+`quackd trace <run>` replays those records afterwards, one member's transcript in full
+after another rather than interleaved, and it does not read `flock.jsonl`, so no `flock`
+line appears in a replay.
+
+With a real provider the planner's one model call is traced under `flock` and recorded
+in `flock.jsonl` as `llm_request` and `llm`. With `--provider fake`
+there is no call to trace: the planner short circuits before it reaches a model.
+
+`--no-trace` or `QUACKD_TRACE=0` removes the views and leaves every record intact.
+
 ## The shared clock
 
 Sim time is a shared resource: the world advances one tick only while every participant
@@ -186,9 +225,8 @@ Sim only. Nothing multi robot has run on hardware, and the acoustic channel stay
 theatrical (a quack, or a Reachy's expressive sound, marks the sighting; Wi Fi would carry
 the real data). Two choreographies ship: `flock-kick` (ducks) and
 `reachy-spots-duck-kicks` (a head and a duck), both 10 of 10 seeds with scripted pilots
-and ground truth checks. An MQTT bus implementing the same `Bus` protocol exists since 0.4
+and ground truth checks. An MQTT bus implementing the same `Bus` protocol exists
 ([lan.md](lan.md)), library only and tested on a fake broker; a flock across machines
 also needs a clock across machines, which is future work, as are hardware flocks once
-Microducks ship, and a flock of Open Ducks additionally needs the runner to learn a
-third body. See [adapter-status.md](adapter-status.md) for the wider honesty
+Microducks ship. See [adapter-status.md](adapter-status.md) for the wider honesty
 table.

@@ -197,7 +197,9 @@ def render(people: list[dict[str, str]]) -> str:
         x = (i % PER_ROW) * (SIZE + GAP)
         y = (i // PER_ROW) * (SIZE + GAP)
         defs.append(
-            f'<clipPath id="c{i}"><circle cx="{x + radius}" cy="{y + radius}" r="{radius}"/></clipPath>'
+            f'<clipPath id="c{i}">'
+            f'<circle cx="{x + radius}" cy="{y + radius}" r="{radius}"/>'
+            "</clipPath>"
         )
         body.append(
             f'<a href="{person["url"]}" target="_blank" rel="noopener">'
@@ -226,9 +228,11 @@ def main() -> int:
     if lost:
         # the API is eventually consistent and this image is a thank-you, so a stale answer
         # must never quietly un-thank somebody. Succeed, change nothing, say why.
-        print(f"the API did not list {', '.join(sorted(lost))} this time, leaving the image "
-              f"alone (it is eventually consistent; the weekly run will pick them up)",
-              file=sys.stderr)
+        print(
+            f"the API did not list {', '.join(sorted(lost))} this time, leaving the image "
+            f"alone (it is eventually consistent; the weekly run will pick them up)",
+            file=sys.stderr,
+        )
         return 0
     OUT.write_text(render(people), encoding="utf-8")
     print(f"{OUT.name}: {len(people)} people ({', '.join(p['login'] for p in people)})")

@@ -9,11 +9,13 @@ calls. `summary.json` records `llm_calls` (0 or 1).
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
-from quackd.agent.providers.base import Exchange, LLMProvider, Observation, Usage
+from quackd.agent.providers.base import Exchange, LLMProvider, Observation, ProviderTurn, Usage
 from quackd.duckfile.schema import DuckFile
 from quackd.flock.messages import FlockTask, Wedge
+from quackd.trace import Tracer
 
 PLAN_TOOL = {
     "name": "plan_flock_task",
@@ -66,13 +68,28 @@ async def plan_flock_task(
     task_id: str,
     log: Any = lambda *_: None,
     wedge_members: list[str] | None = None,
+    *,
+    trace: Tracer | None = None,
 ) -> tuple[FlockTask, dict[str, Wedge], Usage, int, bool]:
     """Returns (task, wedges, usage, llm_calls, fallback_used). Wedges are split over the
-    members that can move (`wedge_members`); a stationary head sweeps its whole range."""
+    members that can move (`wedge_members`); a stationary head sweeps its whole range.
+
+    `trace` narrates the one model call this run makes, as the same `llm_request`/`llm` pair
+    a solo run emits, so a flock's transcript reads like any other run's."""
     wedges = equal_wedges(wedge_members or members)
     task = default_task(duck, task_id)
     if provider.name == "fake":
         return task, wedges, Usage(), 0, False
+
+    def emit(kind: str, **data: Any) -> None:
+        if trace is not None:
+            trace.emit(kind, **data)
+
+    def note(text: str) -> None:
+        """One line for both audiences: `log` is `--verbose`, the trace shows the same words."""
+        log(text)
+        emit("note", text=text)
+
     roles = ""
     if task.roles:
         parts = [f"{name} requires {', '.join(r.requires)}" for name, r in task.roles.items()]
@@ -88,11 +105,37 @@ async def plan_flock_task(
     )
     fallback = False
     usage = Usage()
+    # `step=0`: the planner runs before the flock has taken a step, and a reader of the
+    # transcript should be able to read it exactly as a solo run's first turn
+    emit(
+        "llm_request",
+        step=0,
+        provider=provider.name,
+        model=provider.model,
+        messages=1,
+        images=0,
+        reprompt=False,
+        purpose="plan_flock_task",
+    )
+    started = time.perf_counter()
+    turn: ProviderTurn | None = None
     try:
         turn = await provider.step(
             "You plan tasks for cooperating duck robots. Answer with one tool call.",
             [Exchange(observation=Observation(text=prompt))],
             [PLAN_TOOL],
+        )
+        emit(
+            "llm",
+            step=0,
+            provider=provider.name,
+            model=provider.model,
+            text=turn.text,
+            thinking=turn.thinking,
+            tool_calls=[tc.model_dump() for tc in turn.tool_calls],
+            usage=turn.usage.model_dump(),
+            stop_reason=turn.stop_reason,
+            latency_s=round(time.perf_counter() - started, 3),
         )
         usage = turn.usage
         call = next((c for c in turn.tool_calls if c.name == "plan_flock_task"), None)
@@ -112,9 +155,20 @@ async def plan_flock_task(
             except Exception:
                 dropped[k] = v
         if dropped:
-            log(f"planner dropped invalid arguments: {dropped}")
+            note(f"planner dropped invalid arguments: {dropped}")
     except Exception as e:  # planner trouble (refusal, no call, network) -> defaults
         fallback = True
-        log(f"planner fallback: {type(e).__name__}: {e}")
+        if turn is None:
+            # only when the CALL failed. A reply that arrived and then disappointed us was
+            # already narrated above, and one `llm` per `llm_request` is what a reader counts on
+            emit(
+                "llm",
+                step=0,
+                provider=provider.name,
+                model=provider.model,
+                error=f"{type(e).__name__}: {e}",
+                latency_s=round(time.perf_counter() - started, 3),
+            )
+        note(f"planner fallback: {type(e).__name__}: {e}")
         task = default_task(duck, task_id)
     return task, wedges, usage, 1, fallback

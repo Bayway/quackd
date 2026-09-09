@@ -7,11 +7,14 @@ upstream call without `--robot microduck:jsonrpc|websocket`" promise is kept.
 
 from __future__ import annotations
 
+import os
+
 from quackd.transport.base import DuckTransport, TransportError
 
-TRANSPORT_NAMES = ("sim2d", "mock", "jsonrpc", "websocket")
+TRANSPORT_NAMES = ("sim2d", "mujoco", "mock", "jsonrpc", "websocket")
 TRANSPORT_STATUS = {
     "sim2d": "✅ built-in simulator (default)",
+    "mujoco": "✅ physics: upstream's model and walk policy (needs quackd[mujoco])",
     "mock": "✅ scripted, for tests",
     "jsonrpc": "🧪 experimental — real robot over robotd's unix socket (or a TCP forward)",
     "websocket": "⏳ stub — tracks upstream architecture.md §5.3, not shipped upstream",
@@ -31,6 +34,17 @@ def make_transport(
         from quackd.transport.sim2d import Sim2DTransport
 
         return Sim2DTransport(seed=seed if seed is not None else 0, live=live)
+    if name == "mujoco":
+        from quackd.transport.mujoco import BODY_ENV, DEFAULT_BODY, MujocoTransport
+
+        # The real duck by default: it is the whole point of a physics backend. The
+        # kinematic stand-in is one env var away for anyone who would rather not spend ten
+        # megabytes on upstream's meshes, and is what the tests use.
+        return MujocoTransport(
+            seed=seed if seed is not None else 0,
+            live=live,
+            body=os.environ.get(BODY_ENV) or DEFAULT_BODY,
+        )
     if name == "mock":
         from quackd.transport.mock import MockTransport
 

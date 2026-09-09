@@ -72,6 +72,12 @@ class DuckState(BaseModel):
             parts.append("fall-blind=nothing-detects-falls")
         if self.extras.get("state_stale"):
             parts.append("state=UNREADABLE")
+        # A pointer, not the list. The agent loop puts the sentences in the system prompt,
+        # where there is room for them, but `mcp_server.py` has no system prompt at all: a
+        # Claude Desktop pilot reads tool results only, and `report_state` returns this line
+        # with `extras` beside it. Without this, that pilot is told nothing at all.
+        if assumptions := self.extras.get("assumptions"):
+            parts.append(f"stand-ins={len(assumptions)}-listed-in-extras.assumptions")
         if self.battery_percent is not None:
             parts.append(f"battery={self.battery_percent:.0f}%")
         if self.holding:

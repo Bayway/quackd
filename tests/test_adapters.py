@@ -164,6 +164,9 @@ async def test_factory_describes_and_makes_adapters() -> None:
         "lerobot",
         "rosbridge",
         "open_duck",
+        "xlerobot",
+        "alohamini",
+        "toddlerbot",
     ]
     assert rows[0]["installed"] and "sim2d" in rows[0]["backends"]
     assert rows[1]["extra"] == "quackd[reachy]" and "sdk" in rows[1]["backends"]

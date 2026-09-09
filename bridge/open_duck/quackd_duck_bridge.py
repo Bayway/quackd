@@ -1,6 +1,7 @@
 """quackd's bridge for the Open Duck Mini v2: the walk loop, with the network as its pad.
 
-This is the only part of quackd that runs on a robot. It exists because the Open Duck Mini
+This was the first part of quackd to run on a robot; `bridge/alohamini/` and
+`bridge/toddlerbot/` came later. It exists because the Open Duck Mini
 v2's runtime has no network control API: its command source is a local pygame gamepad and
 its only socket checks the IMU. Rather than reimplement a 50 Hz control loop we are not
 licensed to copy, this process *is* upstream's loop, with one substitution: the class it

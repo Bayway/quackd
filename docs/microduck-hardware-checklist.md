@@ -1,8 +1,9 @@
 # Microduck: the first hardware run
 
 Nobody has run quackd against a physical Microduck. If you have one — your own, or somebody
-else's for an afternoon — this page is the order to do it in. Every step has an abort
-condition, and they are ordered so that the duck's feet do not touch the ground until step 9.
+else's for an afternoon — this page is the order to do it in. Every step that can go wrong has an
+abort condition, and they are ordered so that the duck's feet do not touch the ground until
+step 9.
 
 **This is a robot you are probably borrowing.** Nothing here installs anything on it, stops any
 of its services, or needs `sudo`. Step 6 has an alternative that does, and it is marked, and it
@@ -11,6 +12,28 @@ is the one to skip unless whoever owns the duck has said yes.
 **The gamepad is the real e-stop.** Upstream is explicit that `padd` has authority and quackd
 does not arbitrate. Somebody should be holding it. quackd's `stop` is a request over a socket,
 and step 8 is where you find out what happens when that socket is not there.
+
+## 0. Rehearse in the physics simulator first
+
+`microduck:mujoco` is upstream's own model walking on upstream's own `alpha_walking.onnx`, so
+the two tasks you will run on the robot run against it unchanged:
+
+```bash
+uv pip install 'quackd[mujoco,anthropic]'
+quackd run microduck-lookout --robot microduck:mujoco --provider anthropic
+quackd run find-and-kick --robot microduck:mujoco --provider anthropic
+```
+
+The first run fetches the model and the policies into `~/.quackd/cache`, so do that before you
+are standing next to somebody else's robot rather than on their Wi-Fi.
+
+What it rehearses is the pilot, your provider, each task's allowlist, and reading a run's trace
+while it happens. It touches nothing below: no socket, no `hello` handshake, no `robot.health`,
+no camera transport and no deadman. Four skills there are quackd's own stand-ins rather than the
+robot's, and say so in `state.extras.assumptions`: `kick` and `grab` use the cartoon's contact
+rules, `sit` is refused, and a fall is recovered by resetting the model. The gait floor in the
+simulator was measured on one machine with the XML's own actuators, and upstream deploys a
+different actuator model, so the speeds that walk there are not the speeds that will walk here.
 
 ## 1. Reach the daemon at all
 
@@ -55,8 +78,8 @@ Then read `report_state` in the transcript. **`posture` must not be `unknown`.**
 duck may walk is reading nothing: `fallen` is `false` because nobody is looking, not because
 the duck is upright. quackd refuses to walk in that state on purpose.
 
-> Abort if posture is `unknown`. Check that `robot.subscribe` was accepted — `quackd doctor`
-> prints the answer, including the robot's real skill list.
+> Abort if posture is `unknown`. Check that `robot.subscribe` was accepted — `report_state`
+> carries its answer in `extras.subscribed`, including the robot's real skill list.
 
 ## 4. A dry run moves nothing
 
@@ -121,7 +144,7 @@ thing that broke.
 > **Abort the whole session if the legs keep driving.** The deadman is the protection every
 > step below this one depends on. Nothing else quackd does matters if it is not there.
 
-The command, since this step never named one. `--provider fake` has no script for a free-form goal, so it needs a real model:
+The command, since this step never named one. `--provider fake` answers a free-form goal with a fixed script that ignores it, so it needs a real model:
 
 ```bash
 quackd run --goal "walk in place with small steps, do not turn, then stop" \
@@ -140,6 +163,10 @@ quackd run find-and-kick --robot microduck:jsonrpc --address tcp://127.0.0.1:987
 
 Start with `--no-memory` for a clean first run, then `--memory-dir` so the campaign's notes stay
 out of your simulator's.
+
+> Abort and let the gamepad take it if the duck goes over. Nothing quackd sends stands a fallen
+> duck up on its own: `stand_up` is `robot.enable {on: true}` and it checks `safety.fallen`
+> afterwards rather than claiming upright, so the recovery is `robotd`'s or it is the owner's.
 
 ## 10. Tell everyone
 

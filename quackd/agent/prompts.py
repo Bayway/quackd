@@ -83,9 +83,15 @@ def build_system_prompt(
     transport_name: str,
     manifest: RobotManifest | None = None,
     memory_text: str | None = None,
+    *,
+    assumptions: list[str] | None = None,
 ) -> str:
     """`memory_text` is what the robot remembers from earlier runs (`RobotMemory.recall`);
-    None means memory is off for this run, "" means on but empty."""
+    None means memory is off for this run, "" means on but empty.
+
+    `assumptions` is what the robot says quackd is standing in for on this backend, read from
+    `state.extras` when the run connects. It belongs in the prompt rather than in every
+    observation because the list is sentences and an observation line is a line."""
     fm = duck.frontmatter
     blurb = manifest.blurb if manifest is not None and manifest.blurb else DUCK_BLURB
     names = {v.name for v in verbs}
@@ -101,6 +107,17 @@ def build_system_prompt(
     abort_lines = (
         "\n".join(f"- {a}" for a in advisory) if advisory else "- (none beyond the enforced ones)"
     )
+    stand_ins = ""
+    if assumptions:
+        listed = "\n".join(f"- {a}" for a in assumptions)
+        stand_ins = f"""
+## What is a stand-in on this robot
+The robot reported these itself, and they are in `extras.assumptions` in every observation.
+Each is something quackd stands in for or assumes, not something this robot does. Do not
+report one as the robot's own work, and do not read a success from one as evidence that the
+real skill works.
+{listed}
+"""
     persona = f"\n## Persona\n{fm.persona}\n" if fm.persona else ""
     memory = ""
     if memory_text is not None:
@@ -114,12 +131,22 @@ where an object usually is, which strategy worked, what to avoid. It moves nothi
 costs no step, though it does use one of your calls. Do not save what is already listed
 above.
 """
-    sim_note = (
-        "\nYou are in the built-in 2D simulator: a cartoon top-down world. Distances are metres, "
-        "the arena is about 2 m across, and the ball is orange.\n"
-        if transport_name == "sim2d"
-        else ""
-    )
+    sim_note = ""
+    if transport_name == "sim2d":
+        sim_note = (
+            "\nYou are in the built-in 2D simulator: a cartoon top-down world. Distances are "
+            "metres, the arena is about 2 m across, and the ball is orange.\n"
+        )
+    elif transport_name == "mujoco":
+        # Deliberately only the arena. What the body is, and what its legs can do, differs
+        # between the real duck and the kinematic stand-in behind this one backend name, and
+        # both describe themselves in the stand-ins block below. Saying it here as well
+        # contradicted one of them: this told the model it was driving "a real biped on its
+        # own learned gait" even when it was driving the puppet.
+        sim_note = (
+            "\nYou are in the physics simulator (MuJoCo): a 2 m arena with low walls, an orange "
+            "ball that rolls when kicked, and a blue person marker. Distances are metres.\n"
+        )
     return f"""You are the brain of {blurb}. You are a high-level pilot:
 you choose ONE verb per turn; the robot's own controllers handle balance and gait, and composite
 verbs like `{loop_verb}` close their own loops on the camera. Do not micro-manage.
@@ -139,7 +166,7 @@ verbs like `{loop_verb}` close their own loops on the camera. Do not micro-manag
 
 ## Verbs
 {verb_lines}
-{persona}{memory}{sim_note}
+{stand_ins}{persona}{memory}{sim_note}
 ## Task file: {fm.name} — {fm.description}
 
 {duck.body}

@@ -17,17 +17,27 @@ README = (REPO / "README.md").read_text(encoding="utf-8")
 
 
 def test_adapter_status_lists_every_microduck_upstream_ref() -> None:
+    """The Microduck has two upstreams and adapter-status.md carries both: `robotd`'s API,
+    and `microduck_rl`'s model and policies, which the physics backend fetches and runs.
+
+    Every other upstream in the project has a doc-completeness guard, the seven adapter pages
+    through `test_adapter_doc_lists_every_upstream_ref` and `robotd` through this one. Without
+    the second loop the newest table is the only one that can go stale in silence.
+    """
+    from quackd.sim3d import upstream_api as microduck_rl
+
     doc = (REPO / "docs" / "adapter-status.md").read_text(encoding="utf-8")
     missing = [ref.name for ref in up.all_refs() if ref.name not in doc]
     assert not missing, f"docs/adapter-status.md is missing: {missing}"
+    unverified = [
+        ref.name for ref in microduck_rl.refs_by_status("UNVERIFIED") if ref.name not in doc
+    ]
+    assert not unverified, f"adapter-status.md is missing microduck_rl assumptions: {unverified}"
     from quackd.adapters.factory import BACKENDS
 
     for adapter, backends in BACKENDS.items():
         for backend in backends:
             assert f"`{adapter}:{backend}`" in doc, f"adapter-status.md lacks {adapter}:{backend}"
-    # the old page is a redirect, not a stale copy
-    old = (REPO / "docs" / "transport-status.md").read_text(encoding="utf-8")
-    assert "adapter-status.md" in old and "VERIFIED (read" not in old
 
 
 def test_adapter_guide_and_manifest_spec_match_the_code() -> None:
@@ -45,7 +55,10 @@ def test_adapter_guide_and_manifest_spec_match_the_code() -> None:
     assert "manifest.schema.json" in spec and "digest()" in spec
 
 
-@pytest.mark.parametrize("adapter", ["reachy_mini", "lerobot", "rosbridge", "open_duck"])
+@pytest.mark.parametrize(
+    "adapter",
+    ["reachy_mini", "lerobot", "rosbridge", "open_duck", "xlerobot", "alohamini", "toddlerbot"],
+)
 def test_adapter_doc_lists_every_upstream_ref(adapter: str) -> None:
     api = importlib.import_module(f"quackd.adapters.{adapter}.upstream_api")
     doc = (REPO / "docs" / "adapters" / f"{adapter}.md").read_text(encoding="utf-8")
@@ -75,6 +88,8 @@ def test_readme_promises() -> None:
         "--flock",
         "flock-kick",
         "docs/flock.md",
+        "--no-trace",
+        "QUACKD_TRACE",
     ):
         assert needle in README, needle
     assert "quadruped" not in README.lower()
@@ -126,6 +141,98 @@ def test_readme_images_are_absolute_and_exist() -> None:
 def test_readme_verbs_match_registry() -> None:
     for name in default_registry().names():
         assert f"`{name}`" in README, f"README does not mention verb {name}"
+
+
+def _emitted_kinds(*modules: str) -> set[str]:
+    """Every literal event kind those modules emit, read out of the source. A kind nobody
+    documented is a kind nobody knows to look for, and only the code knows them all."""
+    import ast
+
+    kinds: set[str] = set()
+    for name in modules:
+        tree = ast.parse((REPO / "quackd" / name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            fn = node.func
+            called = fn.attr if isinstance(fn, ast.Attribute) else None
+            if called in ("emit", "write", "_emit", "_event") and isinstance(
+                node.args[0], ast.Constant
+            ):
+                value = node.args[0].value
+                if isinstance(value, str) and value.islower():
+                    kinds.add(value)
+    return kinds
+
+
+def test_the_docs_describe_every_trace_event_the_code_emits() -> None:
+    """architecture.md is the one place that enumerates the transcript, so it is the one
+    place this can go stale."""
+    # the three modules that write a *run* transcript. The flock keeps its own `flock.jsonl`
+    # (docs/flock.md) and the MCP server's two envelope kinds are documented in docs/mcp.md.
+    emitted = _emitted_kinds("agent/loop.py", "safety.py", "trace.py")
+    doc = (REPO / "docs" / "architecture.md").read_text(encoding="utf-8")
+    missing = [kind for kind in sorted(emitted) if f"`{kind}`" not in doc]
+    assert not missing, f"docs/architecture.md does not describe: {missing}"
+
+
+def test_the_mcp_doc_describes_the_envelope_the_server_puts_round_a_call() -> None:
+    """A model reading a tool result sees the server's own kinds first and last. They belong
+    in the page the model's operator reads, not only in the one about the run loop."""
+    emitted = _emitted_kinds("mcp_server.py")
+    doc = (REPO / "docs" / "mcp.md").read_text(encoding="utf-8")
+    architecture = (REPO / "docs" / "architecture.md").read_text(encoding="utf-8")
+    missing = [k for k in sorted(emitted) if f"`{k}`" not in doc and f"`{k}`" not in architecture]
+    assert not missing, f"neither docs/mcp.md nor architecture.md describes: {missing}"
+
+
+def test_the_docs_name_every_gate_the_code_can_fire() -> None:
+    """A gate is the difference between a refusal you can act on and an `ok: false` you
+    cannot, so every one of them has to be findable by name in the docs."""
+    import ast
+
+    gates: set[str] = set()
+    for name in ("safety.py", "mcp_server.py"):
+        tree = ast.parse((REPO / "quackd" / name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if (fn.attr if isinstance(fn, ast.Attribute) else None) not in ("emit", "_emit"):
+                continue
+            if not node.args or getattr(node.args[0], "value", None) != "gate":
+                continue
+            for kw in node.keywords:
+                if kw.arg == "gate" and isinstance(kw.value, ast.Constant):
+                    gates.add(str(kw.value.value))
+    assert gates, "no gate names found: the reader stopped seeing what the code emits"
+    docs = "".join(
+        (REPO / "docs" / name).read_text(encoding="utf-8") for name in ("architecture.md", "mcp.md")
+    )
+    missing = sorted(g for g in gates if f"`{g}`" not in docs)
+    assert not missing, f"architecture.md and mcp.md name no gate called: {missing}"
+
+
+def test_the_trace_is_documented_where_it_is_configured() -> None:
+    for path, needles in (
+        (
+            "docs/architecture.md",
+            (
+                "## Trace",
+                "--no-trace",
+                "QUACKD_TRACE",
+                "QUACKD_TRACE_PROMPT",
+                "QUACKD_TRACE_THINKING",
+            ),
+        ),
+        ("docs/mcp.md", ("trace", "--no-trace", "QUACKD_TRACE")),
+        ("docs/safety.md", ("--dry-run", "dry_run")),
+        (".env.example", ("QUACKD_TRACE", "QUACKD_TRACE_THINKING", "QUACKD_TRACE_PROMPT")),
+        ("docs/flock.md", ("trace", "--no-trace")),
+    ):
+        text = (REPO / path).read_text(encoding="utf-8")
+        for needle in needles:
+            assert needle in text, f"{path} does not mention {needle!r}"
 
 
 def test_mcp_doc_lists_every_tool() -> None:
@@ -301,3 +408,120 @@ def test_no_living_document_claims_the_wrong_number_of_mcp_tools() -> None:
         # anything that still describes the removed aliases as present, in any wording
         for stale in ("duck_* tools kept as aliases", "`duck_*` tools kept as aliases"):
             assert stale not in haystack, f"{path.name} describes the duck_* aliases as present"
+
+
+# ── the guard that was missing twice ────────────────────────────────────────────────────
+
+
+def test_the_architecture_diagram_names_every_adapter() -> None:
+    """`_prose()` strips fenced blocks before every other doc guard, so the mermaid diagram
+    is invisible to all of them by construction.
+
+    That is not hypothetical. `docs/design/memory.md` records 0.6 fixing exactly this defect
+    ("the README's architecture diagram listed four adapters and omitted `open_duck` and its
+    `bridge` backend, which the adapter-count guard could not see because it reads the phrase
+    'N adapters' and not a list"). Nothing was added to catch it, so it came back three
+    adapters later. This is that guard.
+    """
+    from quackd.adapters.factory import ADAPTER_NAMES, BACKENDS
+
+    node = next((line for line in README.splitlines() if 'ADAPTER["robot adapter' in line), None)
+    assert node is not None, "the architecture diagram's adapter node has moved or gone"
+
+    # The names as a SET, split on the separator, not as substrings. `"lerobot" in node` is
+    # satisfied by the `xlerobot` entry, so a substring check cannot see `lerobot` go missing,
+    # which is the one adapter whose name is contained in another's.
+    listed = {n.strip() for n in node.split("<br/>")[1].split("·")}
+    missing = [name for name in ADAPTER_NAMES if name not in listed]
+    assert not missing, f"the architecture diagram does not name: {missing} (has {listed})"
+    extra = [name for name in listed if name and name not in ADAPTER_NAMES]
+    assert not extra, f"the architecture diagram names adapters that do not exist: {extra}"
+
+    #: Backends are listed by their bare name in that node, so every distinct one must appear.
+    kinds = {backend for backends in BACKENDS.values() for backend in backends}
+    absent = sorted(k for k in kinds if k not in node)
+    assert not absent, f"the architecture diagram does not name the backends: {absent}"
+
+
+def test_no_fenced_block_names_a_stale_subset_of_the_adapters() -> None:
+    """The general form of the same hole: any fenced block that enumerates most of the
+    adapters has to enumerate all of them, or it is a list somebody forgot to update."""
+    from quackd.adapters.factory import ADAPTER_NAMES
+
+    for doc in [REPO / "README.md", *sorted((REPO / "docs").rglob("*.md"))]:
+        text = doc.read_text(encoding="utf-8")
+        for block in re.findall(r"```.*?```", text, flags=re.S):
+            named = [n for n in ADAPTER_NAMES if n in block]
+            if len(named) < len(ADAPTER_NAMES) - 2:
+                continue  # not an enumeration, just a couple of examples
+            missing = [n for n in ADAPTER_NAMES if n not in block]
+            assert not missing, (
+                f"{doc.relative_to(REPO)}: a fenced block names {len(named)} adapters "
+                f"and omits {missing}"
+            )
+
+
+#: The README's verb table names bodies, not adapter ids, so the mapping is written down.
+_VERB_TABLE_ROWS = {
+    "microduck": "| Microduck |",
+    "reachy_mini": "| Reachy Mini |",
+    "lerobot": "| LeRobot arm |",
+    "rosbridge": "| rosbridge base |",
+    "open_duck": "| Open Duck Mini v2 |",
+    "xlerobot": "| XLeRobot |",
+    "alohamini": "| AlohaMini |",
+    "toddlerbot": "| ToddlerBot |",
+}
+
+_CORE_VERBS = frozenset(
+    {"observe", "report_state", "stop", "say", "move", "go_to", "search_scan", "approach_and"}
+)
+
+
+async def _implementable(adapter: str) -> set[str]:
+    """Every verb this adapter has an implementation for, across all its builds."""
+    import importlib
+
+    module = importlib.import_module(f"quackd.adapters.{adapter}")
+    return set(module.implementations())
+
+
+def test_the_readme_verb_table_has_a_row_per_body_listing_its_real_verbs() -> None:
+    """The other list-shaped thing no guard could see.
+
+    `test_readme_verbs_match_registry` only checks that each *core* verb appears somewhere in
+    the whole README, so a body could be added with its own verbs and never get a row. Four
+    were: Open Duck Mini, XLeRobot, AlohaMini and ToddlerBot all shipped verbs of their own
+    with nothing in the table.
+    """
+    import asyncio
+
+    from quackd.adapters.factory import ADAPTER_NAMES, make_adapter
+
+    assert set(_VERB_TABLE_ROWS) == set(ADAPTER_NAMES), "the row map has drifted from the code"
+
+    offline = {"microduck": "sim2d", "lerobot": "mock", "rosbridge": "mock"}
+    for adapter in ADAPTER_NAMES:
+        backend = offline.get(adapter, "mock")
+        manifest = asyncio.run(make_adapter(f"{adapter}:{backend}", seed=0).connect())
+        own = sorted(set(manifest.verb_names()) - _CORE_VERBS)
+        prefix = _VERB_TABLE_ROWS[adapter]
+        row = next((line for line in README.splitlines() if line.startswith(prefix)), None)
+        assert row is not None, f"the verb table has no row for {adapter}"
+        if not own:
+            continue  # a body with nothing of its own says so in prose
+        # The verbs cell only. Searching the whole row lets the description satisfy it, and
+        # these descriptions name verbs: the first version of this guard passed happily with
+        # two of the ToddlerBot's three verbs deleted from the cell.
+        cell = row.split("|")[2]
+        missing = [v for v in own if f"`{v}`" not in cell]
+        assert not missing, f"the {adapter} row does not list its own verbs: {missing}"
+        # And the other direction, which is the drift that happens when a verb is deleted from
+        # an adapter and nobody remembers the README.
+        listed = {chunk.strip() for chunk in cell.split("`") if chunk.strip()}
+        # Against everything the adapter can implement, not just what this build reports: a
+        # row may name a verb only some builds have (the ToddlerBot's `grip` needs the gripper
+        # variant), but it may never name one the adapter cannot implement at all.
+        possible = set(asyncio.run(_implementable(adapter)))
+        gone = [v for v in listed if v not in possible and v not in _CORE_VERBS]
+        assert not gone, f"the {adapter} row lists verbs the adapter cannot implement: {gone}"

@@ -24,6 +24,7 @@ never share notes (a note about the cartoon arena is wrong for your living room)
 
 ```
 ~/.quackd/memory/microduck-sim2d.jsonl
+~/.quackd/memory/microduck-mujoco.jsonl
 ~/.quackd/memory/microduck-jsonrpc.jsonl
 ~/.quackd/memory/reachy-mini-mock.jsonl
 ```
@@ -31,6 +32,11 @@ never share notes (a note about the cartoon arena is wrong for your living room)
 The key is the body, not the name you gave it, so two members of one fleet that are the
 same `adapter:backend` share a file. That is the same rule that keeps `microduck:sim2d` and
 `microduck:jsonrpc` apart, read the other way round.
+
+`microduck:sim2d` and `microduck:mujoco` are the pair that catches people out. They share an
+arena, a seed and a `.duck` file by design, and they still keep separate files, because what a
+pilot learns about how far to walk before kicking comes from the body, and only one of the two
+has a gait.
 
 Override the directory with `--memory-dir` or `QUACKD_MEMORY_DIR`. Turn it off for one run
 with `--no-memory`. The file is plain text, one JSON object per line, meant to be read and
@@ -63,7 +69,8 @@ wrote to it (both cases are in [`assets/transcripts/`](assets/transcripts/)). Wh
 putting the call **inside the numbered strategy** of the `.duck` body, right before the
 declaration (`5. When the ball has moved ≥ 0.3 m, \`remember\` where you found the ball,
 \`quack\` once and declare success.`), plus a short *Memory* section saying what is worth
-keeping. Every solo starter duck now does that; `--goal` runs get the same line. The flock
+keeping. The solo starters do that, except the three lookouts added in 0.7 (`xlerobot-lookout`,
+`alohamini-lookout`, `toddlerbot-lookout`); `--goal` runs get the same line. The flock
 ducks do not, because the coordinator does not run the deliberation loop and has no
 `remember`. `hello-world` is left alone: it is a smoke test that says "do not do anything
 else". Write your own ducks the same way.

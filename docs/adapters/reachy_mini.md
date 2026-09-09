@@ -1,7 +1,7 @@
 # Reachy Mini
 
 A stationary expressive head from Pollen Robotics: a camera, a six-degree-of-freedom neck,
-two antennas, a speaker and a microphone. No legs. quackd 0.4 drives it through the same
+two antennas, a speaker and a microphone. No legs. quackd drives it through the same
 loop, executor and `.duck` contract as the Microduck; what changes is the manifest, and
 therefore the verbs. Reachy Mini hardware exists today; the `sdk` backend has **never been
 run against one by us**.
@@ -48,7 +48,7 @@ validation, not in the prompt. `search_scan` exists because the head can look ar
 | Verb | Kind | What it does here |
 |---|---|---|
 | `observe` (alias `get_frame`) | core | a camera frame plus detections; bearings are camera-relative |
-| `report_state` | core | head yaw and pitch, motor mode, whether an expression is playing; battery is always `null` (the SDK has none) |
+| `report_state` | core | head yaw and motor mode; battery is always `null` (the SDK has none) |
 | `stop` | core | `cancel_move()`. Never limp (see Safety) |
 | `say(text)` | core | no text to speech on this robot: the text is logged verbatim and voiced as the closest expressive sound (`?` is curious, a greeting is welcoming, joy is cheerful, sadness is sad, `!` is surprised, otherwise attentive). Chosen by the project owner over "no `say`" and "a local TTS extra" ([ADR-0023](../adr/0023-reachy-mini.md)) |
 | `search_scan(target)` | core | a gaze sweep from the current yaw outward (`c, c+s, c-s, c+2s, ...`) within 180°, one frame per look; the head is left on the target and the result carries `gaze_yaw_deg` |

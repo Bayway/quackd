@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import faulthandler
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,24 @@ from quackd.verbs.registry import VerbRegistry, default_registry
 REPO = Path(__file__).resolve().parents[1]
 DUCKS = REPO / "ducks"
 
+EXIT_GRACE_S = 120
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """If the interpreter has not exited two minutes after pytest is done, dump every thread
+    and force the exit. `faulthandler_timeout` watches a test; nothing watches the shutdown
+    after the last one, and that is where a `zmq.Context` left unclosed by a failing test
+    was garbage collected into a `term()` that waits forever, which held three macOS jobs
+    for six hours with no trace of what they were doing. This names the frame.
+
+    Unconfigure rather than sessionfinish, and a flush first: the failure report is printed
+    inside sessionfinish, and `_exit` flushes nothing, so arming the timer any earlier
+    turned the one line that mattered into a lost buffer."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    faulthandler.dump_traceback_later(EXIT_GRACE_S, exit=True)
+
 
 @pytest.fixture(autouse=True)
 def _memory_in_tmp(
@@ -23,6 +43,36 @@ def _memory_in_tmp(
     runs the CLI with memory on (the default) gets a throwaway directory instead. Not inside
     `tmp_path`: tests count the run directories they make there."""
     monkeypatch.setenv("QUACKD_MEMORY_DIR", str(tmp_path_factory.mktemp("quackd-memory")))
+
+
+@pytest.fixture(autouse=True)
+def _asset_cache_in_tmp(
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The physics backend's downloaded model lives in `~/.quackd/cache`, and a developer who
+    has one was running a different suite from CI: `ensure_microduck(offline=True)` found it
+    and the tests that skip everywhere else ran here. Everything gets a throwaway cache and no
+    checkout override, so a skip is a skip on both machines.
+
+    Except the `real_duck` tests, whose whole purpose is the developer's real cache. They
+    still never fetch — an empty one skips them — so this decides which machine they run on,
+    not whether they download."""
+    if request.node.get_closest_marker("real_duck") is not None:
+        return
+    monkeypatch.setenv("QUACKD_CACHE_DIR", str(tmp_path_factory.mktemp("quackd-cache")))
+    monkeypatch.delenv("QUACKD_MICRODUCK_ASSETS", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _trace_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The trace is on by default and goes to stderr, which CliRunner folds into `output`,
+    so every CLI and acceptance test would carry pages of it in its failure message and its
+    substring assertions would match by accident. Off for the suite; the tests that prove
+    the default is on set `QUACKD_TRACE` to an empty string themselves (an empty value is
+    on, and unlike `delenv` it also shields them from a developer's own `.env`)."""
+    monkeypatch.setenv("QUACKD_TRACE", "0")
 
 
 @pytest.fixture

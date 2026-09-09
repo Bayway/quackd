@@ -95,15 +95,34 @@ def parse_response(response: Any) -> ProviderTurn:
             args = {"_unparsed": raw_args}
         tool_calls.append(ToolCall(id=str(tc.id), name=str(fn.name), arguments=args))
     usage = getattr(response, "usage", None)
+    # OpenAI's own Chat Completions returns no reasoning text, only a count of the tokens it
+    # spent on it. DeepSeek, vLLM's reasoning parsers, llama.cpp, LM Studio and xAI put the
+    # text in `reasoning_content`; Ollama's /v1 and OpenRouter in `reasoning`. The SDK's
+    # message model keeps unknown wire fields as attributes, so both reads work on the real
+    # object and on a stub alike.
+    reasoning = next(
+        (
+            v
+            for v in (
+                getattr(message, "reasoning_content", None),
+                getattr(message, "reasoning", None),
+            )
+            if isinstance(v, str) and v.strip()
+        ),
+        None,
+    )
+    details = getattr(usage, "completion_tokens_details", None)
     return ProviderTurn(
         tool_calls=tool_calls,
         text=getattr(message, "content", None) or None,
         usage=Usage(
             input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
             output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+            reasoning_tokens=int(getattr(details, "reasoning_tokens", 0) or 0),
         ),
         stop_reason=getattr(choice, "finish_reason", None),
         raw=None,
+        thinking=reasoning.strip() if reasoning else None,
     )
 
 
@@ -171,6 +190,10 @@ class OpenAIProvider:
             params["parallel_tool_calls"] = False
         return params
 
+    def _normalise(self, turn: ProviderTurn) -> ProviderTurn:
+        """Hook: tidy a parsed turn before anything reads its text. Base: nothing."""
+        return turn
+
     def _fallback(self, turn: ProviderTurn, tools: list[dict[str, Any]]) -> ProviderTurn:
         """Hook for providers that can rescue a tool call from plain text. Base: nothing."""
         return turn
@@ -179,15 +202,19 @@ class OpenAIProvider:
         self, system: str, history: list[Exchange], tools: list[dict[str, Any]]
     ) -> ProviderTurn:
         self.calls += 1
+        # parse_response is inside the try on purpose: a gateway that answers a content
+        # filter with `choices: []`, or a usage field that is not a number, would otherwise
+        # escape the provider as a raw traceback — the CLI only catches TransportError and
+        # ProviderError. The fallback stays outside: it is quackd's code, not the SDK's.
         try:
             response = await self.client.chat.completions.create(
                 **self._params(system, history, tools)
             )
+            turn = self._normalise(parse_response(response))
         except ProviderError:
             raise
         except Exception as e:
             raise ProviderError(f"{self.name}: {type(e).__name__}: {e}") from e
-        turn = parse_response(response)
         if not turn.tool_calls:
             turn = self._fallback(turn, tools)
         return turn

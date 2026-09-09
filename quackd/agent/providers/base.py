@@ -24,11 +24,15 @@ class ToolCall(BaseModel):
 class Usage(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
+    reasoning_tokens: int = 0
+    """Tokens spent thinking, when the API counts them apart from the answer (OpenAI does).
+    Anthropic folds thinking into `output_tokens`, so it stays 0 there."""
 
     def __add__(self, other: Usage) -> Usage:
         return Usage(
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
+            reasoning_tokens=self.reasoning_tokens + other.reasoning_tokens,
         )
 
 
@@ -70,6 +74,12 @@ class ProviderTurn(BaseModel):
     usage: Usage = Field(default_factory=Usage)
     stop_reason: str | None = None
     raw: Any = None
+    thinking: str | None = Field(
+        default=None,
+        description="What the model reasoned before answering, as the vendor shows it: a "
+        "summary on Claude, the reasoning field of an OpenAI-compatible server, Gemini's "
+        "thought parts. None when the provider returned nothing of the kind.",
+    )
 
 
 class ProviderError(RuntimeError):

@@ -34,12 +34,15 @@ EXTRAS = {
     "gemini": ("google.genai", "quackd[gemini]"),
     "yolo": ("ultralytics", "quackd[yolo]"),
     "live": ("pygame", "quackd[live]"),
+    "mujoco": ("mujoco", "quackd[mujoco]"),
     "reachy": ("reachy_mini", "quackd[reachy]"),
     "lan (zeroconf)": ("zeroconf", "quackd[lan]"),
     "lan (mqtt)": ("paho.mqtt.client", "quackd[lan]"),
     "lerobot": ("lerobot", "quackd[lerobot]"),
     "rosbridge": ("roslibpy", "quackd[rosbridge]"),
     "microduck camera (webrtc)": ("aiortc", "quackd[microduck-camera]"),
+    "xlerobot": ("zmq", "quackd[xlerobot]"),
+    "alohamini": ("zmq", "quackd[alohamini]"),
 }
 # Robot SDKs are looked up by distribution metadata only: importing reachy_mini pulls
 # onnxruntime and GStreamer, and lerobot pulls torch, into a diagnostics command, which is
@@ -373,7 +376,7 @@ def run_doctor(
 
     unverified = up.refs_by_status("UNVERIFIED")
     t = Table(
-        title=f"upstream assumptions (UNVERIFIED: {len(unverified)}) — see docs/transport-status.md"
+        title=f"upstream assumptions (UNVERIFIED: {len(unverified)}) — see docs/adapter-status.md"
     )
     t.add_column("what")
     t.add_column("note")
@@ -387,16 +390,22 @@ def run_doctor(
         "the jsonrpc backend has never been run against a robotd[/dim]"
     )
 
+    from quackd.adapters.alohamini import upstream_api as alohamini_api
     from quackd.adapters.lerobot import upstream_api as lerobot_api
     from quackd.adapters.open_duck import upstream_api as open_duck_api
     from quackd.adapters.reachy_mini import upstream_api as reachy
     from quackd.adapters.rosbridge import upstream_api as rosbridge_api
+    from quackd.adapters.toddlerbot import upstream_api as toddlerbot_api
+    from quackd.adapters.xlerobot import upstream_api as xlerobot_api
 
     for name, api, backend, target in (
         ("reachy_mini", reachy, "sdk", "a robot"),
         ("lerobot", lerobot_api, "real", "an arm"),
         ("rosbridge", rosbridge_api, "ws", "a bridge"),
         ("open_duck", open_duck_api, "bridge", "a duck"),
+        ("xlerobot", xlerobot_api, "zmq", "a cart"),
+        ("alohamini", alohamini_api, "zmq", "a robot"),
+        ("toddlerbot", toddlerbot_api, "bridge", "a humanoid"),
     ):
         unverified = api.refs_by_status("UNVERIFIED")
         t = Table(
@@ -413,4 +422,27 @@ def run_doctor(
             f"VERIFIED refs: {len(api.refs_by_status('VERIFIED'))} · "
             f"the {backend} backend has never been run against {target}[/dim]"
         )
+    _microduck_rl_table(console)
     return bool(ok)
+
+
+def _microduck_rl_table(console: Console) -> None:
+    """The physics backend's upstream, which is a simulator rather than a robot: what it
+    assumes is not "never run", it is "measured here, on one machine"."""
+    from quackd.sim3d import upstream_api as rl
+
+    unverified = rl.refs_by_status("UNVERIFIED")
+    t = Table(
+        title=f"microduck_rl assumptions (UNVERIFIED: {len(unverified)}) — "
+        "see docs/adr/0030-mujoco-physics-backend.md"
+    )
+    t.add_column("what")
+    t.add_column("note")
+    for ref in unverified:
+        t.add_row(ref.name, ref.note)
+    console.print(t)
+    console.print(
+        f"[dim]microduck_rl pinned at {rl.PIN[:7]}, policies at {rl.POLICIES_PIN[:7]} "
+        f"(read {rl.READ_ON}) · VERIFIED refs: {len(rl.refs_by_status('VERIFIED'))} · "
+        "the model and the policies are fetched at run time and never shipped[/dim]"
+    )

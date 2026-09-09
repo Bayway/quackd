@@ -8,19 +8,36 @@ Thanks for taking a toy duck seriously. Two kinds of contribution matter most: *
 ```bash
 git clone https://github.com/rokbenko/quackd && cd quackd
 uv sync --extra dev            # add --extra anthropic etc. if you want a real provider
+uv sync --extra dev --extra mujoco   # the physics simulator, or its tests just skip
 uv run pre-commit install
 uv run pytest                  # the whole suite, a few minutes, no network, no keys
-uv run ruff check . && uv run ruff format --check . && uv run mypy
+uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run quackd validate ducks/*.duck
 ```
 
+`uv run mypy` checks with whatever interpreter your venv has. CI runs it twice,
+under 3.11 and 3.12, and `[tool.mypy]` pins no `python_version` on purpose (pinning 3.11
+made mypy reject numpy's stubs under 3.12), so a clean local run is half of that gate.
+`uv sync --python 3.12 --extra dev` and run it again for the other half.
+
 Windows, macOS and Linux are all first-class. Tests must never touch the network. About a
-third of that is the five seeded acceptance sweeps, which CI holds at 10 of 10 by setting
+third of that is the seeded acceptance sweeps, which CI holds at 10 of 10 by setting
 `QUACKD_STRICT_SEEDS=1`; locally they pass at 8 of 10 so a slow machine does not block you.
 
-Touching `bridge/open_duck/`? That is the only code here that runs on a robot, so it plays
-by different rules: it must never import quackd (its dependencies do not belong on a 512 MB
+Touching `quackd/sim3d/` or `quackd/transport/mujoco.py`? Install `--extra mujoco` or your work
+is untested locally: both test modules start with `pytest.importorskip("mujoco")` and vanish
+without it. CI's `physics` job installs the extra and runs them on the kinematic stand-in, which
+touches no network. The tests marked `real_duck` need upstream's model in `~/.quackd/cache`, so
+they skip until you have run `--robot microduck:mujoco` once, and a nightly job runs them there.
+The gait arithmetic itself lives in `quackd/sim3d/gait.py`, which imports no `mujoco`, so
+`tests/test_sim3d_gait.py` runs whether you installed the extra or not.
+
+Touching anything under `bridge/`? That is the code that runs on a robot, and there are
+three lots of it now (`open_duck/`, `alohamini/`, `toddlerbot/`). It plays by different
+rules: it must never import quackd (its dependencies do not belong on a 512 MB
 Raspberry Pi), it ships in the sdist and never in the wheel, and it stays testable with no
-hardware through its `--fake` mode and a pure core the tests drive directly.
+hardware through its `--fake` mode and a pure core the tests drive directly. The
+ToddlerBot daemon is the largest of the three, because it owns that robot's control
+loop rather than feeding one, so it carries the most of its own safety machinery.
 
 Touching `quackd/lan/` or `quackd/flock/mqtt_bus.py`? Neither imports its library at module
 level and neither is in the default install, so the tests run them on fakes: a fake zeroconf
@@ -44,8 +61,9 @@ slug name · `allow` lists only verbs the robot provides (`quackd list-verbs --r
 phrasings if you want them enforced · body starts with `# Task` · `quackd validate
 your.duck --robot <adapter>:<backend>` passes for the robot you mean.
 
-**Ask for a note.** Since 0.6 every solo starter ends its numbered strategy with a
-`remember` and carries a short *Memory* section saying what is worth keeping for next time.
+**Ask for a note.** Every solo starter except `hello-world` and the three lookouts added in 0.7
+ends its numbered strategy with a `remember` and carries a short *Memory* section saying what
+is worth keeping for next time.
 Put the call in the strategy rather than only in a Memory section: a 14B local model read a
 prompt-level hint and never wrote to memory, and followed the same instruction on its first
 run once it was step 5. `remember` is offered automatically when memory is on and needs
@@ -74,16 +92,42 @@ nothing in your `allow` list. Skip it for a smoke test, the way `hello-world` do
    what makes the verb exist: a verb not in the manifest is not in the registry, the MCP
    tool list, `.duck` validation or the prompt). Preconditions are named in the manifest
    and supplied by the adapter's `conditions()`.
-4. Add a test: on `MockTransport` for intent sequences, on `Sim2DTransport` for behaviour.
+4. Add a test: on `MockTransport` for intent sequences, on `Sim2DTransport` for behaviour, and on `MujocoTransport(body="puppet")` if the verb makes a claim about the body, because the cartoon cannot tell you whether one is true.
 5. If the verb needs an upstream method we have not verified, add it to the adapter's
    `upstream_api.py` as `UNVERIFIED` with a note and a row in that adapter's page under
    `docs/adapters/` (the Microduck's table is in `docs/adapter-status.md`). Never invent
    one.
 6. Mention it in `docs/architecture.md`, the README verb table (a test checks every
    registry name is backticked there) and `CHANGELOG.md` (Unreleased).
+7. Nothing extra is needed for the trace: every intent your verb sends is already an event,
+   and `ctx.log(...)` is already a `note`. If you emit a new event *kind*, add a row for it
+   to the table in `docs/architecture.md`, because a test reads the kinds out of the code
+   and fails when the docs do not name one.
 
 Renaming a verb is not a rename: add the new name and keep the old one in
 `quackd/verbs/aliases.py`, the only file that may spell an alias.
+
+## Add a provider
+
+A provider is one file under `quackd/agent/providers/` and five entries that have to
+agree: the name in `CLOUD_NAMES` or `LOCAL_NAMES`, rows in `DEFAULT_MODELS` and
+`KEY_ENV`, a branch in `make_provider`, and a row in `EXTRAS` in `quackd/doctor.py`.
+Nothing counts them, and `quackd doctor` indexes `KEY_ENV` and `EXTRAS` by name, so a
+missing row is a `KeyError` in the command people run when something is already wrong. Four
+things the tracing depends on, none of them optional:
+
+1. Fill `ProviderTurn.thinking` with the model's own reasoning when the API returns it, and
+   `Usage.reasoning_tokens` with what it charged for. The trace shows the first and the
+   transcript keeps all of it; a provider that drops them makes the run unarguable.
+2. Degrade with exactly one retry. If the API refuses a request because it does not support
+   thinking, turn thinking off, remember that, and retry once. Match the specific complaint,
+   not the word: a 400 about a *replayed* thinking block is a different bug and retrying it
+   loops.
+3. Wrap every SDK exception in `ProviderError`. The loop treats one as a turn it can report
+   and the run ends cleanly; anything else is a traceback in somebody's terminal.
+4. Never let response parsing raise outside that wrapper. An empty `choices`, a usage field
+   that is a string, a tool call with no name: all of it is `ProviderError`, and the test
+   for it belongs in `tests/test_providers.py`.
 
 ## Add an adapter
 
@@ -103,7 +147,12 @@ arrive 🧪 in the status tables until someone runs it against the real thing.
 - Consequential decisions get a short ADR in `docs/adr/` (copy the shape of an existing one).
 - Every module opens with a docstring saying *why it exists*.
 - Keep the default install light: provider SDKs and YOLO stay optional extras.
-- No Pollen Robotics assets — no logos, meshes, or videos — ever.
+- **Never commit an upstream asset.** No logos, meshes, CAD, MJCF, ONNX policies or videos,
+  from Pollen Robotics or anyone else, in a commit, a test fixture or a docs asset. This got
+  sharper in 0.8: a real `--robot microduck:mujoco` run puts upstream's `robot_walk.xml` and
+  38 CC BY-NC-SA meshes in `~/.quackd/cache`. quackd's whole licence position is that it
+  redistributes none of them, and a public history does not forget. `.gitignore` now catches
+  `.stl` and `robot_walk.xml` as well as `.onnx`, but do not rely on it.
 - Tone: confident, playful, honest about status.
 
 ## How your PR gets handled

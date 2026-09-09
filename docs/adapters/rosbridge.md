@@ -12,7 +12,7 @@ backend has **never been run against a bridge by us**.
 uvx quackd list-verbs --robot rosbridge:mock
 uvx quackd run patrol-and-quack --robot rosbridge:mock --provider fake   # exit 1: requires quack, but base-01 (rosbridge-base) does not provide it
 uv pip install "quackd[rosbridge]"
-quackd list-verbs --robot rosbridge:ws --address "ws://robot.local:9090?cmd_vel=/cmd_vel&odom=/odom&image=/camera/image/compressed"
+quackd doctor --robot rosbridge:ws --address "ws://robot.local:9090?cmd_vel=/cmd_vel&odom=/odom&image=/camera/image/compressed"
 ```
 
 The address carries everything: host, port, `ws` or `wss`, and the three topics as query
@@ -43,9 +43,8 @@ and turns the camera verbs on).
 ```
 
 Every verb here is a core verb: the adapter adds no extension, it only says what it has.
-The `limits` are what `move`, `go_to` and the turn used by `search_scan` clamp to (since
-0.4 the core verbs read a manifest's `max_vx`, `max_vy` and `max_wz`); they are quackd's
-caution, not the base's capability. A manifest can lower them, but not raise them past
+The `limits` are what `move`, `go_to` and the turn used by `search_scan` clamp to; they are
+quackd's caution, not the base's capability. A manifest can lower them, but not raise them past
 `move`'s own schema bounds (±0.3 m/s, ±0.2 m/s, ±1.5 rad/s), which reject a larger request.
 
 ## Safety

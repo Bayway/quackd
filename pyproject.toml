@@ -5,13 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "quackd"
 dynamic = ["version", "readme"]
-description = "Give your small robot a brain. Any LLM, one .duck file. Microduck, Open Duck Mini, Reachy Mini, LeRobot arms and ROS bases."
+description = "Give your small robot a brain. Any LLM, one .duck file. Microduck, Open Duck Mini, Reachy Mini, LeRobot arms, XLeRobot carts, AlohaMini, ToddlerBot and ROS bases."
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 authors = [{ name = "Rok Benko" }]
 keywords = [
-  "microduck", "open-duck-mini", "reachy-mini", "lerobot", "ros", "rosbridge",
+  "microduck", "open-duck-mini", "reachy-mini", "lerobot", "xlerobot", "alohamini", "toddlerbot", "humanoid", "ros", "rosbridge",
   "robotics", "embodied-ai", "physical-ai", "llm-agents",
   "mcp", "model-context-protocol", "reinforcement-learning", "sim2real",
   "claude", "openai", "ollama", "vllm", "llama-cpp", "local-llm",
@@ -47,6 +47,10 @@ grok = ["openai>=1.50"]
 all = ["anthropic>=1.0,<2", "openai>=1.50", "google-genai>=1.0"]
 yolo = ["ultralytics>=8.2"]
 live = ["pygame>=2.5"]
+# The physics simulator: MuJoCo on the CPU, no GPU, both imported only inside connect().
+# onnxruntime is what runs the robot's own walking policy; the Microduck's meshes and that
+# policy are fetched at run time and never shipped here (docs/licenses.md).
+mujoco = ["mujoco>=3.12,<4", "onnxruntime>=1.20"]
 # Robot SDKs are extras too: the default install never imports one. reachy-mini pulls
 # onnxruntime, FastAPI and a GStreamer bundle (read from the 1.10.0 wheel, 2026-09-02).
 reachy = ["reachy-mini>=1.10,<2"]
@@ -55,6 +59,13 @@ lan = ["zeroconf>=0.132", "paho-mqtt>=2,<3"]
 # LeRobot needs Python 3.12 and pulls torch; the marker keeps the lock solvable on 3.11.
 lerobot = ["lerobot>=0.6; python_version >= '3.12'"]
 rosbridge = ["roslibpy>=2,<3"]
+# XLeRobot is not an installable package: its own install is copying files into a lerobot
+# tree. So quackd speaks its ZeroMQ host protocol instead and needs only pyzmq, which keeps
+# the 3.11 floor and works on Windows (ADR-0026, docs/adapters/xlerobot.md).
+xlerobot = ["pyzmq>=26"]
+# AlohaMini is a fork of LeRobot that calls itself lerobot and is not published, so it
+# cannot be a dependency at all. quackd speaks its ZeroMQ host protocol instead.
+alohamini = ["pyzmq>=26"]
 # The Microduck's camera reaches clients only as an H.264 WebRTC track from mediad — there is
 # no camera method in duck-ipc-proto and no snapshot endpoint — so a picture means being a
 # WebRTC peer. Heavy (aiortc pulls av, which pulls FFmpeg), needed by nobody who is not
@@ -70,6 +81,11 @@ dev = [
   "mypy>=1.10",
   "types-PyYAML",
   "pre-commit>=3.7",
+  # The one robot SDK dev carries, because it is the only way the xlerobot wire protocol is
+  # exercised for real: tests/test_xlerobot_host.py runs quackd's client against a fake host
+  # over loopback sockets. It is a small pure wheel on every platform CI runs, unlike torch
+  # or onnxruntime, and adapter-status.md claims that test, so CI has to be able to run it.
+  "pyzmq>=26",
 ]
 
 [project.scripts]
@@ -106,11 +122,17 @@ include = [
   "quackd", "ducks", "bridge", "docs", "tests",
   "README.md", "LICENSE", "NOTICE", "CHANGELOG.md", "hatch_build.py",
 ]
+# The README's images are served from raw.githubusercontent, so no published artefact ever
+# needed them. Keeping them out matters for one of them: the hero renders upstream's model
+# and carries its CC BY-SA-NC terms, and a published package must stay wholly Apache-2.0.
+exclude = ["docs/assets/*.gif", "docs/assets/*.png", "docs/assets/*.svg"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["runs", "docs/assets"]
+# `docs/assets` held two scripts that nothing linted, formatted or type-checked, one of which
+# builds the README's hero. Only the binaries are excluded now.
+extend-exclude = ["runs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC", "T20"]
@@ -120,6 +142,8 @@ ignore = ["RUF012", "B008"]
 "quackd/cli.py" = ["T20"]
 "quackd/mcp_server.py" = ["T20"]
 "tests/**" = ["T20"]
+# The two scripts that build the README's assets are run by hand and report as they go.
+"docs/assets/*.py" = ["T20"]
 # Prose-heavy files: upstream citations and LLM-facing prompt text read better unwrapped.
 "quackd/transport/upstream_api.py" = ["E501"]
 "quackd/agent/prompts.py" = ["E501"]
@@ -132,7 +156,7 @@ line-ending = "lf"
 # mypy reject numpy's stubs (PEP 695 `type` statements) when running under 3.12.
 # `bridge/` is the code that runs on the robot, and it was the only Python here that nothing
 # type-checked. mypy takes packages OR files, not both, so both are listed as paths.
-files = ["quackd", "bridge"]
+files = ["quackd", "bridge", "docs/assets"]
 ignore_missing_imports = true
 warn_unused_ignores = false
 check_untyped_defs = true
@@ -145,3 +169,12 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    # The only tests allowed to read the developer's own asset cache, and the only ones the
+    # conftest does not redirect to a throwaway one. They never fetch: an empty cache skips.
+    "real_duck: needs upstream's Microduck model and policies already cached",
+]
+# A single test that runs five minutes has hung: the slowest here, a ten-seed sweep, takes
+# well under one. pytest then dumps every thread's stack to stderr and carries on, so the
+# job timeout in ci.yml ends a hang with the blocked frame in the log rather than nothing.
+faulthandler_timeout = 300

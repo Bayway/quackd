@@ -4,12 +4,13 @@ quackd never silently invents an upstream API. Every method name, socket path, t
 message type, enum or convention it relies on lives in one file per upstream, tagged
 **VERIFIED** (read from upstream source on the date given, link given) or **UNVERIFIED**
 (designed upstream but not shipped, or an assumption of ours, with what quackd does about
-it). A test proves UNVERIFIED names are only reachable from the experimental backends.
+it). A test proves UNVERIFIED names stay inside the backend that needs them.
 `quackd doctor` prints every UNVERIFIED list on your machine.
 
 | Adapter | `--robot` | Status | Upstream file | Page |
 |---|---|---|---|---|
 | Microduck | `microduck:sim2d` | ✅ default | | this page |
+| | `microduck:mujoco` | ✅ physics simulator (MuJoCo, `quackd[mujoco]`): `find-and-kick` 10 of 10 seeds on both bodies, the stand-in and the trained gait, on one machine rather than in CI | [`quackd/sim3d/upstream_api.py`](../quackd/sim3d/upstream_api.py) | |
 | | `microduck:mock` | ✅ | | |
 | | `microduck:jsonrpc` | 🧪 experimental: every method VERIFIED, never run on a duck | [`quackd/transport/upstream_api.py`](../quackd/transport/upstream_api.py) | |
 | | `microduck:websocket` | ⏳ stub: raises with a link until upstream ships it | | |
@@ -23,6 +24,14 @@ it). A test proves UNVERIFIED names are only reachable from the experimental bac
 | Open Duck Mini v2 | `open_duck:sim2d` | ✅ `open-duck-scout` 10 of 10 seeds | | [adapters/open_duck.md](adapters/open_duck.md) |
 | | `open_duck:mock` | ✅ | | |
 | | `open_duck:bridge` | 🧪 every runtime name VERIFIED at a pinned commit, the protocol exercised against the real daemon over loopback, never run on a duck | [`quackd/adapters/open_duck/upstream_api.py`](../quackd/adapters/open_duck/upstream_api.py) | |
+| XLeRobot | `xlerobot:mock` | ✅ | | [adapters/xlerobot.md](adapters/xlerobot.md) |
+| | `xlerobot:zmq` | 🧪 the whole wire format VERIFIED at a pinned commit, the client exercised against a fake host quackd wrote from that source over loopback, never run on a cart | [`quackd/adapters/xlerobot/upstream_api.py`](../quackd/adapters/xlerobot/upstream_api.py) | |
+| AlohaMini | `alohamini:mock` | ✅ | | [adapters/alohamini.md](adapters/alohamini.md) |
+| | `alohamini:sim2d` | ✅ `alohamini-lookout` 10 of 10 seeds | | |
+| | `alohamini:zmq` | 🧪 the whole wire format VERIFIED at a pinned commit, the client exercised against a fake host quackd wrote from that source over loopback, never run on a robot. The arm verbs additionally need quackd's own host wrapper, which nobody has run either | [`quackd/adapters/alohamini/upstream_api.py`](../quackd/adapters/alohamini/upstream_api.py) | |
+| ToddlerBot | `toddlerbot:mock` | ✅ | | [adapters/toddlerbot.md](adapters/toddlerbot.md) |
+| | `toddlerbot:sim2d` | ✅ `toddlerbot-lookout` 10 of 10 seeds | | |
+| | `toddlerbot:bridge` | 🧪 every upstream name VERIFIED at the commit the v2.0.0 tag points at, the protocol and the daemon's own safety machinery exercised against a fake body over loopback, never run on a robot | [`quackd/adapters/toddlerbot/upstream_api.py`](../quackd/adapters/toddlerbot/upstream_api.py) | |
 
 **Flocks** (`--flock`, `flock.roles`) run N in-process views of one simulated world on
 one lockstep clock. The MQTT bus implements the same `Bus` protocol and was exercised
@@ -42,13 +51,6 @@ Sources: [duck-ipc-proto/src/lib.rs](https://github.com/pollen-robotics/microduc
 [robotd-design.md](https://github.com/pollen-robotics/microduck/blob/bc41fb5c9a9b39894669c1e022e375cf83800382/docs/design/robotd-design.md) ·
 [remote-webrtc.md](https://github.com/pollen-robotics/microduck/blob/bc41fb5c9a9b39894669c1e022e375cf83800382/docs/design/remote-webrtc.md) ·
 [roadmap.md](https://github.com/pollen-robotics/microduck/blob/bc41fb5c9a9b39894669c1e022e375cf83800382/docs/project/roadmap.md).
-
-The previous read was 2026-08-28 against `main`, unpinned — the one adapter ADR-0022 let keep a
-moving link. Upstream moved seven API versions in the week that followed and nothing here showed
-it, which is what the pin is for. What actually changed for the names quackd uses: the version
-number, `Skill` (an enum then, a free string now), and three additive fields
-(`RobotState.theremin`, `RobotState.chorale`, `HealthResult.cpu_temp_c`). Everything else read
-identically.
 
 ### VERIFIED (read from upstream source)
 
@@ -85,7 +87,7 @@ identically.
 | `robot.state.policy == 'sit' means sitting` | assumption: the state frame names the policy that drove the tick, and we assume a sitting robot's is named something containing `sit`. Upstream notes two gaits can "both report `walk`", so the name is a policy and not a posture | `jsonrpc` infers posture from it and lists the assumption in `extras.assumptions`. `sit`/`stand` read posture first and **refuse** when it is unknown, because upstream has one `sit_toggle` rather than a sit and a stand: firing it unaimed is a coin flip whose losing side sits a standing duck down |
 | `WebSocket agent gateway` | architecture.md §5.3 designs "open a WebSocket, poll a frame, send intents"; roadmap M5 in progress, not shipped | `--robot microduck:websocket` is a stub that raises with the links |
 | `get_frame` | §5.3: "JPEG on demand, or 1–2 fps push"; not in duck-ipc-proto | not called anywhere; the stub will use it when it exists |
-| `camera snapshot over a unix socket` | today the camera reaches clients only through `mediad`'s WebRTC track; no socket-level frame method, and `robotctl`/`duckctl` have no camera subcommand either | `jsonrpc.get_frame()` returns `None` unless `--camera-url` points at an HTTP snapshot you provide. With one, frames are pulled on a 5 fps timer and served from memory, so `observe` costs no round trip and a failed fetch is reported by `camera_health()` rather than raised. Without one the manifest drops `camera` and the four verbs that need eyes, instead of advertising sight the robot has not got |
+| `camera snapshot over a unix socket` | today the camera reaches clients only through `mediad`'s WebRTC track; no socket-level frame method, and `robotctl`/`duckctl` have no camera subcommand either | `jsonrpc.get_frame()` returns `None` unless `--camera-url` names a source: an HTTP snapshot you provide, or `mediad`'s WebRTC track (below). A snapshot is pulled on a 5 fps timer and served from memory, so `observe` costs no round trip and a failed fetch is reported by `camera_health()` rather than raised. Without one the manifest drops `camera` and the four verbs that need eyes, instead of advertising sight the robot has not got |
 | `mediad media.detections notifications` | **built**, not merely designed: `mediad/src/detect.rs` emits `{width, height, took_ms, boxes[{x0,y0,x1,y1,score}]}` at ~2 Hz (RKNN on the NPU, ONNX on CPU) — and it detects *ducks*, not balls. UNVERIFIED because it is broadcast to WebRTC signalling clients while `remote-webrtc.md` still says perception consumes pixels locally: source and design doc disagree | unreachable from `robotd`'s socket either way, so our `Detector` protocol is still the stand-in |
 | `stand_up` | no such RPC; `robotd` recovers from falls itself (limp → settle → ramp → standing policy) | `stand_up` sends `robot.enable {on: true}` and checks `safety.fallen` afterwards — and fails rather than claiming "upright" when nothing is reporting falls |
 
@@ -127,9 +129,45 @@ Neither route has been run against a Microduck.
 ## How to help
 
 **Built an Open Duck Mini v2?** That is the row most likely to flip this year, because it
-is the only body here you can build from scratch and the only one whose robot side quackd
+is one of three bodies here you can build from scratch, and one of three whose robot side quackd
 ships and already exercises. [open-duck-hardware-checklist.md](open-duck-hardware-checklist.md)
 is the order to try it in, and there is an issue template waiting for the result.
+
+### The physics backend's upstreams
+
+`microduck:mujoco` runs the robot Pollen trains, on the policy Pollen trained. Two upstreams,
+both pinned, both fetched at run time into `~/.quackd/cache` and checked against a recorded
+sha256, and neither shipped: the 3D model files are CC BY-NC-SA
+([licenses.md](licenses.md)). Every name quackd relies on lives in
+[`quackd/sim3d/upstream_api.py`](../quackd/sim3d/upstream_api.py), and
+[ADR-0030](adr/0030-mujoco-physics-backend.md) is the reasoning.
+
+**What that ✅ rests on.** Two `find-and-kick` sweeps over the same ten seeds: one on the
+kinematic stand-in, which CI's `physics` job runs on every push against a software rasteriser,
+and one on the trained gait, which needs upstream's model and so runs nightly, fetched the way a
+first run fetches it. The real duck's other tests — that it walks, turns, stays upright, refuses
+to sit and stands itself up — go with the second. The gait numbers below are still one machine's
+word; the sweeps are not.
+
+Read: 2026-09-07, pinned at
+[`2b25a48`](https://github.com/pollen-robotics/microduck_rl/tree/2b25a48b08f1f17bc38c90bb03144c81fbd9ed07)
+(`develop`, 2026-09-06) and policies at
+[`088524a`](https://huggingface.co/pollen-robotics/microduck-policies/tree/088524a64e2557dc453256b6071dbb9d23888802).
+
+| What | Status | Why it matters |
+|---|---|---|
+| `robot_walk.xml` and its 38 STL meshes | **VERIFIED** | the body: one free joint, 14 hinges, position actuators, an IMU and a head camera |
+| `alpha_walking.onnx`, `alpha_stand.onnx` | **VERIFIED** | `obs[1,61] → actions[1,14]`, the normaliser baked in, Apache-2.0 on the Hub |
+| observation layout, 13-value command, `ctrl = default_pose + action`, 50 Hz | **VERIFIED** | read from `scripts/infer_policy.py`; the same layout appears in the daemon and in Pollen's own browser simulator |
+| projected gravity is the world's `-z` in the trunk frame | **VERIFIED** | get its sign wrong and the duck braces and stands still for every command, silently |
+| the gait floor: `no gait below vx 0.22 m/s or wz 1.0 rad/s; above it about 0.42x the commanded speed` | **UNVERIFIED** | measured here on one machine with the XML's own actuators. Upstream trains and deploys with a different actuator model, so a real duck may track commands directly |
+| `a positive head_pitch in the command vector tilts the camera down` | **UNVERIFIED** | measured by driving the command and watching the rendered head camera, not read anywhere, so quackd negates its own pitch to make looking up positive. `neck_pitch` and `head_roll` are left at zero: quackd's gaze has one pitch and no roll, so nothing has exercised them |
+| the four stand-ins, in place of `ball_kick_left.onnx, ball_kick_right.onnx, alpha_ground_pick.onnx, alpha_sitstand.onnx` | **UNVERIFIED** | upstream's episodic policies did nothing from a standing pose when tried and the sit-stand one toppled the model, so these four are quackd's stand-ins and say so in `extras.assumptions` |
+
+The head camera is the one place quackd deliberately does not do what the file says: upstream's
+`<camera>` quaternion is not MuJoCo's viewing convention, so rendering through it looks
+backwards into the duck's own shell. quackd renders from the camera's position along the head
+body's forward axis instead.
 
 **Got your hands on a Microduck?** [microduck-hardware-checklist.md](microduck-hardware-checklist.md)
 is the order to try it in, and there is an issue template waiting for the result. Nothing in it
@@ -137,8 +175,10 @@ installs anything on the robot or needs `sudo`, because the first Microduck most
 will belong to somebody else. `microduck-lookout` is the task to point at it first: nothing in
 its allowlist moves a leg.
 
-Ran `--robot open_duck:bridge` against a duck you built, `microduck:jsonrpc` against a real
-duck, `reachy_mini:sdk` against a Reachy Mini (or its `--mockup-sim` daemon), `lerobot:real`
-against an arm, or `rosbridge:ws` against a bridge? Open an issue with `quackd doctor` output and the first lines of
+Ran `--robot open_duck:bridge` against a duck you built, `toddlerbot:bridge` against a
+ToddlerBot on its stand, `xlerobot:zmq` against a cart, `alohamini:zmq` against an AlohaMini,
+`microduck:jsonrpc` against a real duck, `reachy_mini:sdk` against a Reachy Mini (or its
+`--mockup-sim` daemon), `lerobot:real` against an arm, or `rosbridge:ws` against a bridge?
+Open an issue with `quackd doctor` output and the first lines of
 `transcript.jsonl`. Every row above that flips from 🧪/⏳ to ✅ is one line in an
 `upstream_api.py` and one row here.
