@@ -28,7 +28,8 @@ ROOT = Path(__file__).resolve().parent
 class MountedAtSimulator(SimpleHTTPRequestHandler):
     """Strip the mount prefix before the file lookup, and send the bare root to it."""
 
-    def do_GET(self) -> None:  # noqa: N802  (stdlib's casing, not ours)
+    # do_GET, not do_get: the casing is BaseHTTPRequestHandler's, not ours.
+    def do_GET(self) -> None:
         if self.path in ("/", ""):
             self.send_response(302)
             self.send_header("Location", f"{PREFIX}/")

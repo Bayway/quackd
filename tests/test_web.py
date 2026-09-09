@@ -134,7 +134,9 @@ def test_the_header_wears_the_vendored_duck_mark_and_not_an_emoji() -> None:
     assert icon and f"{MOUNT}/assets/favicon-96.png" in icon.group(0), (
         "the tab icon is not the vendored PNG favicon"
     )
-    assert f'href="{MOUNT}/assets/apple-touch-icon.png"' in HTML, "nothing links the home-screen icon"
+    assert f'href="{MOUNT}/assets/apple-touch-icon.png"' in HTML, (
+        "nothing links the home-screen icon"
+    )
 
 
 def test_the_page_offers_a_way_back_to_the_site_that_mounts_it() -> None:
@@ -168,9 +170,7 @@ def test_every_asset_the_page_asks_for_is_a_file_in_this_directory() -> None:
     makes has to resolve on disk, under the mount prefix the deploy serves it from."""
     referenced = set(re.findall(r'(?:src|href)="(?!https?:|data:|mailto:|#)([^"]+)"', HTML))
     assert referenced, "the regex found no local references, so this test is not testing anything"
-    missing = sorted(
-        ref for ref in referenced if not (WEB / _unmount(ref).split("?")[0]).is_file()
-    )
+    missing = sorted(ref for ref in referenced if not (WEB / _unmount(ref).split("?")[0]).is_file())
     assert not missing, f"index.html points at files that web/ does not hold: {missing}"
 
 

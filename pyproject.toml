@@ -144,6 +144,9 @@ ignore = ["RUF012", "B008"]
 "tests/**" = ["T20"]
 # The two scripts that build the README's assets are run by hand and report as they go.
 "docs/assets/*.py" = ["T20"]
+# The browser demo's dev server. It is a command a person runs, and printing the URL it
+# mounted on is the whole of its user interface.
+"web/serve.py" = ["T20"]
 # Prose-heavy files: upstream citations and LLM-facing prompt text read better unwrapped.
 "quackd/transport/upstream_api.py" = ["E501"]
 "quackd/agent/prompts.py" = ["E501"]
