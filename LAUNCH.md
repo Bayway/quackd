@@ -20,10 +20,10 @@ The switch decides one thing only: whether anything on the page reads English. T
 version of that argument is an absence — **there is no key for `say`**. A key carries a
 command; a sentence needs something to read it.
 
-> The demo is headed for `www.quackd.org/simulator`, served from `web/` with no build step and
-> fetched onto that path at build time by quackd-web, a separate Vercel project. The pull request
-> that would make it so has not landed, so there is no link to give out yet. Sit with it locally before any
-> of this goes out — `python web/serve.py`, then <http://localhost:8000/simulator/>. The page has
+> The demo is live at <https://www.quackd.org/simulator>, served from `web/` with no build step and
+> fetched onto that path at build time by quackd-web, a separate Vercel project. That is the link to
+> give out. Sit with it yourself before any of this goes out — there, or locally with
+> `python web/serve.py`, then <http://localhost:8000/simulator/>. The page has
 > been opened in a browser twice while it was built: it boots clean and a held `W` walks the
 > duck. Nobody has yet watched a model drive a whole run, a key barge in out of one, or the
 > Record button work, which is exactly the material every asset below needs.
@@ -126,9 +126,10 @@ please correct it" framing.
 
 ## Timing
 
-- **Before any of it: the quackd-web pull request.** Every line above that invites somebody to
-  open a link needs one, and nothing answers at www.quackd.org/simulator until quackd-web's build
-  fetches `web/` into its own `/simulator`. Land that, open the page, then post.
+- **Before any of it: open the page yourself.** Every line above invites somebody to follow a
+  link that now answers — <https://www.quackd.org/simulator> is live, and quackd-web's build
+  refreshes it from `web/` on each deploy. Watch a model drive a whole run there, barge in on one
+  with a key, and then post.
 - **Now: simulator-first launch.** Discord post → 24 h → Show HN (Tue–Thu, 8–10 am ET) → X
   thread the same hour.
 - **Second beat, and it no longer waits for Christmas.** Reachy Mini hardware, SO-101 arms and

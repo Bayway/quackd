@@ -155,11 +155,11 @@ Apple Silicon, and no GPU. There is no Intel Mac wheel.
   *Since 0.8 — this supersedes the note above on all three counts, the address, the test list
   and the last sentence:* that address and that list have both moved on. The page is mounted at `/simulator`
   rather than at a domain root — `vercel.json` rewrites `/simulator/*` into `web/`, still with
-  no build step, and quackd-web *would* serve the mount from its own build, which fetches this
-  directory at a pinned commit, once the pull request that adds that step lands — so every
-  local reference in `index.html` is absolute, because a relative one resolves off the mount
-  and 404s. It is headed for www.quackd.org/simulator and it is not there: that pull request
-  against quackd-web is what would make it so. Locally it runs under `python web/serve.py`,
+  no build step, and quackd-web serves the mount from its own build, which fetches this
+  directory at a pinned commit — so every local reference in `index.html` is absolute, because a
+  relative one resolves off the mount and 404s. It answers at www.quackd.org/simulator, and
+  `/simulator/source.json` records the commit the deployed copy was cut from.
+  Locally it runs under `python web/serve.py`,
   which serves `web/` under the same prefix the deploy uses; `python -m http.server --directory
   web` no longer works, because nothing answers on the mount. `tests/test_web.py` has grown
   with the page and now also holds the mount and the deploy that answers on it, that every

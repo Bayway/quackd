@@ -82,16 +82,13 @@ not before.
 
 ## Open elsewhere
 
-One item, and it is the only one: nothing in this repository can finish it.
+One item, and it closed: the half of the browser demo that no commit here could finish.
 
-- ⬜ **The quackd-web pull request, which is what puts the page on the web.** `web/` is meant to
-  be reached at `www.quackd.org/simulator`, and it is not there: that address belongs to
-  quackd-web, a separate Vercel project serving the landing page, and its build has to fetch this
-  directory into its own `/simulator`. This repository's half is done — `vercel.json` answers on
-  the mount and every local reference in `index.html` is absolute under it, both pinned by
-  `tests/test_web.py` — so the PR over there is the whole of what is left. Until it lands, no
-  document here writes that address as a link, only as text, and [LAUNCH.md](LAUNCH.md) waits
-  on it.
+- ✅ **`web/` is on the web.** <https://www.quackd.org/simulator> answers. That address belongs to
+  quackd-web, a separate Vercel project serving the landing page, and its build now fetches this
+  directory into its own `/simulator` at a pinned commit — so a change here reaches the page on
+  that project's next deploy, and `/simulator/source.json` records which commit the live copy came
+  from. The landing page points at the demo from five places; the demo's header points back.
 
 ## Release checklist
 

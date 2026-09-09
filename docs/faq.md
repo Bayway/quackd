@@ -31,10 +31,10 @@ one stdlib file. It still needs a server, for two reasons: browsers refuse ES mo
 `file://`, and the page expects to be mounted at `/simulator`, so every local reference in
 `index.html` is absolute. That is why a plain `python -m http.server --directory web` no longer
 works — it serves the HTML and then 404s the stylesheet and the script, because nothing answers
-on `/simulator` at the root. `web/serve.py` takes an optional port. The page is meant to live at
-`www.quackd.org/simulator`, where the separate quackd-web project fetches this directory into
-its own build, and it is not there yet, which is why that address is text here rather than a
-link. The browser fetches
+on `/simulator` at the root. `web/serve.py` takes an optional port. The page is live at
+<https://www.quackd.org/simulator>, where the separate quackd-web project fetches this directory
+into its own build at a pinned commit; `/simulator/source.json` says which one. The browser
+fetches
 about 45 MB the first time and caches it: MuJoCo's WebAssembly build, onnxruntime-web and
 three.js from jsDelivr, upstream's model at the same pinned commit Python uses, and
 `alpha_walking.onnx` and `alpha_stand.onnx` — the same two policies Python fetches, with the

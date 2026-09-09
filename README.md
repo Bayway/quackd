@@ -109,8 +109,8 @@ run `python web/serve.py` and open <http://localhost:8000/simulator/>. That serv
 file, Python but not quackd). Same physics, the same two upstream policies, seven of the same
 verbs and a contract of its own, in a page. Type a sentence, paste your own API key or point it
 at Ollama, and watch what the model chose. The keyboard beside the box is live at the same time,
-so a key can take the duck off the model mid-run. It is headed for `www.quackd.org/simulator` and
-is not there yet: [The browser demo](#the-browser-demo).
+so a key can take the duck off the model mid-run. It is live at
+<https://www.quackd.org/simulator>: [The browser demo](#the-browser-demo).
 
 Put keys in the environment or in a `.env` file (copy [`.env.example`](.env.example)). `quackd doctor` tells you what is missing. Needs Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/), nothing else.
 
@@ -202,7 +202,7 @@ Version 0.7, simulator and mocks. What has been built, and how far each piece ha
 |---|---|
 | `sim2d` bundled simulator (default) | ✅ 10 of 10 seeds on `find-and-kick`, GIF and transcript per run |
 | `mujoco` physics simulator (`quackd[mujoco]`) | ✅ 10 of 10 seeds on `find-and-kick` twice over: once on the kinematic stand-in and once with the duck walking on **upstream's own trained policy**, both ground truth checked, and both named tests rather than remembered numbers. The trained-gait sweep needs upstream's model in the cache, so a nightly job runs it and the gating job on every push runs the stand-in. The model and the policy are fetched from upstream at a pinned commit and hash checked, never shipped |
-| Browser demo ([`web/`](web/)) | 🧪 the same physics, the same two upstream policies, seven of the same verbs and the same allowlist-and-budget machinery in a static page, with the sentence box and the keyboard live on one duck at the same time. Bring your own key, or point it at Ollama. CI checks what it can without a browser (the ids the script looks up, the pins and gait numbers it shares with Python, each module's syntax, the argument validator run under Node, the `/simulator` mount and the assets the page asks for, the vendored mark in the header, the rule that a key barges in only if it would move the robot, and that the abort reaches the request in flight). The page has been booted in a browser twice and a held `W` walks the duck, but a full model-driven run, a barge-in out of one and the recording have never been watched. Headed for `www.quackd.org/simulator`, and not there yet |
+| Browser demo ([`web/`](web/)) | 🧪 the same physics, the same two upstream policies, seven of the same verbs and the same allowlist-and-budget machinery in a static page, with the sentence box and the keyboard live on one duck at the same time. Bring your own key, or point it at Ollama. CI checks what it can without a browser (the ids the script looks up, the pins and gait numbers it shares with Python, each module's syntax, the argument validator run under Node, the `/simulator` mount and the assets the page asks for, the vendored mark in the header, the rule that a key barges in only if it would move the robot, and that the abort reaches the request in flight). The page has been booted in a browser twice and a held `W` walks the duck, but a full model-driven run, a barge-in out of one and the recording have never been watched. Live at <https://www.quackd.org/simulator> |
 | Manifests and core verbs (`quackd list-adapters`, `quackd list-verbs --robot`) | ✅ eight adapters, eight core verbs that appear only where the manifest meets their requirements, speed limits from the manifest, `manifest.schema.json` generated and drift tested |
 | MCP server (`quackd serve-mcp`) | ✅ Claude Code and Claude Desktop, fleets with `--robots` (eight `robot_*` tools, tested in process against the simulator and the mocks), no Claude Desktop session on record |
 | Memory between runs (`quackd memory`, `remember`) | ✅ one JSONL file per `adapter:backend`, notes and run outcomes into the next prompt, tested end to end offline, 🧪 the `remember` tool itself exercised by one local model on one machine and by no cloud model ([docs/memory.md](docs/memory.md)) |
@@ -492,10 +492,10 @@ python web/serve.py                 # stdlib only, no dependencies, no build ste
 The page is mounted at `/simulator` rather than at a root, so every local reference in
 `index.html` is absolute and `python -m http.server --directory web` no longer works: it serves
 the HTML and then 404s the stylesheet and the script. `web/serve.py` is that missing mount, and
-[`web/README.md`](web/README.md) explains why the mount is not a style choice. The address this
-is headed for is `www.quackd.org/simulator`, which a separate repository serves and a pull
-request there has still to land. It is written as text and not as a link, because nothing
-answers there.
+[`web/README.md`](web/README.md) explains why the mount is not a style choice. It is served at
+<https://www.quackd.org/simulator> by quackd-web, a separate repository, whose build fetches this
+directory at a pinned commit, so a change here reaches the page on that project's next build.
+`/simulator/source.json` records which commit the deployed copy came from.
 
 **Both ways of driving are live at once.** The sentence box and the keyboard hold the same duck at
 the same time, and neither takes turns with the other: there is no mode to flip before you can
