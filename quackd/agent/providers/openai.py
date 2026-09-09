@@ -3,6 +3,14 @@
 Chat Completions with function tools, `tool_choice="required"` and
 `parallel_tool_calls=False` for one call per turn. Tool results go back as `tool` messages;
 because a `tool` message cannot carry an image, the frame follows in a `user` message.
+
+Some newer reasoning models will not take function tools on Chat Completions at all, at any
+reasoning effort, and say so in a 400 that names `/v1/responses` as the way through. Every
+verb quackd has is a function tool, so for those models Chat Completions is not a degraded
+path, it is no path. `step` reads that 400, switches this provider to the Responses API and
+keeps it there for the rest of the run. The two APIs disagree about nearly every field name,
+so each gets its own renderer and its own parser below, and the provider owns which pair it
+is using. `QUACKD_OPENAI_API=responses` starts there without waiting to be told.
 """
 
 from __future__ import annotations
@@ -68,8 +76,8 @@ def render_messages(system: str, history: list[Exchange]) -> list[dict[str, Any]
     return messages
 
 
-def _asks_for_no_reasoning(error: Exception) -> bool:
-    """Is this the 400 that wants `reasoning_effort="none"` before it will take function tools?
+def _wants_the_responses_api(error: Exception) -> bool:
+    """Is this the 400 that refuses function tools on Chat Completions and names Responses?
 
     Matched on what the API says rather than on a model name, because the list of models that
     behave this way is not ours to keep and gets longer. Observed on `gpt-6-astra`:
@@ -78,13 +86,18 @@ def _asks_for_no_reasoning(error: Exception) -> bool:
         /v1/chat/completions. To use function tools, use /v1/responses or set
         reasoning_effort to 'none'.
 
-    Both halves are required so an unrelated 400 that happens to name one of the two words
-    does not silently turn a run's reasoning off.
+    Both halves are required so an unrelated 400 that happens to name one of the two does not
+    move a run onto a different API.
+
+    The second remedy that message offers is a dead end on the model that produced it, which
+    is worth recording: `reasoning_effort="none"` comes back as *"does not support 'none' with
+    this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'"*, and the tools are
+    refused at every one of those. Measured 2026-09-09. So the fix is the API, not the effort.
     """
     if getattr(error, "status_code", None) not in (400, None):
         return False
     text = str(error).lower()
-    return "reasoning_effort" in text and "function tools" in text
+    return "function tools" in text and "responses" in text
 
 
 def render_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -99,6 +112,129 @@ def render_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         for t in tools
     ]
+
+
+def render_tools_responses(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The same tools, flat. Responses drops the `function` wrapper Chat Completions nests."""
+    return [
+        {
+            "type": "function",
+            "name": t["name"],
+            "description": t["description"],
+            "parameters": t["input_schema"],
+        }
+        for t in tools
+    ]
+
+
+def _image_part_responses(png: bytes) -> dict[str, Any]:
+    data = base64.standard_b64encode(png).decode("ascii")
+    return {"type": "input_image", "image_url": f"data:image/png;base64,{data}"}
+
+
+def render_input(history: list[Exchange]) -> list[dict[str, Any]]:
+    """History as Responses input items. The system prompt is not one: it goes in
+    `instructions`, which is why this takes no `system` where `render_messages` does.
+
+    A turn is up to three items rather than a message with a `tool_calls` field: what the
+    model called, what came back, and the frame. `function_call_output` carries text only, as
+    a `tool` message does, so the image follows it in a user item for the same reason.
+
+    `call_id` is the handle, not the item `id`. Sending the wrong one is a 400 that says the
+    output refers to a call that does not exist, so `parse_responses` reads `call_id` into
+    `ToolCall.id` and the loop hands it straight back here.
+    """
+    items: list[dict[str, Any]] = []
+    for ex in history:
+        obs = ex.observation
+        if obs.tool_call_id:
+            items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": obs.tool_call_id,
+                    "output": obs.text,
+                }
+            )
+            if obs.image_png:
+                items.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Current camera frame:"},
+                            _image_part_responses(obs.image_png),
+                        ],
+                    }
+                )
+        else:
+            parts: list[dict[str, Any]] = [{"type": "input_text", "text": obs.text}]
+            if obs.image_png:
+                parts.append(_image_part_responses(obs.image_png))
+            items.append({"role": "user", "content": parts})
+        if ex.decision is not None:
+            tc = ex.decision.tool_call
+            items.append(
+                {
+                    "type": "function_call",
+                    "call_id": tc.id,
+                    "name": tc.name,
+                    "arguments": json.dumps(tc.arguments),
+                }
+            )
+    return items
+
+
+def parse_responses(response: Any) -> ProviderTurn:
+    """A Responses result into the same `ProviderTurn` the Chat Completions parser returns.
+
+    `output` is a flat list of items rather than one message: reasoning, then any calls, then
+    any text. Reasoning arrives as a summary (a list of parts) and is often empty even when
+    the token count is not, because the model is not obliged to show its work.
+    """
+    tool_calls: list[ToolCall] = []
+    texts: list[str] = []
+    thoughts: list[str] = []
+    for item in getattr(response, "output", None) or []:
+        kind = getattr(item, "type", None)
+        if kind == "function_call":
+            raw_args = getattr(item, "arguments", None)
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args or {})
+            except json.JSONDecodeError:
+                args = {"_unparsed": raw_args}
+            # call_id, not id: it is what a later function_call_output must quote.
+            tool_calls.append(
+                ToolCall(
+                    id=str(getattr(item, "call_id", None) or getattr(item, "id", "")),
+                    name=str(getattr(item, "name", "")),
+                    arguments=args,
+                )
+            )
+        elif kind == "message":
+            for part in getattr(item, "content", None) or []:
+                text = getattr(part, "text", None)
+                if isinstance(text, str) and text.strip():
+                    texts.append(text)
+        elif kind == "reasoning":
+            for part in getattr(item, "summary", None) or []:
+                text = getattr(part, "text", None)
+                if isinstance(text, str) and text.strip():
+                    thoughts.append(text)
+    usage = getattr(response, "usage", None)
+    details = getattr(usage, "output_tokens_details", None)
+    return ProviderTurn(
+        tool_calls=tool_calls,
+        text="\n".join(texts) or None,
+        usage=Usage(
+            input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+            output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+            reasoning_tokens=int(getattr(details, "reasoning_tokens", 0) or 0),
+        ),
+        # No finish_reason here. `status` is "completed" or "incomplete", and the loop only
+        # reads this for the trace, so say the same words the other parser would.
+        stop_reason="tool_calls" if tool_calls else getattr(response, "status", None),
+        raw=None,
+        thinking="\n".join(thoughts) or None,
+    )
 
 
 def parse_response(response: Any) -> ProviderTurn:
@@ -175,12 +311,14 @@ class OpenAIProvider:
         self.calls = 0
         import os as _os
 
-        #: Sent only when set. Newer reasoning models reject function tools on
-        #: `/v1/chat/completions` unless this is `none`, and say so in the 400: see
-        #: `_RETRY_ON` and `step`. `QUACKD_OPENAI_REASONING_EFFORT` sets it by hand.
+        #: Sent only when set, and spelled differently by each API: `reasoning_effort` on Chat
+        #: Completions, `reasoning={"effort": ...}` on Responses.
         self.reasoning_effort = reasoning_effort or _os.environ.get(
             "QUACKD_OPENAI_REASONING_EFFORT"
         )
+        #: "chat" or "responses". `step` switches to Responses on its own when the API says
+        #: this model will not take function tools any other way, and stays switched.
+        self.api = (_os.environ.get("QUACKD_OPENAI_API") or "chat").strip().lower()
         if base_url is not None:
             self.base_url = base_url
         if vision is not None:
@@ -220,6 +358,33 @@ class OpenAIProvider:
             params["reasoning_effort"] = self.reasoning_effort
         return params
 
+    def _params_responses(
+        self, system: str, history: list[Exchange], tools: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "model": self.model,
+            "instructions": system,
+            "input": render_input(history),
+            "tools": render_tools_responses(tools),
+        }
+        if self.tool_choice and self.tool_choice != "none":
+            params["tool_choice"] = self.tool_choice
+        if self.send_parallel_flag:
+            params["parallel_tool_calls"] = False
+        if self.reasoning_effort:
+            params["reasoning"] = {"effort": self.reasoning_effort}
+        return params
+
+    async def _call(self, system: str, history: list[Exchange], tools: list[dict[str, Any]]):
+        """One request on whichever API this provider is currently using."""
+        if self.api == "responses":
+            response = await self.client.responses.create(
+                **self._params_responses(system, history, tools)
+            )
+            return self._normalise(parse_responses(response))
+        response = await self.client.chat.completions.create(**self._params(system, history, tools))
+        return self._normalise(parse_response(response))
+
     def _normalise(self, turn: ProviderTurn) -> ProviderTurn:
         """Hook: tidy a parsed turn before anything reads its text. Base: nothing."""
         return turn
@@ -237,25 +402,19 @@ class OpenAIProvider:
         # escape the provider as a raw traceback — the CLI only catches TransportError and
         # ProviderError. The fallback stays outside: it is quackd's code, not the SDK's.
         try:
-            response = await self.client.chat.completions.create(
-                **self._params(system, history, tools)
-            )
-            turn = self._normalise(parse_response(response))
+            turn = await self._call(system, history, tools)
         except ProviderError:
             raise
         except Exception as e:
-            # A reasoning model that will not take function tools alongside its own default
-            # reasoning effort. The 400 says the fix in words ("set reasoning_effort to
-            # 'none'"), so take it, once, and carry it for the rest of the run rather than
-            # paying a failed call per turn. Every verb quackd has is a function tool, so the
-            # alternative is that the model cannot drive the robot at all.
-            if self.reasoning_effort is None and _asks_for_no_reasoning(e):
-                self.reasoning_effort = "none"
+            # A model that will not take function tools on Chat Completions. Every verb quackd
+            # has is a function tool, so this is not a degraded path, it is no path: take the
+            # API at its word, move to Responses, and stay there rather than paying a failed
+            # call every turn. Only once, and only from chat, so a genuine Responses failure
+            # still surfaces instead of looping.
+            if self.api != "responses" and _wants_the_responses_api(e):
+                self.api = "responses"
                 try:
-                    response = await self.client.chat.completions.create(
-                        **self._params(system, history, tools)
-                    )
-                    turn = self._normalise(parse_response(response))
+                    turn = await self._call(system, history, tools)
                 except ProviderError:
                     raise
                 except Exception as retry:

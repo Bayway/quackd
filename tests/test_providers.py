@@ -215,11 +215,23 @@ async def test_openai_request_and_response_mapping() -> None:
     assert turn.usage.input_tokens == 50 and turn.stop_reason == "tool_calls"
 
 
-class RefusesReasoning:
-    """A server that 400s the first call the way a reasoning model does, then answers.
+def responses_result(name: str, args: str, text: str | None = None) -> Any:
+    """What `/v1/responses` returns: a flat list of output items, not one message."""
+    output: list[Any] = [NS(type="reasoning", summary=[NS(text="thinking")])]
+    output.append(NS(type="function_call", call_id="call_r1", name=name, arguments=args))
+    if text:
+        output.append(NS(type="message", content=[NS(type="output_text", text=text)]))
+    return NS(
+        output=output,
+        status="completed",
+        usage=NS(input_tokens=11, output_tokens=4, output_tokens_details=NS(reasoning_tokens=3)),
+    )
 
-    The message is the one OpenAI returns for `gpt-6-astra`, quoted rather than paraphrased,
-    because the retry matches on its words.
+
+class RefusesToolsOnChat:
+    """Chat Completions 400s the way `gpt-6-astra` does; Responses answers.
+
+    The message is quoted rather than paraphrased, because the switch matches on its words.
     """
 
     MESSAGE = (
@@ -229,15 +241,19 @@ class RefusesReasoning:
     )
 
     def __init__(self, response: Any) -> None:
-        self.calls: list[dict[str, Any]] = []
+        self.chat_calls: list[dict[str, Any]] = []
+        self.responses_calls: list[dict[str, Any]] = []
 
-        async def create(**kwargs: Any) -> Any:
-            self.calls.append(kwargs)
-            if len(self.calls) == 1:
-                raise RuntimeError(self.MESSAGE)
+        async def chat_create(**kwargs: Any) -> Any:
+            self.chat_calls.append(kwargs)
+            raise RuntimeError(self.MESSAGE)
+
+        async def responses_create(**kwargs: Any) -> Any:
+            self.responses_calls.append(kwargs)
             return response
 
-        self.chat = NS(completions=NS(create=create))
+        self.chat = NS(completions=NS(create=chat_create))
+        self.responses = NS(create=responses_create)
 
 
 @pytest.fixture
@@ -246,30 +262,64 @@ def _no_effort_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("QUACKD_OPENAI_REASONING_EFFORT", raising=False)
 
 
-async def test_openai_retries_once_without_reasoning_when_tools_are_refused(
+async def test_openai_switches_to_responses_when_chat_refuses_function_tools(
     _no_effort_env: None,
 ) -> None:
-    """A reasoning model that will not take function tools alongside its own default effort.
+    """A model that will not take function tools on Chat Completions at any effort.
 
-    Every verb quackd has is a function tool, so the alternative to taking the API at its word
-    is that the model cannot drive the robot at all. The retry must send
-    `reasoning_effort="none"`, and must keep sending it for the rest of the run rather than
-    paying a failed call every turn.
+    Every verb quackd has is a function tool, so this is not a degraded path, it is no path.
+    The provider must take the API at its word, move to Responses, and STAY there: retrying
+    chat every turn would pay a failed call per step for the length of the run.
+
+    The other remedy that 400 offers is a dead end and is deliberately not taken: measured on
+    gpt-6-astra, `reasoning_effort="none"` comes back as unsupported for that model, and the
+    tools are refused at low, medium, high and xhigh alike.
     """
-    client = RefusesReasoning(openai_response("walk", json.dumps({"vx": 0.2})))
+    client = RefusesToolsOnChat(responses_result("walk", json.dumps({"vx": 0.2})))
     p = OpenAIProvider(model="gpt-6-astra", client=client)
     turn = await p.step("SYS", history(), TOOLS)
-    assert turn.tool_calls[0].name == "walk"
-    assert len(client.calls) == 2, "it did not retry"
-    assert "reasoning_effort" not in client.calls[0], "the first call should not send one"
-    assert client.calls[1]["reasoning_effort"] == "none"
-    assert p.reasoning_effort == "none", "the setting must stick for the rest of the run"
+    assert turn.tool_calls == [ToolCall(id="call_r1", name="walk", arguments={"vx": 0.2})]
+    assert p.api == "responses", "the switch must stick for the rest of the run"
+    assert len(client.chat_calls) == 1 and len(client.responses_calls) == 1
     await p.step("SYS", history(), TOOLS)
-    assert client.calls[2]["reasoning_effort"] == "none"
+    assert len(client.chat_calls) == 1, "it went back to the API that refuses it"
+    assert len(client.responses_calls) == 2
+    # and the request is the Responses shape, not the Chat one
+    kw = client.responses_calls[0]
+    assert kw["instructions"] == "SYS" and "messages" not in kw
+    assert kw["tools"][0]["name"] == "walk", "Responses tools are flat, not nested"
+
+
+async def test_openai_responses_round_trip_shapes(_no_effort_env: None) -> None:
+    """The Responses renderer and parser, together: history in, a turn out.
+
+    `call_id` is the handle a `function_call_output` must quote, so it is what lands in
+    `ToolCall.id` and what the loop hands back. Sending the item `id` instead is a 400.
+    """
+    client = RefusesToolsOnChat(responses_result("walk", '{"vx": 0.3}', text="going"))
+    p = OpenAIProvider(model="gpt-6-astra", client=client)
+    turn = await p.step("SYS", history(), TOOLS)
+    items = client.responses_calls[0]["input"]
+    kinds = [i.get("type") or i.get("role") for i in items]
+    assert kinds == ["user", "function_call", "function_call_output", "user"]
+    assert items[1]["call_id"] == "call-1", "the assistant's call goes back by call_id"
+    assert items[2]["call_id"] == "call-1", "and its result quotes the same one"
+    assert items[3]["content"][1]["type"] == "input_image", "the frame follows the result"
+    assert items[0]["content"][0]["type"] == "input_text"
+    assert turn.text == "going" and turn.thinking == "thinking"
+    assert turn.usage.input_tokens == 11 and turn.usage.reasoning_tokens == 3
+    assert turn.stop_reason == "tool_calls"
+
+
+async def test_openai_responses_bad_json_arguments_do_not_crash(_no_effort_env: None) -> None:
+    client = RefusesToolsOnChat(responses_result("walk", "{not json"))
+    p = OpenAIProvider(model="gpt-6-astra", client=client)
+    turn = await p.step("SYS", history()[:1], TOOLS)
+    assert "_unparsed" in turn.tool_calls[0].arguments
 
 
 async def test_openai_does_not_swallow_an_unrelated_bad_request(_no_effort_env: None) -> None:
-    """Only the 400 that names both halves is retried, so a real error still surfaces."""
+    """Only the 400 that names both halves switches API, so a real error still surfaces."""
 
     class Broken:
         def __init__(self) -> None:
@@ -281,7 +331,7 @@ async def test_openai_does_not_swallow_an_unrelated_bad_request(_no_effort_env: 
     p = OpenAIProvider(model="gpt-5", client=Broken())
     with pytest.raises(ProviderError, match="context_length_exceeded"):
         await p.step("SYS", history(), TOOLS)
-    assert p.reasoning_effort is None
+    assert p.api == "chat", "an unrelated failure must not move the run to another API"
 
 
 async def test_openai_reasoning_effort_can_be_set_by_hand() -> None:
