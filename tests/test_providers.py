@@ -215,6 +215,82 @@ async def test_openai_request_and_response_mapping() -> None:
     assert turn.usage.input_tokens == 50 and turn.stop_reason == "tool_calls"
 
 
+class RefusesReasoning:
+    """A server that 400s the first call the way a reasoning model does, then answers.
+
+    The message is the one OpenAI returns for `gpt-6-astra`, quoted rather than paraphrased,
+    because the retry matches on its words.
+    """
+
+    MESSAGE = (
+        "Function tools with reasoning_effort are not supported for gpt-6-astra in "
+        "/v1/chat/completions. To use function tools, use /v1/responses or set "
+        "reasoning_effort to 'none'."
+    )
+
+    def __init__(self, response: Any) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+        async def create(**kwargs: Any) -> Any:
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise RuntimeError(self.MESSAGE)
+            return response
+
+        self.chat = NS(completions=NS(create=create))
+
+
+@pytest.fixture
+def _no_effort_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The knob is also an env var, and a developer who has set it must not fail this file."""
+    monkeypatch.delenv("QUACKD_OPENAI_REASONING_EFFORT", raising=False)
+
+
+async def test_openai_retries_once_without_reasoning_when_tools_are_refused(
+    _no_effort_env: None,
+) -> None:
+    """A reasoning model that will not take function tools alongside its own default effort.
+
+    Every verb quackd has is a function tool, so the alternative to taking the API at its word
+    is that the model cannot drive the robot at all. The retry must send
+    `reasoning_effort="none"`, and must keep sending it for the rest of the run rather than
+    paying a failed call every turn.
+    """
+    client = RefusesReasoning(openai_response("walk", json.dumps({"vx": 0.2})))
+    p = OpenAIProvider(model="gpt-6-astra", client=client)
+    turn = await p.step("SYS", history(), TOOLS)
+    assert turn.tool_calls[0].name == "walk"
+    assert len(client.calls) == 2, "it did not retry"
+    assert "reasoning_effort" not in client.calls[0], "the first call should not send one"
+    assert client.calls[1]["reasoning_effort"] == "none"
+    assert p.reasoning_effort == "none", "the setting must stick for the rest of the run"
+    await p.step("SYS", history(), TOOLS)
+    assert client.calls[2]["reasoning_effort"] == "none"
+
+
+async def test_openai_does_not_swallow_an_unrelated_bad_request(_no_effort_env: None) -> None:
+    """Only the 400 that names both halves is retried, so a real error still surfaces."""
+
+    class Broken:
+        def __init__(self) -> None:
+            async def create(**kwargs: Any) -> Any:
+                raise RuntimeError("context_length_exceeded: too many tokens")
+
+            self.chat = NS(completions=NS(create=create))
+
+    p = OpenAIProvider(model="gpt-5", client=Broken())
+    with pytest.raises(ProviderError, match="context_length_exceeded"):
+        await p.step("SYS", history(), TOOLS)
+    assert p.reasoning_effort is None
+
+
+async def test_openai_reasoning_effort_can_be_set_by_hand() -> None:
+    client = FakeOpenAI(openai_response("stop", "{}"))
+    p = OpenAIProvider(model="gpt-5", client=client, reasoning_effort="low")
+    await p.step("SYS", history(), TOOLS)
+    assert client.kwargs["reasoning_effort"] == "low"
+
+
 async def test_openai_bad_json_arguments_do_not_crash() -> None:
     p = OpenAIProvider(client=FakeOpenAI(openai_response("walk", "{not json")))
     turn = await p.step("S", history()[:1], TOOLS)

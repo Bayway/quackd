@@ -176,6 +176,9 @@ markers = [
     # The only tests allowed to read the developer's own asset cache, and the only ones the
     # conftest does not redirect to a throwaway one. They never fetch: an empty cache skips.
     "real_duck: needs upstream's Microduck model and policies already cached",
+    # Cost money and reach the network. Opt-in twice: this marker and QUACKD_LIVE_LLM=1, so a
+    # bare `pytest -m live_llm` on a machine with a key still skips until it is asked for.
+    "live_llm: calls a real LLM over the network (needs OPENAI_API_KEY and QUACKD_LIVE_LLM=1)",
 ]
 # A single test that runs five minutes has hung: the slowest here, a ten-seed sweep, takes
 # well under one. pytest then dumps every thread's stack to stderr and carries on, so the
