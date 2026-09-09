@@ -161,7 +161,7 @@ renderer, on stdout.
 `--no-trace` or `QUACKD_TRACE=0` removes the views. The transcript is unaffected, because a
 run that cannot be argued about afterwards is the thing this project cannot give up.
 `--no-trace-prompt` or `QUACKD_TRACE_PROMPT=0` keeps the narration and drops the system
-prompt, which is forty to sixty lines and worth reading once.
+prompt, which is forty to seventy lines and worth reading once.
 `QUACKD_TRACE_THINKING` is how much of the model's thinking each turn shows: a number of
 characters, `all`, or `0`. The transcript always has all of it.
 

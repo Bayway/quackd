@@ -80,7 +80,7 @@ def test_the_trace_is_on_by_default(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_no_trace_prompt_hides_only_the_prompt(tmp_path: Path, monkeypatch) -> None:
-    """The prompt is forty to sixty lines, worth reading once and tiresome on the fiftieth
+    """The prompt is forty to seventy lines, worth reading once and tiresome on the fiftieth
     run of an afternoon. Hiding it must not cost the verbs and the intents."""
     out = _trace_run(tmp_path, monkeypatch, "--no-trace-prompt")
     assert "system prompt" not in out and "You are the brain" not in out
