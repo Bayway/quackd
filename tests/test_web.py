@@ -36,6 +36,10 @@ MODULES = sorted(SRC.glob("*.js"))
 # own deployment. Every local reference in the HTML is absolute under it.
 MOUNT = "/simulator"
 
+# The other half of the product, one level up from the mount. Written absolute wherever this
+# page points at it, and so written absolute here.
+SITE = "https://www.quackd.org/"
+
 
 def _unmount(reference: str) -> str:
     """A reference as the browser sees it, back to a path inside `web/`."""
@@ -131,6 +135,31 @@ def test_the_header_wears_the_vendored_duck_mark_and_not_an_emoji() -> None:
         "the tab icon is not the vendored PNG favicon"
     )
     assert f'href="{MOUNT}/assets/apple-touch-icon.png"' in HTML, "nothing links the home-screen icon"
+
+
+def test_the_page_offers_a_way_back_to_the_site_that_mounts_it() -> None:
+    """quackd-web links here from five places — the hero, the loop, the try section, the footer
+    and the nav — and this page linked back zero times: the mark was not even a link and "What
+    is this?" answered with a README, which is written for somebody who already decided to
+    care. So a visitor arriving straight at /simulator, from a shared link or from search or
+    from the `sitemap.xml` entry the landing page publishes, had no path to the product at all.
+
+    The URL has to be absolute. This file is a static artifact copied into another project's
+    build, and `web/serve.py` sends the local root straight back to `/simulator/`, so a bare
+    `/` would loop in development and would mean whatever owns the root in production.
+    """
+    header = re.search(r"<header\b.*?</header>", HTML, re.S)
+    assert header, "index.html has no <header>, so this test cannot see what it offers"
+    assert f'href="{SITE}"' in header.group(0), (
+        f"nothing in the header links to {SITE}, so a visitor who lands on the simulator has "
+        f"no way to the landing page. It must be that absolute URL: a relative `/` is a loop "
+        f"back to this page under web/serve.py"
+    )
+    heading = re.search(r"<h1\b.*?</h1>", HTML, re.S)
+    assert heading and re.search(rf'<a[^>]+href="{SITE}"', heading.group(0)), (
+        "the brand lockup is not the way home. A mark and a wordmark that return the visitor "
+        "to the site is the convention every page on the web shares, and this h1 holds both"
+    )
 
 
 def test_every_asset_the_page_asks_for_is_a_file_in_this_directory() -> None:

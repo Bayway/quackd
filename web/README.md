@@ -7,13 +7,11 @@ two ways of driving a robot sit a centimetre apart. It is the same idea as
 `quackd run --goal "..." --robot microduck:mujoco`, with the same physics and the same
 walking policy, in six modules of plain JavaScript with no build step instead of Python.
 
-It is meant to live at **`www.quackd.org/simulator`**, and it is not there yet — which is why
-that address is written here as text and not as a link. That domain is served by quackd-web, a
-separate Vercel project, whose build would fetch this directory into its own `/simulator` at a
-pinned commit once the pull request that adds that step lands; read the address as where this is
-going. There
-is no build step either way: `vercel.json` at the repository root serves `web/` as it stands,
-because everything heavy here is a CDN URL the page fetches at run time.
+It lives at <https://www.quackd.org/simulator>. That domain is served by quackd-web, a separate
+Vercel project, whose build fetches this directory into its own `/simulator` at a pinned commit,
+so the page you are reading about is the one deployed there. There is no build step either way:
+`vercel.json` at the repository root serves `web/` as it stands, because everything heavy here
+is a CDN URL the page fetches at run time.
 
 ### Why the paths are absolute
 
@@ -25,6 +23,22 @@ asset under it would 404. `tests/test_web.py` fails if a relative path comes bac
 
 The same `vercel.json` also rewrites `/simulator/*` to `/*` here, so this project answers on
 the mount as well as at its own root and the direct deployment URL is not a broken page.
+
+### The link back
+
+The mount is one direction of a loop. quackd-web points at `/simulator` from five places — its
+hero, its loop section, its try section, its footer and the nav — and lists that address in its
+`sitemap.xml`, so a visitor can arrive here having never seen the product page: from a shared
+link, from search, from an agent reading the sitemap.
+
+This page answers in the header with one deliberate way back — the `What is this?` link, which
+used to open the GitHub README and now opens the landing page, because a README is for somebody
+who has already decided to care and this visitor has just watched a duck walk — plus the brand
+lockup (the mark and the word `quackd`, wrapped in an anchor inside the `h1`, which stays an
+`h1`), which is home on every site on the web and was inert here. Both are the absolute
+`https://www.quackd.org/` rather than a bare `/`, because `/` here is the mount's parent in
+production and, under `serve.py`, a redirect straight back to `/simulator/` — a relative link
+would loop in development. `tests/test_web.py` fails if that link goes.
 
 ## Running it locally
 

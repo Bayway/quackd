@@ -33,15 +33,29 @@
 
 <a class="skip-link" href="#view">Skip to the arena</a>
 
+<!--
+  The way back to the product page: "What is this?", which a visitor who has just watched a
+  duck walk asks of the product and not of a README, plus the brand lockup, which every site
+  on the web makes the way home.
+
+  Both URLs are ABSOLUTE — https://www.quackd.org/, never a bare "/". This file is a static
+  artifact fetched into the quackd-web build and served under its /simulator mount, and
+  locally `web/serve.py` redirects the root straight back to /simulator/. A relative "/" would
+  therefore leave the visitor exactly where they started in development, and depend on which
+  project happens to own the root in production. tests/test_web.py fails if the link goes.
+-->
 <header class="nav-shell">
   <h1>
-    <img src="/simulator/assets/duck-mark.png" alt="" width="30" height="30" decoding="async" class="mark">
-    quackd <small>a Microduck with a brain</small>
+    <a href="https://www.quackd.org/">
+      <img src="/simulator/assets/duck-mark.png" alt="" width="30" height="30" decoding="async" class="mark">
+      quackd
+    </a>
+    <small>a Microduck with a brain</small>
   </h1>
   <span class="status-pill">MuJoCo · WASM · your key stays in this tab</span>
   <nav>
     <a class="nav-link nav-star" href="https://github.com/rokbenko/quackd">GitHub</a>
-    <a class="nav-link" href="https://github.com/rokbenko/quackd#readme">What is this?</a>
+    <a class="nav-link" href="https://www.quackd.org/">What is this?</a>
   </nav>
 </header>
 

@@ -37,9 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused, and a fall is recovered by standing the model up, because upstream's episodic
   policies did nothing from a standing pose and it ships no get-up policy.
 - **A browser demo, so trying quackd costs nobody an install** (`web/`, a static page with no
-  build step, served by Vercel under the `/simulator` mount that `vercel.json` rewrites;
-  `www.quackd.org/simulator` is where it is headed, and it is not there until quackd-web, the
-  separate project that owns that domain, fetches this directory into its build). Locally it is
+  build step, served by Vercel under the `/simulator` mount that `vercel.json` rewrites; live at
+  `www.quackd.org/simulator`, which quackd-web, the separate project that owns that domain, builds
+  by fetching this directory at a pinned commit). Locally it is
   `python web/serve.py`, then <http://localhost:8000/simulator/> — a stdlib server that mounts
   the directory the way the deploy does. `python -m http.server --directory web` no longer
   serves it: every local reference in `index.html` is absolute under the mount, so a root server
