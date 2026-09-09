@@ -66,6 +66,47 @@
   </div>
 
   <section class="console">
+    <!--
+      The band. It is FIRST in the document, above the arena, because a visitor who never
+      sees the key field types a sentence, presses Run and gets an error about a credential
+      nobody asked them for. The switch and 03 are one question — "is a model in this loop"
+      and "whose key pays for it" — so they share the band.
+
+      #key-box is a SIBLING of .toggle-row and never its parent or its child: applyToggle()
+      does `ui.keyBox.hidden = !on`, so a switch nested inside the box it hides would hide
+      itself and become unreachable.
+    -->
+    <div class="model-bar">
+      <div class="toggle-row">
+        <label class="switch">
+          <input type="checkbox" id="quackd-on" aria-labelledby="toggle-label" checked>
+          <span class="slider" aria-hidden="true"></span>
+        </label>
+        <div>
+          <strong id="toggle-label">quackd is on</strong>
+          <p id="toggle-note" class="fine">A model reads your sentence and picks from the robot's own verbs. The executor checks every one against the contract before anything moves.</p>
+        </div>
+      </div>
+
+      <details id="key-box" open>
+        <summary>
+          <span class="num" aria-hidden="true">03</span><span class="rule"></span><span class="eyebrow">Your API key</span>
+        </summary>
+        <p class="fine">
+          The key stays in this tab. It goes straight from your browser to the model you
+          pick, is never stored and never passes through any server of ours. Every call is
+          billed to you. Prefer nothing to leave the machine at all? Pick <em>Local</em>.
+        </p>
+        <div class="row">
+          <select id="provider" aria-label="model provider"></select>
+          <input id="model" placeholder="model" autocomplete="off">
+        </div>
+        <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off">
+        <input id="base-url" placeholder="http://localhost:11434/v1" autocomplete="off" hidden>
+        <p id="provider-note" class="fine"></p>
+      </details>
+    </div>
+
     <div class="stage">
       <canvas id="view" width="960" height="640" tabindex="0"
               aria-label="The arena. W A S D drives the duck; Space stops it.">
@@ -108,23 +149,16 @@
 
     <div class="deck">
       <div class="lane lane-a">
-        <h2 class="lane-label">
-          <span class="num" aria-hidden="true">01</span><span class="rule"></span><span class="eyebrow">Say it</span>
-        </h2>
-
-        <div class="toggle-row">
-          <label class="switch">
-            <input type="checkbox" id="quackd-on" aria-labelledby="toggle-label" checked>
-            <span class="slider" aria-hidden="true"></span>
-          </label>
-          <div>
-            <strong id="toggle-label">quackd is on</strong>
-            <p id="toggle-note" class="fine">A model reads your sentence and picks from the robot's own verbs. The executor checks every one against the contract before anything moves.</p>
-          </div>
+        <!-- The 01 label and the instruction share one baseline row. `for=` is document-wide,
+             so moving the <label> out of the form keeps it associated with #goal. -->
+        <div class="say-head">
+          <h2 class="lane-label">
+            <span class="num" aria-hidden="true">01</span><span class="rule"></span><span class="eyebrow">Say it</span>
+          </h2>
+          <label for="goal">Tell the duck what to do</label>
         </div>
 
         <form id="goal-form" method="dialog">
-          <label for="goal">Tell the duck what to do</label>
           <input id="goal" value="Walk in a square, half a metre a side" autocomplete="off" enterkeyhint="go">
           <div class="row actions">
             <button type="submit" id="run" disabled>Run</button>
@@ -138,70 +172,6 @@
             <button type="button" class="chip">Walk to the person and quack</button>
           </div>
         </form>
-
-        <!-- The cockpit is permanent. It is not a mode the switch turns on, and it sits
-             directly under the sentence box on purpose: the adjacency IS the argument. -->
-        <section id="manual" class="cockpit" aria-labelledby="drive-label">
-          <h2 class="lane-label" id="drive-label">
-            <span class="num" aria-hidden="true">02</span><span class="rule"></span><span class="eyebrow">Drive it</span><span class="tag" aria-hidden="true">always live</span>
-          </h2>
-          <div class="keycaps">
-            <div class="cluster">
-              <kbd data-code="KeyQ">Q</kbd><kbd data-code="KeyW">W</kbd><kbd data-code="KeyE">E</kbd>
-              <kbd data-code="KeyA">A</kbd><kbd data-code="KeyS">S</kbd><kbd data-code="KeyD">D</kbd>
-              <kbd data-code="Space" class="wide">Space</kbd>
-            </div>
-            <div class="cluster cluster-2">
-              <kbd data-code="KeyK">K</kbd><kbd data-code="KeyR">R</kbd>
-              <kbd data-code="KeyG">G</kbd><kbd data-code="KeyO">O</kbd>
-              <kbd data-code="Digit1">1</kbd><kbd data-code="Digit2">2</kbd>
-            </div>
-          </div>
-          <dl class="legend">
-            <dt>W S</dt><dd>Walk forward / back</dd>
-            <dt>A D</dt><dd>Turn left / right</dd>
-            <dt>⇧ A D</dt><dd>Strafe instead of turning</dd>
-            <dt>Q E</dt><dd>Look left / right</dd>
-            <dt>G</dt><dd>Centre the head</dd>
-            <dt>Space</dt><dd>Stop. Release and press again to go.</dd>
-            <dt>K</dt><dd>Kick, right leg</dd>
-            <dt>R</dt><dd>Stand up</dd>
-            <dt>O</dt><dd>Read the state into the log</dd>
-            <dt>1 2</dt><dd>Over the shoulder / duck cam</dd>
-            <dt>Esc</dt><dd>Hand the keyboard back to the arena, from anywhere</dd>
-          </dl>
-          <p class="fine">
-            This is the whole interface the robot has: a twist — three numbers,
-            <code>vx, vy, wz</code> — and a head angle. Two learned policies use them: one
-            stands it up, one walks it. The kick is quackd's own scripted impulse, not a
-            policy. None of it reads English.
-          </p>
-          <p class="fine">
-            There is no key for <code>say</code>, and no key for <em>walk to the person and
-            quack</em>. A key carries a command. A sentence needs something to read it — that
-            is the box above. A verb leaves a line in the log; a twist leaves a number in the
-            readout.
-          </p>
-          <p class="touch-note">These are for a laptop keyboard. On a phone, use the box above.</p>
-        </section>
-
-        <details id="key-box" open>
-          <summary>
-            <span class="num" aria-hidden="true">03</span><span class="rule"></span><span class="eyebrow">Your API key</span>
-          </summary>
-          <p class="fine">
-            The key stays in this tab. It goes straight from your browser to the model you
-            pick, is never stored and never passes through any server of ours. Every call is
-            billed to you. Prefer nothing to leave the machine at all? Pick <em>Local</em>.
-          </p>
-          <div class="row">
-            <select id="provider" aria-label="model provider"></select>
-            <input id="model" placeholder="model" autocomplete="off">
-          </div>
-          <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off">
-          <input id="base-url" placeholder="http://localhost:11434/v1" autocomplete="off" hidden>
-          <p id="provider-note" class="fine"></p>
-        </details>
       </div>
 
       <div class="lane">
@@ -214,6 +184,65 @@
         </section>
       </div>
     </div>
+
+    <!-- The cockpit is permanent. It is not a mode the switch turns on. It used to sit
+         directly under the sentence box, where adjacency carried the dual-control argument;
+         it is now the right-hand column, at the full height of the arena AND the sentence
+         box, so both ways of driving are on screen AT ONCE instead of one below the fold.
+         Simultaneity is the argument now, and the layout is what makes it. -->
+    <section id="manual" class="cockpit" aria-labelledby="drive-label">
+      <h2 class="lane-label" id="drive-label">
+        <span class="num" aria-hidden="true">02</span><span class="rule"></span><span class="eyebrow">Drive it</span><span class="tag" aria-hidden="true">always live</span>
+      </h2>
+      <div class="keycaps">
+        <div class="cluster">
+          <kbd data-code="KeyQ">Q</kbd><kbd data-code="KeyW">W</kbd><kbd data-code="KeyE">E</kbd>
+          <kbd data-code="KeyA">A</kbd><kbd data-code="KeyS">S</kbd><kbd data-code="KeyD">D</kbd>
+          <kbd data-code="Space" class="wide">Space</kbd>
+        </div>
+        <div class="cluster cluster-2">
+          <kbd data-code="KeyK">K</kbd><kbd data-code="KeyR">R</kbd>
+          <kbd data-code="KeyG">G</kbd><kbd data-code="KeyO">O</kbd>
+          <kbd data-code="Digit1">1</kbd><kbd data-code="Digit2">2</kbd>
+        </div>
+      </div>
+
+      <!-- The MAP is pinned above and the WORDS scroll here. All thirteen keycaps stay
+           visible at every height; only the reading matter behind them gives way. -->
+      <div class="key-notes">
+        <dl class="legend">
+          <dt>W S</dt><dd>Walk forward / back</dd>
+          <dt>A D</dt><dd>Turn left / right</dd>
+          <dt>⇧ A D</dt><dd>Strafe instead of turning</dd>
+          <dt>Q E</dt><dd>Look left / right</dd>
+          <dt>G</dt><dd>Centre the head</dd>
+          <dt>Space</dt><dd>Stop. Release and press again to go.</dd>
+          <dt>K</dt><dd>Kick, right leg</dd>
+          <dt>R</dt><dd>Stand up</dd>
+          <dt>O</dt><dd>Read the state into the log</dd>
+          <dt>1 2</dt><dd>Over the shoulder / duck cam</dd>
+          <dt>Esc</dt><dd>Hand the keyboard back to the arena, from anywhere</dd>
+        </dl>
+        <!-- A real <details>/<summary>: the keydown guard's TYPING selector lists `summary`,
+             so Space still opens it instead of stopping the duck. -->
+        <details class="why">
+          <summary><span class="eyebrow">Why two controls?</span></summary>
+          <p class="fine">
+            This is the whole interface the robot has: a twist — three numbers,
+            <code>vx, vy, wz</code> — and a head angle. Two learned policies use them: one
+            stands it up, one walks it. The kick is quackd's own scripted impulse, not a
+            policy. None of it reads English.
+          </p>
+          <p class="fine">
+            There is no key for <code>say</code>, and no key for <em>walk to the person and
+            quack</em>. A key carries a command. A sentence needs something to read it — that
+            is the sentence box, bay 01. A verb leaves a line in the log; a twist leaves a
+            number in the readout.
+          </p>
+        </details>
+        <p class="touch-note">These are for a laptop keyboard. With a touchscreen, use the sentence box in 01.</p>
+      </div>
+    </section>
   </section>
 </main>
 

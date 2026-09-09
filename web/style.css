@@ -7,11 +7,23 @@
 
    THREE RULES THAT DECIDE EVERY LATER QUESTION
    R1  The page has exactly two objects plus a brandline: .brandline, section.console,
-       footer. Everything needed during a run lives inside the console: the arena on top,
-       a two-lane deck beneath it — lane A "say it / drive it / your key", lane B the log.
-   R2  The sentence box and the keycaps are ADJACENT, in that order, in one lane. That
-       adjacency is the dual-control argument, made by proximity instead of by copy. Do not
-       separate them, do not put the log between them, do not move the cockpit to lane B.
+       footer. Everything needed during a run lives inside the console: the credential band
+       across the top, the arena beneath it with the cockpit as a full-height right column,
+       and the deck — lane A "say it", lane B the log — under the arena.
+   R2  Both ways of driving are visible AT ONCE, without scrolling. That simultaneity is the
+       dual-control argument, and the LAYOUT is what makes it. This rule used to demand that
+       the sentence box and the keycaps be adjacent in one lane, and they were — adjacent to
+       each other and both under the fold, together with the key box, so a visitor typed a
+       sentence, pressed Run and got an error about a credential the page had never shown
+       them. The console is one screen now: the switch and 03 in a full-width band across the
+       top, the arena with 01 and 04 beneath it, 02 down the right side spanning both. Nothing
+       added here may push the band, the arena, the sentence box, the log or the keycaps off a
+       real 1366×768 laptop — 641px of viewport once the browser has taken its chrome, which
+       is the number to test against, not 768. Adjacency was a proxy for simultaneity; this is
+       the thing itself. Do not restore the vertical stack.
+       The bay numbers 01–04 are NAMES, not a sequence: reading order is 03, the arena, 01,
+       04, 02. They were numbered when the page was one column and they stay numbered so the
+       copy can point at a bay ("the sentence box, bay 01") from anywhere on the page.
    R3  Machine speech is mono, human speech is sans. Verb calls, results, #readout, keycaps,
        eyebrows and bay numbers are DM Mono; the goal line, the refusal paragraph and every
        .fine are Nunito Sans. This is deliberate — do not "fix" the mixed-family log.
@@ -20,8 +32,8 @@
    content, not chrome. Everything else is cream.
 
    Section order below: tokens · reset · class registry · base/type · shell · brandline ·
-   console/stage · stage chrome · deck · controls · cockpit · key box · terminal · footer ·
-   keyframes · responsive.
+   console/stage · the model bar · stage chrome · deck · controls · cockpit · key box ·
+   terminal · footer · keyframes · responsive.
    ═════════════════════════════════════════════════════════════════════════════════════ */
 
 /* ── tokens ──────────────────────────────────────────────────────────────────────────── */
@@ -388,13 +400,30 @@ button:disabled,
 
 /* ── console and stage ───────────────────────────────────────────────────────────────── */
 
+/* The console is the grid. Below 62rem it is one column in document order — 03 the key, the
+   arena, 01, 04, 02 — and at 62rem it becomes the band / arena+02 / 01+04 layout in B8. */
 .console {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);   /* below 62rem: one column, DOM order */
+  gap: 0;                                  /* REQUIRED. Every division on this card is a
+                                              border, never a gap: applyToggle() sets
+                                              keyBox.hidden = !on, and a row-gap would
+                                              survive that collapse as a band of cream. */
   background: var(--card-soft);
   border: 1px solid var(--edge);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
   overflow: hidden;              /* the canvas clips to the card's top corners */
 }
+
+/* ── the model bar ───────────────────────────────────────────────────────────────────────
+   The switch and the credential, in one full-width band ABOVE the arena. Stacked here;
+   a two-track grid from 62rem up. */
+.model-bar {
+  padding: var(--s-3) var(--gutter);
+  border-bottom: 1px solid var(--edge-3);
+}
+.model-bar > * + * { margin-top: var(--s-3); }
 
 .stage { position: relative; }
 
@@ -407,7 +436,13 @@ button:disabled,
 canvas#view {
   display: block;
   width: 100%;
-  height: clamp(18rem, 50vh, 34rem);
+  /* The one-column value, for below 62rem. From 62rem up "THE FOLD, AND HOW THE ARENA PAYS
+     FOR IT" at the foot of the file replaces it with `calc(100vh - the measured chrome)`,
+     which is what actually delivers the fold.
+     Viewport-relative either way, and never a percentage of a `1fr` row: every row in the
+     console grid stays `auto`, so the failure mode is the page scrolling, never a
+     scissored Run button. */
+  height: clamp(12rem, 38vh, 30rem);
   background: var(--lilac-2);    /* the one frame before MuJoCo draws; never white */
   touch-action: none;            /* REQUIRED: view.js binds pointer drag and a passive:false wheel */
   cursor: grab;
@@ -463,7 +498,16 @@ canvas#view:focus-visible { outline: 3px solid var(--ring); outline-offset: -3px
   inset: 0;
   z-index: 3;
   display: grid;
-  place-content: center;
+  /* The boot panel is ~279px of content. A 205px arena inside `.console { overflow: hidden }`
+     scissors centred content at BOTH ends — the duck mark off the top, "Nothing is uploaded"
+     off the bottom. Start-safe and scrollable, it loses neither. This used to be fixed only
+     below 48rem, because that was the only place the arena got short. */
+  align-content: center;
+  align-content: safe center;   /* two declarations, not one: a browser without the `safe`
+                                   keyword drops the whole line, and with nothing centring
+                                   left the boot panel would spread instead. */
+  justify-content: center;
+  overflow-y: auto;
   justify-items: center;
   gap: var(--s-2);
   text-align: center;
@@ -559,13 +603,9 @@ canvas#view:focus-visible { outline: 3px solid var(--ring); outline-offset: -3px
   border-top: 1px solid var(--edge-3);
 }
 .lane { padding: var(--s-3) var(--gutter); min-width: 0; }
-.lane > * + * { margin-top: var(--s-3); }
-#manual { margin-top: var(--s-5); }
-#key-box {
-  margin-top: var(--s-5);
-  padding-top: var(--s-3);
-  border-top: 1px solid var(--edge-3);
-}
+/* The lanes' own inter-block spacing is set per width, not here: `.lane-a > * + *` above
+   62rem and `.deck > .lane > * { margin-top: 0 }` below it, where the rule between bays does
+   the separating instead. A base `* + *` rule here would be overridden at every width. */
 
 /* Four numbered bays are the page's entire heading system:
    01 Say it · 02 Drive it · 03 Your API key · 04 Transcript. */
@@ -598,6 +638,19 @@ canvas#view:focus-visible { outline: 3px solid var(--ring); outline-offset: -3px
   text-transform: uppercase;
   color: var(--meta);
 }
+
+/* Bay 01's label and its instruction on ONE baseline row. Two stacked lines here cost the
+   fold ~20px and say nothing the one line does not. */
+.say-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: var(--s-2);
+  row-gap: var(--s-0);
+}
+.say-head > .lane-label { margin: 0; flex: 0 0 auto; }
+/* No `display` here: this is a flex item, so any inline value is blockified anyway. */
+.say-head > label[for="goal"] { margin: 0; flex: 1 1 16ch; min-width: 0; }
 
 /* ── controls ────────────────────────────────────────────────────────────────────────── */
 
@@ -906,6 +959,14 @@ kbd.down {
 }
 .legend dd { margin: 0; color: var(--ink-2); max-width: 62ch; }
 
+/* Plain blocks below 62rem — nothing scrolls inside a scrolling page. From 62rem up
+   .key-notes becomes the cockpit's scroll region; see the responsive section. */
+.key-notes { min-width: 0; }
+.why > summary { font-size: var(--t-fine); color: var(--body); }
+.why > summary::after { margin-left: var(--s-1); }   /* not `auto`: no full-width row to push to */
+.why[open] > summary { margin-bottom: var(--s-1); }
+.why > .fine:first-of-type { margin-top: 0; }
+
 .touch-note {
   display: none;
   margin: var(--s-2) 0 0;
@@ -1166,9 +1227,260 @@ summary .rule { display: block; width: 1.5rem; height: 1px; background: var(--pi
 /* ── responsive ──────────────────────────────────────────────────────────────────────── */
 
 @media (min-width: 62rem) {
-  .deck { grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr); align-items: start; }
-  .lane { padding: var(--s-4); }
+  /* Four children, three areas. 03 and the switch span the full card because a visitor who
+     never sees the key field presses Run and gets an error about something nobody asked them
+     for; 02 is a full-height column beside the arena AND the sentence box, so neither way of
+     driving waits for the other. */
+  .console {
+    grid-template-columns: minmax(0, 1fr) clamp(15rem, 22%, 20rem);
+    grid-template-areas:
+      "key   key"
+      "stage drive"
+      "say   drive";
+  }
+  .model-bar { grid-area: key; }
+  .stage     { grid-area: stage; }
+  .deck      { grid-area: say; }
+  #manual    { grid-area: drive; }
+  /* 22% of a 1178px console = 259px; the clamp floors it at 240px down at 992px wide and caps
+     it at 320px on a wide screen. The left group is 74–79% throughout — "about 80/20" holds. */
+
+  /* the band: the switch on the left, the credential on the right */
+  .model-bar {
+    display: grid;
+    grid-template-columns: minmax(19rem, 30rem) minmax(0, 1fr);
+    column-gap: var(--s-4);
+    align-items: start;
+    padding: var(--s-2) var(--s-4);   /* 12px vertical is the minimum that clears the global
+                                         :focus-visible ring's 3px offset against
+                                         .console { overflow: hidden } */
+  }
+  .model-bar > * + * { margin-top: 0; }
+  /* With the language layer off, #key-box is `hidden` and the right track has nothing in it. */
+  body.no-quackd .model-bar { grid-template-columns: minmax(0, 1fr); }
+  .toggle-row > div > #toggle-note { font-size: var(--t-micro); }
+
+  /* <details> interposes a ::details-content box between #key-box and everything after the
+     <summary>, so WITHOUT this the flex container has exactly two items — the summary and
+     that box — and every `flex:` below is dead: .row, #key and .fine each render full-track
+     on their own line and the band is a 185px vertical stack instead of the row described
+     here. `display: contents` dissolves it so the fields are flex items again; the box
+     carries no styling of its own, and every rule here is scoped to [open], so the closed
+     state is untouched. Worth 24px, straight out of the fold. */
+  #key-box[open]::details-content { display: contents; }
+
+  #key-box[open] {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s-2);
+    row-gap: var(--s-1);
+  }
+  #key-box[open] > * { margin-top: 0; }
+  #key-box[open] > summary        { flex: 0 0 auto; margin-bottom: 0; }
+  #key-box[open] > summary::after { margin-left: var(--s-1); }   /* `auto` would shove the caret
+                                                                    across the whole card */
+  /* grow 3 against #key's 2, not 2 against 2. The row carries TWO controls, and the <select>
+     takes its own min-content width (181px for "Anthropic (Claude)") off the top regardless
+     of `min-width: 0`, so an even split left the model field 162px for a 166px value and
+     "claude-sonnet-5" read as "claude-sonnet-". #key still gets 246px for an "sk-ant-…". */
+  #key-box[open] > .row           { flex: 3 1 18rem; }
+  #key-box[open] > #key           { flex: 2 1 12rem; }
+  #key-box[open] > #base-url      { flex: 2 1 12rem; }
+  #key-box[open] > .fine          { flex: 1 1 100%; margin: 0; max-width: none;
+                                    font-size: var(--t-micro); }
+  #key-box[open] > #provider-note { flex: 1 1 100%; margin: 0; font-size: var(--t-micro); }
+  #provider-note:empty { display: none; }
+  /* The privacy note is 228 characters and it takes TWO 17px lines at this width. It is the
+     reason a visitor is willing to paste a key at all, so it is never truncated. If it is ever
+     "tidied" back to --t-fine with its 62ch measure the band grows ~35px and takes all of it
+     out of the arena. */
+
+  /* the deck: 01 | 04, 50/50, and lane B fills the row rather than floating in it */
+  .deck { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; }
+  .lane { padding: var(--s-3); }
   .lane + .lane { border-left: 1px solid var(--edge-3); }
+  .lane-a > * + * { margin-top: var(--s-2); }
+  .deck > .lane:last-child { display: flex; }
+  .transcript-box { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+  #transcript { flex: 1 1 auto; max-height: clamp(6rem, 17vh, 26rem); }
+  /* max-height and overflow-y stay ON THE <ol> — that is the element app.js scrolls. flex-grow
+     only lets it reach that cap; it never replaces it. The cap is what stops a fifty-line log
+     from making bay 04 taller than bay 01 and growing the whole card. */
+
+  /* 02, the right column, spanning the arena and the deck */
+  #manual {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    min-height: 0;                 /* lets THIS grid's own 1fr row shrink below its content.
+                                      Necessary, and on its own not sufficient — see the
+                                      `contain: size` on .key-notes, which is what actually
+                                      stops #manual inflating the console. */
+    margin: 0;
+    padding: var(--s-3);
+    border-width: 0 0 0 1px;
+    border-color: var(--edge-guard);
+    border-radius: 0;
+  }
+  /* The off-state signal was an OUTSET 3px ring; this column's own edges and the console's
+     `overflow: hidden` would scissor it, so it goes inset. */
+  body.no-quackd .cockpit {
+    border-color: #e0b93f;
+    box-shadow: inset 0 0 0 2px rgba(245, 197, 51, 0.55), var(--shadow-guard);
+  }
+  #manual > .lane-label .rule { display: none; }   /* "02 DRIVE IT … ALWAYS LIVE" measures
+                                                      ~208px against 215px of content; the
+                                                      24px rule is what makes it wrap */
+  .keycaps { gap: var(--s-2); }
+  .legend { font-size: var(--t-micro); row-gap: 0.3rem; margin-top: 0; }
+  .legend dd { max-width: none; }
+  .key-notes {
+    /* THE ONE DECLARATION THAT KEEPS #manual OUT OF THE CONSOLE'S ROW SIZING, and it looks
+       like a micro-optimisation. #manual spans rows 2 and 3, and a row-spanning grid item
+       grows every `auto` track it spans to fit its own content. `min-height: 0` zeroes only
+       the MIN-content contribution; the MAX-content contribution still grows those tracks, so
+       the legend used to stretch the arena's row and the deck's row by ~34px each — 67px past
+       the fold, a 34px strip of dead card under the arena, and the glass HUD (which anchors
+       to .stage, not to the canvas) hanging off the bottom of the render. `contain: size`
+       makes this box contribute NOTHING to intrinsic sizing, so the rows are sized by the
+       arena and the deck alone, #manual stretches to whatever they came to, and the 1fr row
+       above hands the remainder here to scroll. The cheap regression check is that .stage's
+       height equals canvas#view's height at 1366×641.
+       min-height is the floor if a browser ever leaves this row indeterminate: with
+       containment an auto height would collapse the legend to nothing. */
+    contain: size;
+    min-height: 7rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin-top: var(--s-2);
+    padding-top: var(--s-2);
+    /* the ring is 2px at a 3px offset and outlines do not scroll into view, so a scroll
+       container flush with its content clips it left and right (FINDING: .why's summary) */
+    padding-inline: 5px;
+    margin-inline: -5px;
+    border-top: 1px solid var(--edge-3);
+    scrollbar-width: thin;
+    scrollbar-color: var(--edge-soft) transparent;
+  }
+  /* The MAP is pinned and the WORDS scroll. All thirteen keycaps are visible at every height;
+     only the reading matter behind them gives way, and only when the arena and the deck did
+     not leave it room. */
+}
+
+/* THE FOLD, AND HOW THE ARENA PAYS FOR IT.
+   ---------------------------------------------------------------------------------------
+   Everything in the console except the arena is a fixed number of pixels tall: the band is
+   the summary, the privacy note, one field row and the provider note; the deck is the 01
+   head, the input, the button row and the chips; the cockpit no longer contributes anything
+   (see `contain: size` above). So the console's height is that constant plus the canvas, and
+   the canvas is the only part that can give.
+
+   That is why the height below is `calc(100vh - <constant>)` and not a bare `Nvh`. A
+   fraction of the viewport is only ACCIDENTALLY right at one height: 32vh fitted a 641px
+   laptop and overflowed a 768px one by 70px, because the fixed remainder does not scale.
+   Subtracting the measured remainder makes the fit a straight line instead of a staircase,
+   so every height from ~590px up lands the same way and there is no dead zone where a TALLER
+   viewport overflows worse than a shorter one. It is still viewport-relative, as it must be;
+   it is just relative to the space that is actually left.
+
+   The constant is the measured chrome above and below the arena, rounded up for slack, and
+   it therefore changes when that chrome does. If the privacy note ever wraps to a third line
+   or a bay grows a row, this number is what you re-measure — the symptom will be the card
+   going back under the fold. The clamp floor is the point at which the arena stops being the
+   centrepiece and we let the page scroll instead.
+   HARD RULE unaffected: this resolves on resize only, never per frame, so view.js's WebGL
+   buffer is reallocated exactly as often as it was before. */
+
+@media (min-width: 62rem) {
+  :root {
+    /* everything above and below the arena, measured: the nav and the wrap's top padding,
+       the brandline, the band, the deck, and a few px of slack. */
+    --fold-chrome: 35rem;
+    --arena-floor: 12rem;
+    --arena-cap: 30rem;
+    /* and what the band costs when it does not fit on one line at this WIDTH — see below. */
+    --band-wrap: 0rem;
+  }
+  /* `vh`, not `dvh`: this rule only runs at 62rem and up, where there is no collapsing URL
+     bar to care about, and `dvh` inside a var()-bearing declaration cannot fall back to the
+     line above it — it would compute to `auto` on a browser that lacks the unit. */
+  canvas#view {
+    height: clamp(var(--arena-floor),
+                  calc(100vh - var(--fold-chrome) - var(--band-wrap)),
+                  var(--arena-cap));
+  }
+}
+
+/* THE BAND'S OWN WIDTH TIER. Below ~72rem the credential track gets too narrow for the
+   provider/model row and the key field to share a line, so the band takes an extra line
+   (and the privacy note a third) — 65px the height tiers cannot see, because it is a
+   function of width. Narrowing the switch's track buys most of it back; the rest is
+   declared here so the arena still knows what is left. */
+@media (min-width: 62rem) and (max-width: 72rem) {
+  .model-bar { grid-template-columns: minmax(0, 19rem) minmax(0, 1fr); }
+  :root { --band-wrap: 0.25rem; }
+}
+/* and narrower still, where the deck's own bays start wrapping too */
+@media (min-width: 62rem) and (max-width: 68rem) {
+  :root { --band-wrap: 2rem; }
+}
+
+/* THE LAPTOP TIER, and it starts far higher than it used to. It used to open at 46rem
+   (736px) and so a literal 768px viewport got the TALLEST variant and none of these
+   reductions — the reason the required 1366×768 case overflowed by 70px while the shorter
+   1280×720 overflowed by 35px. Opening it at 58rem (928px) means the two reductions that
+   cost the least — a brand line that repeats the nav and a second row of optional chips —
+   are spent well before the fold is actually in danger. */
+@media (min-width: 62rem) and (max-height: 58rem) {
+  :root { --fold-chrome: 28rem; --arena-floor: 11rem; --arena-cap: 28rem; }
+
+  .wrap { padding-block: var(--s-1) var(--s-4); }
+  .brandline .lede { display: none; }
+  .brandline { margin-bottom: var(--s-2); }
+
+  /* The chips become ONE SCROLLING ROW, worth 25px and the cheapest 25px on the page. Three
+     declarations, and all three are load-bearing:
+       · nowrap on the container, or it is two rows;
+       · `flex: 0 0 auto; white-space: nowrap` on the CHIPS, or nowrap only squeezes them and
+         each one takes two text lines — taller than the two-row version it replaced;
+       · padding-block for the focus ring. Outlines do not contribute to scrollable overflow,
+         so a scroll container flush with its content clips the ring instead of scrolling to
+         it. The negative margin hands the padding back, so the row occupies what it did.
+     Never a `text-overflow` here: a half-shown example is not an example. */
+  .examples {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    padding-block: 5px;
+    margin-block: -5px;
+  }
+  .examples .chip { flex: 0 0 auto; white-space: nowrap; }
+
+  .row.actions { margin: var(--s-1) 0 var(--s-1); }  /* the bottom margin stays --s-1: #run's
+                                                        7px plinth must keep clearing .examples */
+  .keycaps { gap: var(--s-1); margin-top: var(--s-1); }
+
+  /* The boot panel is 289px of content against an arena of ~217px here, and `safe center`
+     lets it scroll rather than clip its head off — correct, but a half-shown line of the
+     45MB note reads as a bug and not as an affordance. Tightened by 72px it fits whole at
+     the sizes this tier is actually about; below 600px of viewport it scrolls again, which
+     is what the overlay was built to do. */
+  .overlay { padding: var(--s-3); gap: var(--s-1); }
+  .boot-mark { width: 38px; height: 38px; }
+}
+
+/* THE VALVE — a real laptop: 1366×768 minus Windows Chrome's chrome is 641px, 1280×720 is
+   593px, and a bookmarks bar takes another 40. The eyebrow goes here, and the 26px it costs
+   go straight into the arena: the nav already carries the wordmark, "a Microduck with a
+   brain" and a status pill that says "MuJoCo · WASM · your key stays in this tab", which is
+   very nearly what the eyebrow says. The page is not left mute — it stops saying the same
+   thing twice at the one height where the duck is fighting for pixels.
+   Opening at 46rem (736px) rather than the 40rem this used to use is deliberate: 641px is
+   40.06rem, so the old boundary sat ONE CSS pixel from the single most important case and a
+   bookmarks bar flipped it. */
+@media (min-width: 62rem) and (max-height: 46rem) {
+  .brandline { display: none; }
+  :root { --fold-chrome: 26.5rem; --arena-floor: 9.5rem; }
 }
 
 @media (max-width: 61.99rem) {
@@ -1182,7 +1494,13 @@ summary .rule { display: block; width: 1.5rem; height: 1px; background: var(--pi
      box and the keycaps adjacent, which is R2. `order` had it running 01 → 04 → 02 → 03 with
      the log wedged between the two halves of the dual-control argument, and it moved only the
      paint: Tab still followed the DOM, so focus jumped from the last chip to the visually last
-     block and then back up to the transcript's clear button (WCAG 2.4.3). */
+     block and then back up to the transcript's clear button (WCAG 2.4.3).
+
+     #key-box and #manual are no longer lane children — #key-box lives in .model-bar above the
+     arena and #manual is the console's last child — so the rule that used to reset their
+     margins names .console > #manual instead. Document order is still the paint order and the
+     Tab order: 03 the key, the arena, 01, 04, 02. The key box being FIRST on a phone is the
+     brief, and the keycap map being last is right, because a phone has no keyboard. */
   .lane { display: contents; }
   /* Not `* + *`: a sibling combinator reads the DOM, so the transcript — the first child of
      the second lane — would be the only block in the stack with no rule above it. */
@@ -1191,9 +1509,23 @@ summary .rule { display: block; width: 1.5rem; height: 1px; background: var(--pi
     margin-top: 0;
     border-top: 1px solid var(--edge-3);
   }
-  /* Both carry an id, so the 0-2-0 rule above cannot reach the margins their base rules set. */
-  #manual, #key-box { margin-top: 0; padding: var(--s-3) var(--gutter); }
-  .lane-a > .lane-label { border-top: 0; }   /* .deck already draws the rule above it */
+  /* It carries an id, so the 0-2-0 rule above cannot reach the margin its base rule sets. */
+  .console > #manual {
+    margin: 0;
+    padding: var(--s-3) var(--gutter);
+    border-width: 1px 0 0;
+    /* .cockpit's own --edge-guard is the card's border colour; in the stack this line is one
+       of the rules BETWEEN bays, and those are all --edge-3. */
+    border-color: var(--edge-3);
+    border-radius: 0;
+  }
+  /* 01's head and its field are ONE bay. The label moved out of the form into .say-head so
+     that "01 SAY IT" and "Tell the duck what to do" share a baseline above 62rem; down here
+     that would put the between-bays rule and 33px of padding between a label and the input
+     it names, so the head keeps the rule that .deck already draws above it and the form
+     keeps none at all. Worth 33px of phone height as well. */
+  .lane-a > .say-head { border-top: 0; }
+  .lane-a > #goal-form { border-top: 0; padding-top: 0; }
 }
 
 /* Un-floating the stage chrome is a design decision, not a fallback: a glass pill over a
@@ -1217,11 +1549,9 @@ summary .rule { display: block; width: 1.5rem; height: 1px; background: var(--pi
     padding: 0;
   }
   canvas#view { height: clamp(15rem, 42vh, 22rem); }
-  /* The stage is ~269px tall on a 360×640 phone and the overlay's content is taller than that.
-     Centred content inside `.console { overflow: hidden }` overflows symmetrically and gets
-     scissored at BOTH ends — the duck mark off the top, "Nothing is uploaded" off the bottom.
-     Start-aligned and scrollable, it loses neither. */
-  .overlay { place-content: start center; padding: var(--s-3); overflow-y: auto; }
+  /* The centring fix that used to live here is now on the base `.overlay` rule — the shorter
+     desktop arena exposed the same clipping — so only the tighter padding remains. */
+  .overlay { padding: var(--s-3); }
 }
 
 @media (max-width: 60rem) {
@@ -1234,6 +1564,11 @@ summary .rule { display: block; width: 1.5rem; height: 1px; background: var(--pi
    fold. The eyebrow is one 11px line and it says what this is. */
 @media (max-height: 46rem) { .brandline .lede { display: none; } }
 @media (max-width: 30rem) {
+  /* The provider select and the model name share a row everywhere else. At this width the
+     model track is ~128px and "claude-sonnet-5" needs 166, so the value the visitor most
+     needs to READ is silently clipped to "claude-sonn". Two rows instead. */
+  #key-box .row { flex-wrap: wrap; }
+  #key-box .row > * { flex: 1 1 100%; }
   .legend { grid-template-columns: 1fr; }
   .legend dt { margin-top: 0.35rem; }
   .row.actions { flex-wrap: wrap; }
