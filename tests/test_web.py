@@ -377,35 +377,32 @@ def test_the_browser_uses_the_same_gait_numbers_python_does() -> None:
 # ── the arena is quackd's, and still the arena the verbs aim at ─────────────────────────
 
 
-def test_the_person_marker_is_no_longer_a_blue_tube_and_is_still_the_target() -> None:
-    """It was one cylinder in `0.24 0.35 0.86` — Python's blue, which over there is
-    load-bearing: `quackd/sim3d/render.py` finds a person by that exact hue, so `scene.py` has
-    to paint one. Nothing in the browser reads a pixel, `observe()` measures against the body's
-    own position, and so the only thing that blue did here was read as a stray tube. It is a
-    plinth, a post and a head in the brand's purple now — and every handle the rest of the demo
-    holds it by is untouched: the body's name, and the `person` label observe() publishes for
-    the "Walk to the person and quack" example to aim at."""
+def test_nobody_is_in_the_browser_arena_either() -> None:
+    """The person marker is gone from both 3D worlds, and this is the browser's half.
+
+    It was a plinth, a post and a head in the brand's purple, and `observe()` published a
+    `person` label the example chip aimed at. All of it went with the Python cylinder, so what
+    is checked here is absence in the three places a half-removal would survive: the arena XML,
+    the observation, and the page's own copy. The 2D cartoon still has a person and is not
+    this test's business.
+
+    The copy matters as much as the code. A chip that asks a model to walk to somebody who is
+    not there is a demo that fails in front of whoever clicked it.
+    """
     js = _js("microduck.js")
-    assert "0.24 0.35 0.86" not in js, (
-        "the person marker is Python's detector blue again. That hue is load-bearing in "
-        "quackd/sim3d/scene.py and decorative here, so here it can be quackd's own"
+    # Comments first: the module explains at some length who is NOT in the arena, and prose
+    # about an absence must not read as the absence itself failing.
+    code = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
+    code = re.sub(r"(?m)^\s*//.*$", "", code)
+    assert "person" not in code.lower(), (
+        "microduck.js still has a person in its code; nobody is in this arena"
     )
-    marker = re.search(r'<body name="person".*?</body>', js, re.S)
-    assert marker, (
-        'the arena XML defines no static body named "person"; observe() reports that name and '
-        "the example chip on the page walks to it"
-    )
-    named = re.findall(r'rgba="\$\{(\w+)\}"', marker.group(0))
-    assert named, "the person marker's geoms carry no colour of their own"
-    palette = dict(re.findall(r'(\w+)\s*=\s*"([\d.]+ [\d.]+ [\d.]+ [\d.]+)"', js))
-    for name in named:
-        assert name in palette, f"{name} is used in the arena XML and defined nowhere"
-        red, green, blue, _alpha = (float(value) for value in palette[name].split())
-        assert blue > green and red > green, (
-            f"{name} is {palette[name]}, which is not on quackd's purple axis: green at or "
-            f"above red and blue is some other colour's marker"
-        )
-    assert 'label: "person"' in js, "observe() no longer labels the marker `person`"
+    assert '<body name="person"' not in js, "the arena XML stands a person up again"
+    assert 'label: "person"' not in js, "observe() publishes a `person` label again"
+    page = (WEB / "index.html").read_text(encoding="utf-8")
+    assert "person" not in page.lower(), "the page still promises a person in the arena"
+    prompt = _js("pilot.js")
+    assert "person marker" not in prompt, "the system prompt still describes a person marker"
 
 
 def test_the_demo_claims_no_more_policies_than_it_downloads() -> None:

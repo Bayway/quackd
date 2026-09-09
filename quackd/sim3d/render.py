@@ -51,9 +51,9 @@ def _head_camera_view() -> Any:
 
     The shell goes, because a camera bolted to the head does not see the head, and because it
     is the difference between 3 ms and 400 ms a frame. The floor is swapped for the colourless
-    copy of itself: upstream's blue-grey checker is what every human view shows, and it is
-    also, to an HSV detector hunting a blue person marker, a person in every frame. See
-    `scene.FLOOR_GROUP`.
+    copy of itself: upstream's blue-grey checker is what every operator view shows, and it is
+    also, to an HSV detector hunting a blue person marker, a person in every frame. Nobody
+    stands in this arena, so that would be a phantom every time. See `scene.FLOOR_GROUP`.
     """
     import mujoco
 
@@ -84,7 +84,7 @@ def render_headcam(world: MujocoWorld, size: int = 256) -> Image.Image:
     cam = _free_camera(lookat, ahead, math.degrees(yaw), math.degrees(pitch))
     # No skybox. Upstream's gradient is a saturated blue at the horizon, and above a 8 cm
     # wall it fills the top half of this frame, where the detector reads it as a person for
-    # the same reason the floor was one. What is left is the model's flat background, which
+    # the same reason the floor is one. What is left is the model's flat background, which
     # is what a camera in a 2 m arena has any business seeing.
     return _render(world, size, cam, _head_camera_view(), skybox=False)
 

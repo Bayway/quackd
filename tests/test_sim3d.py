@@ -48,6 +48,13 @@ def _place_ball(world: MujocoWorld, dist: float, bearing_deg: float) -> None:
 
 
 def test_a_seed_lays_the_arena_out_as_it_does_in_sim2d() -> None:
+    """Everything the two arenas still share lands in the same place.
+
+    The cartoon draws a person and this world has none, so the person is what they no longer
+    share. That draw came last in the cartoon's order, after the duck and after the ball,
+    which is the whole reason this test is still about equality and not about tolerance:
+    dropping the last draw moves nothing drawn before it.
+    """
     for seed in range(10):
         cartoon, physics = World(seed=seed), MujocoWorld(seed=seed)
         assert (cartoon.duck.x, cartoon.duck.y, cartoon.duck.theta) == pytest.approx(
@@ -56,7 +63,7 @@ def test_a_seed_lays_the_arena_out_as_it_does_in_sim2d() -> None:
         assert (cartoon.ball.x, cartoon.ball.y) == pytest.approx(
             (physics.ball_x, physics.ball_y), abs=1e-3
         )
-        assert (cartoon.people[0].x, cartoon.people[0].y) == pytest.approx(physics.people[0])
+        assert cartoon.people, "the cartoon still stands somebody up; the physics world does not"
         physics.close()
 
 
@@ -275,12 +282,18 @@ def test_the_head_camera_shows_the_detector_what_the_cartoon_would() -> None:
 def test_upstreams_blue_scene_is_never_mistaken_for_a_person() -> None:
     """The scene is upstream's, and upstream's policies are blind: nothing in `microduck_rl`
     ever looks at its own floor. quackd put a colour detector in front of it, and that floor
-    is the same blue as the person marker — hue 105 against 114, and overlapping on saturation
-    and value too, so no threshold separates them. Measured before the head camera got its own
-    view: a person 0.12 m ahead in 48 of 48 frames, whichever way the duck faced.
+    is the blue that detector calls a person — hue 105 against 114, and overlapping on
+    saturation and value too, so no threshold separates them. Measured before the head camera
+    got its own view: a person 0.12 m ahead in 48 of 48 frames, whichever way the duck faced.
 
     The head camera renders the colourless copy of the floor and no skybox. Every other view
     keeps upstream's palette.
+
+    Nobody stands in this arena, which sharpens the test rather than retiring it: the detector
+    still carries the person target, because the cartoon still has a person to find, so any
+    person reported here is the scenery and there is no true one to hide behind. That is why
+    this counts every person at every range, where it used to excuse anything beyond a duck's
+    own radius.
     """
     detector = ColorBlobDetector()
     phantoms = frames = 0
@@ -292,11 +305,7 @@ def test_upstreams_blue_scene_is_never_mistaken_for_a_person() -> None:
             w.body._place()
             mujoco.mj_forward(w.model, w.data)
             frames += 1
-            for d in detector.detect(render_headcam(w, 256)):
-                # the arena is 2 m across and the duck is 8 cm: anything "seen" closer than a
-                # duck's own radius is scenery, not a person
-                if d.label == "person" and d.est_distance_m < 0.25:
-                    phantoms += 1
+            phantoms += sum(d.label == "person" for d in detector.detect(render_headcam(w, 256)))
         w.close()
     assert frames == 32
     assert phantoms == 0, f"the scenery reads as a person in {phantoms} of {frames} frames"
@@ -318,14 +327,21 @@ def test_the_two_floors_are_the_same_floor_seen_by_different_eyes() -> None:
     w.close()
 
 
-def test_the_person_is_blue_enough_to_be_seen() -> None:
+def test_nobody_is_in_the_arena() -> None:
+    """The person marker is gone from the physics world, and gone by more than one measure.
+
+    Three ways of asking, because a half-removal passes any one of them: the compiled model
+    has no body by that name, the world exposes no people to place or avoid, and the arena XML
+    carries no geom whose name says person. The cartoon keeps its own person; this asserts
+    nothing about `sim2d`.
+    """
     w = MujocoWorld(seed=0)
-    require_render(w)
-    px, py = w.people[0]
-    w.body.reset(px - 0.8, py, 0.0)  # 0.8 m west of the person, facing it
-    w.step()
-    labels = {d.label for d in ColorBlobDetector().detect(render_headcam(w, 256))}
-    assert "person" in labels, labels
+    names = {mujoco.mj_id2name(w.model, mujoco.mjtObj.mjOBJ_BODY, i) for i in range(w.model.nbody)}
+    assert "person" not in names, sorted(n for n in names if n)
+    assert not hasattr(w, "people"), "the world still tracks people"
+    geoms = {mujoco.mj_id2name(w.model, mujoco.mjtObj.mjOBJ_GEOM, i) for i in range(w.model.ngeom)}
+    assert not any("person" in (g or "") for g in geoms), sorted(g for g in geoms if g)
+    assert "people" not in w.snapshot()
     w.close()
 
 
@@ -358,17 +374,20 @@ def test_standing_up_clears_the_twist_that_put_it_down() -> None:
 
 
 def test_standing_up_does_not_leave_the_duck_inside_something() -> None:
-    """A duck goes down while walking, so it comes to rest wherever it slid to: against a
-    wall, on the ball, or overlapping the person. Standing up in place puts it inside them."""
-    from quackd.sim3d.scene import ARENA_HALF, PERSON_R
+    """A duck goes down while walking, so it comes to rest wherever it slid to: against a wall
+    or on top of the ball. Standing up in place puts it inside them.
+
+    The ball is the only thing left in this arena to be inside of, now that nobody stands in
+    it, so it is the ball that covers the obstacle branch the person used to cover."""
+    from quackd.sim3d.scene import ARENA_HALF, BALL_R
     from quackd.sim3d.world import DUCK_R
 
     w = MujocoWorld(seed=0, body=Puppet())
-    px, py = w.people[0]
-    w.body.x, w.body.y = px, py  # face down on top of the person
+    bx, by = w.ball_x, w.ball_y
+    w.body.x, w.body.y = bx, by  # face down on top of the ball
     w.body.fall()
     w.enable()
-    assert math.hypot(w.x - px, w.y - py) >= DUCK_R + PERSON_R - 1e-9
+    assert math.hypot(w.x - bx, w.y - by) >= DUCK_R + BALL_R - 1e-9
 
     w.body.x, w.body.y = ARENA_HALF * 2, 0.0  # slid through the wall
     w.body.fall()

@@ -350,7 +350,7 @@ Cloud or local, same command.
 | LM Studio (local) | `quackd[openai]` | none | `uvx --from "quackd[openai]" quackd run find-and-kick --provider lmstudio` |
 | any OpenAI compatible server | `quackd[openai]` | optional | `uvx --from "quackd[openai]" quackd run find-and-kick --provider local --base-url http://host:8000/v1` |
 
-Every row above runs the cartoon, which is the default robot. To put the same model on the physics simulator instead, ask for both extras and name the backend: `uvx --from "quackd[mujoco,anthropic]" quackd run find-and-kick --provider anthropic --robot microduck:mujoco`. The extras are independent, so `quackd[anthropic]` alone gives you the model and no physics.
+Every row above runs the cartoon, which is the default robot. To put the same model on the physics simulator instead, ask for both extras and name the backend: `uvx --from "quackd[mujoco,anthropic]" quackd run find-and-kick --provider anthropic --robot microduck:mujoco`. The extras are independent, so `quackd[anthropic]` alone gives you the model and no physics. Nobody stands in the physics arena, so `follow-me`, whose whole task is to follow somebody, cannot succeed there and nothing stops you pointing it at that backend anyway.
 
 The four cloud providers see the camera frame as an image. Local models get the text detections by default and the frame too with `--vision`. The scripted pilot only reads the detection summary. Local setup, tool calling flags per server and what to expect from small models: [docs/local-llms.md](docs/local-llms.md).
 
@@ -406,8 +406,8 @@ requires: [search_scan, walk_to, kick]  # the honest minimum a body must provide
 |---|---|---|
 | `hello-world` | quack, one step forward, quack | the smoke test |
 | `find-and-kick` | find the ball and kick it | the flagship, ground truth checked in tests |
-| `patrol-and-quack` | wander, quack twice on a person or pet | the scripted pilot quacks at the sighting but hits its budget on seeds 0 to 9, no pilot has completed it yet |
-| `follow-me` | keep a person in view and follow at 0.5 m | the scripted pilot has no strategy for it and declares success after two steps without a single `walk_to`, no real model run yet |
+| `patrol-and-quack` | wander, quack twice on a person or pet | the scripted pilot quacks at the sighting but hits its budget on seeds 0 to 9, no pilot has completed it yet. Nobody is in the physics arena, so on `microduck:mujoco` it is a patrol with nobody to announce |
+| `follow-me` | keep a person in view and follow at 0.5 m | **cartoon only**, nobody stands in the physics arena and this task is to follow somebody, so it cannot succeed on `microduck:mujoco`. The scripted pilot has no strategy for it and declares success after two steps without a single `walk_to`, no real model run yet |
 | `fetch` | scoop the ball up and bring it back | **experimental**, the scoop is open loop and fails about 40 % of the time in sim, by design, and the scripted pilot has no strategy for it either, no real model run yet |
 | `flock-kick` | multiple ducks split the search, the closest one kicks | **flock mode**, cooperation over a bus and an auction |
 | `reachy-spotter` | find the ball with your gaze and say where it is | **Reachy Mini** (`--robot reachy_mini:sim2d` is its default), a stationary head with no legs |
@@ -535,7 +535,7 @@ Underneath there are exactly two learned policies, `alpha_walking` and `alpha_st
 quackd's own scripted impulse rather than a policy, as it is in `sim3d`, because upstream's
 episodic one did nothing from a standing pose. Seven verbs are implemented and none of the
 composites, so the model steers with `move` and reads the pose it actually reached. Where else
-this differs from the Python backend (the arena, perception, the person marker, the missing hash
+this differs from the Python backend (the arena, perception, the missing hash
 check, what a seed means, the absent scripted pilot) is one list in
 [`web/README.md`](web/README.md), with the API key handling. That list is the canonical one, and
 this section deliberately does not keep a second copy of it.
@@ -555,6 +555,7 @@ browser test.
 | API keys | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY` in the environment or a `.env` file (see [`.env.example`](.env.example)) |
 | Model | `--model` or `QUACKD_MODEL`. Defaults: `claude-opus-5`, `gpt-5`, `gemini-2.5-pro`, `grok-4`. The OpenAI, Gemini and Grok IDs are unverified, override them if yours differ |
 | Claude reasoning effort | `QUACKD_EFFORT` (`low` to `max`, default `medium`). `QUACKD_ANTHROPIC_FALLBACKS=0` disables server side refusal fallbacks. `QUACKD_THINKING_DISPLAY=omitted` stops Claude returning a summary of its reasoning, and `QUACKD_GEMINI_THOUGHTS=0` does the same for Gemini |
+| OpenAI reasoning effort | `QUACKD_OPENAI_REASONING_EFFORT`, sent only when set. Some reasoning models refuse function tools on `/v1/chat/completions` unless it is `none`, and say so in the 400. quackd reads that answer, retries once with `none` and keeps it for the rest of the run, so you should not need this flag |
 | Local models | `--provider ollama`, `vllm`, `llamacpp`, `lmstudio` or `local --base-url http://host:port/v1`. No key. `--model` or the first served model. `--vision` sends frames. `QUACKD_TOOL_CHOICE=auto`, `required` or `none` for picky servers. See [docs/local-llms.md](docs/local-llms.md) |
 | Robot | `--robot <adapter>:<backend>`, or a `robots:` line in the `.duck`, the flag wins. Default `microduck:sim2d`. `quackd list-adapters` lists the eight that ship, `quackd list-verbs --robot X` what each can do |
 | Physics simulator | `--robot microduck:mujoco`, with `quackd[mujoco]`. The model and the policies are fetched once into `~/.quackd/cache`, where `QUACKD_CACHE_DIR` moves them and `QUACKD_MICRODUCK_ASSETS` points at your own `microduck_rl` checkout instead. `QUACKD_MUJOCO_BODY=puppet` runs the kinematic stand-in, which downloads nothing and is the body the tests build. `--live` opens MuJoCo's own viewer |

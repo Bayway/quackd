@@ -64,7 +64,6 @@ FLOOR = (14, 16, 19)
 WALL = (78, 84, 92)
 TRAIL = (255, 170, 60)
 BALL = (255, 140, 0)
-PERSON = (60, 90, 220)
 
 
 def inset(frame: Image.Image, world: Any, trail: list[tuple[float, float]], size: int) -> None:
@@ -79,8 +78,6 @@ def inset(frame: Image.Image, world: Any, trail: list[tuple[float, float]], size
         return left + (x + ARENA_HALF) * scale, top + (ARENA_HALF - y) * scale
 
     marks = [(world.ball_x, world.ball_y, BALL, 2)]
-    if world.people:
-        marks.append((world.people[0][0], world.people[0][1], PERSON, 3))
     for x, y, colour, radius in marks:
         cx, cy = at(x, y)
         draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=colour)

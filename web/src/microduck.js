@@ -59,43 +59,16 @@ const CMD_MAX = { vx: 0.40, vy: 0.30, wz: 1.50 };
 const DEAD_FRACTION = 1 / 3;
 
 // ── the arena: quackd/sim3d/scene.py's dimensions, not its scene ───────────────────────
-// Same half-width, same walls, same ball, same person body. Not the same look: sim3d builds
-// upstream's own scene*.xml palette, a blue-grey edge-marked checker under a gradient
-// skybox, and this fetches robot_walk.xml alone and draws a flat plane under a headlight.
+// Same half-width, same walls, same ball. Not the same look: sim3d builds upstream's own
+// scene*.xml palette, a blue-grey edge-marked checker under a gradient skybox, and this
+// fetches robot_walk.xml alone and draws a flat plane under a headlight.
 // web/README.md carries that as a deliberate divergence.
+//
+// Nobody is in this arena, and nobody is in Python's either: the person marker both once
+// stood up was removed from the 3D worlds together. The 2D cartoon still has one, so a task
+// about a person — `follow-me` — is a 2D task and neither of these can run it.
 export const ARENA_HALF = 1.0;
-const BALL_R = 0.05, PERSON_R = 0.12, PERSON_H = 0.5, WALL_H = 0.08;
-/**
- * The person marker looks different here, and only here. Python's is a flat-topped blue
- * cylinder because its blue is load-bearing: `quackd/sim3d/scene.py` picks that exact hue
- * for the HSV detector in `render.py`, which is how the Python duck sees a person at all.
- * The browser's perception is geometric — `observe()` measures against `this.person`, never
- * a pixel — so nothing here reads the colour, and the marker can be shaped and coloured
- * like the rest of quackd instead of like a detector target.
- *
- * It is still one static body called "person", still a metre tall, still standing on a
- * footprint of PERSON_R: a plinth the width of the old cylinder, a slimmer post, and a
- * sphere for a head. The FOOTPRINT is unchanged — the plinth is the old cylinder's radius —
- * but only for its first 6 cm. placeBody puts the duck's trunk at z = 0.125, so what a
- * walking duck meets at trunk height is the 0.075 m post, not the 0.12 m tube it met before:
- * the feet hit the same obstacle, the body brushes past a slimmer one.
- *
- * A capsule would say "post with a rounded cap" in one geom, and it is the wrong one: the
- * CAPSULE branch in `view.js` builds three.js's capsule without the rotation the CYLINDER
- * branch applies, and three.js runs both along y where MuJoCo runs them along z, so a
- * capsule here would be drawn lying on the floor. Cylinder and sphere are drawn upright.
- */
-const PERSON_POST_R = 0.075;                         // the post, slimmer than its footprint
-const PERSON_HEAD_R = 0.09;                          // the cap, a shade wider than the post
-const PERSON_BASE_H = 0.03;                          // half-height of the plinth
-const PERSON_POST_H = PERSON_H - PERSON_HEAD_R / 2;  // half-height: floor to the head's centre
-const PERSON_HEAD_Z = +(PERSON_H - PERSON_HEAD_R).toFixed(4); // so the head's top is the marker's
-// Three steps of one hue (~270 degrees), quackd's purple: the ink #3e294e under the primary
-// hsl(272 45% 56%) under a lit tint of it. Held a little deeper than the CSS values because
-// the headlight in this scene is bright enough to wash a literal #8a5cc4 out to lavender.
-const PERSON_BASE_RGBA = "0.28 0.19 0.36 1";
-const PERSON_POST_RGBA = "0.45 0.28 0.68 1";
-const PERSON_HEAD_RGBA = "0.62 0.44 0.80 1";
+const BALL_R = 0.05, WALL_H = 0.08;
 const DEADMAN_S = 0.3;
 const KICK_RANGE = 0.30, KICK_CONE_DEG = 35, KICK_SPEED = 1.2;
 const FALL_TILT = -0.5, FALL_HEIGHT = 0.06, FALL_DEBOUNCE = 10;
@@ -121,7 +94,7 @@ function rng(seed) {
   };
 }
 
-function arenaXml(ball, person) {
+function arenaXml(ball) {
   const lim = ARENA_HALF + 0.02;
   const wall = (n, px, py, sx, sy) =>
     `<geom name="quackd_wall_${n}" type="box" pos="${px} ${py} ${WALL_H}" size="${sx} ${sy} ${WALL_H}" rgba="0.55 0.55 0.58 1"/>`;
@@ -140,14 +113,6 @@ function arenaXml(ball, person) {
       <joint name="ball_free" type="free"/>
       <geom name="ball_geom" type="sphere" size="${BALL_R}" rgba="1 0.55 0 1" condim="6"
             mass="0.05" friction="0.8 0.005 0.002"/>
-    </body>
-    <body name="person" pos="${person[0]} ${person[1]} ${PERSON_H}">
-      <geom name="person_base" type="cylinder" size="${PERSON_R} ${PERSON_BASE_H}"
-            pos="0 0 ${PERSON_BASE_H - PERSON_H}" rgba="${PERSON_BASE_RGBA}"/>
-      <geom name="person_body" type="cylinder" size="${PERSON_POST_R} ${PERSON_POST_H}"
-            pos="0 0 ${-PERSON_HEAD_R / 2}" rgba="${PERSON_POST_RGBA}"/>
-      <geom name="person_head" type="sphere" size="${PERSON_HEAD_R}"
-            pos="0 0 ${PERSON_HEAD_Z}" rgba="${PERSON_HEAD_RGBA}"/>
     </body>
   </worldbody>
 </mujoco>`;
@@ -223,23 +188,16 @@ export class Microduck {
       return at;
     };
     const ball = place(1.5, (b) => Math.hypot(b[0] - duck[0], b[1] - duck[1]) >= 0.5);
-    const person = place(
-      1.6,
-      (q) =>
-        Math.hypot(q[0] - duck[0], q[1] - duck[1]) >= 0.6 &&
-        Math.hypot(q[0] - ball[0], q[1] - ball[1]) >= 0.4
-    );
 
-    const model = mujoco.MjModel.from_xml_string(arenaXml(ball, person), vfs);
+    const model = mujoco.MjModel.from_xml_string(arenaXml(ball), vfs);
     const data = new mujoco.MjData(model);
-    return new Microduck({ mujoco, model, data, walk, stand, duck, ball, person, random });
+    return new Microduck({ mujoco, model, data, walk, stand, duck, ball, random });
   }
 
-  constructor({ mujoco, model, data, walk, stand, duck, ball, person, random }) {
+  constructor({ mujoco, model, data, walk, stand, duck, ball, random }) {
     Object.assign(this, { mujoco, model, data, walk, stand, random });
     this.spawn = duck;
     this.ballStart = ball;
-    this.person = person;
     const id = (kind, name) => mujoco.mj_name2id(model, mujoco.mjtObj[kind].value, name);
     this.trunk = id("mjOBJ_BODY", "trunk_base");
     this.qadr = JOINTS.map((n) => model.jnt(n).qposadr);
@@ -473,7 +431,6 @@ export class Microduck {
   observe() {
     const { x, y, theta } = this.pose;
     const ball = this.relative(this.ballX, this.ballY, { camera: true });
-    const person = this.relative(this.person[0], this.person[1], { camera: true });
     const inView = (r) => Math.abs(r.bearing) < Math.PI / 4 && r.distance < 1.6;
     return {
       pose: { x: +x.toFixed(3), y: +y.toFixed(3), theta: +theta.toFixed(3) },
@@ -483,7 +440,6 @@ export class Microduck {
       head_yaw_deg: Math.round((this.head[0] * 180) / Math.PI),
       detections: [
         inView(ball) && { label: "ball", bearing_deg: Math.round((ball.bearing * 180) / Math.PI), est_distance_m: +ball.distance.toFixed(2) },
-        inView(person) && { label: "person", bearing_deg: Math.round((person.bearing * 180) / Math.PI), est_distance_m: +person.distance.toFixed(2) },
       ].filter(Boolean),
       ball_moved_m: +this.ballDisplacement.toFixed(2),
     };

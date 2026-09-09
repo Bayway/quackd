@@ -68,6 +68,25 @@ def render_messages(system: str, history: list[Exchange]) -> list[dict[str, Any]
     return messages
 
 
+def _asks_for_no_reasoning(error: Exception) -> bool:
+    """Is this the 400 that wants `reasoning_effort="none"` before it will take function tools?
+
+    Matched on what the API says rather than on a model name, because the list of models that
+    behave this way is not ours to keep and gets longer. Observed on `gpt-6-astra`:
+
+        Function tools with reasoning_effort are not supported for gpt-6-astra in
+        /v1/chat/completions. To use function tools, use /v1/responses or set
+        reasoning_effort to 'none'.
+
+    Both halves are required so an unrelated 400 that happens to name one of the two words
+    does not silently turn a run's reasoning off.
+    """
+    if getattr(error, "status_code", None) not in (400, None):
+        return False
+    text = str(error).lower()
+    return "reasoning_effort" in text and "function tools" in text
+
+
 def render_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
@@ -150,9 +169,18 @@ class OpenAIProvider:
         base_url: str | None = None,
         tool_choice: str | None = None,
         vision: bool | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.model = model
         self.calls = 0
+        import os as _os
+
+        #: Sent only when set. Newer reasoning models reject function tools on
+        #: `/v1/chat/completions` unless this is `none`, and say so in the 400: see
+        #: `_RETRY_ON` and `step`. `QUACKD_OPENAI_REASONING_EFFORT` sets it by hand.
+        self.reasoning_effort = reasoning_effort or _os.environ.get(
+            "QUACKD_OPENAI_REASONING_EFFORT"
+        )
         if base_url is not None:
             self.base_url = base_url
         if vision is not None:
@@ -188,6 +216,8 @@ class OpenAIProvider:
             params["tool_choice"] = self.tool_choice
         if self.send_parallel_flag:
             params["parallel_tool_calls"] = False
+        if self.reasoning_effort:
+            params["reasoning_effort"] = self.reasoning_effort
         return params
 
     def _normalise(self, turn: ProviderTurn) -> ProviderTurn:
@@ -214,7 +244,24 @@ class OpenAIProvider:
         except ProviderError:
             raise
         except Exception as e:
-            raise ProviderError(f"{self.name}: {type(e).__name__}: {e}") from e
+            # A reasoning model that will not take function tools alongside its own default
+            # reasoning effort. The 400 says the fix in words ("set reasoning_effort to
+            # 'none'"), so take it, once, and carry it for the rest of the run rather than
+            # paying a failed call per turn. Every verb quackd has is a function tool, so the
+            # alternative is that the model cannot drive the robot at all.
+            if self.reasoning_effort is None and _asks_for_no_reasoning(e):
+                self.reasoning_effort = "none"
+                try:
+                    response = await self.client.chat.completions.create(
+                        **self._params(system, history, tools)
+                    )
+                    turn = self._normalise(parse_response(response))
+                except ProviderError:
+                    raise
+                except Exception as retry:
+                    raise ProviderError(f"{self.name}: {type(retry).__name__}: {retry}") from retry
+            else:
+                raise ProviderError(f"{self.name}: {type(e).__name__}: {e}") from e
         if not turn.tool_calls:
             turn = self._fallback(turn, tools)
         return turn

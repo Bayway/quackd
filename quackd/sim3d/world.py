@@ -2,10 +2,15 @@
 
 What MuJoCo brings is contact: the ball rolls, a body pushes it, a kick is a velocity on a
 sphere the floor slows down. What is kept from `sim2d`, on purpose, is everything a `.duck`
-or a test might have come to rely on: the seeded spawn order (duck, ball, person, in that
-order, from the same distributions), the 0.3 s deadman that zeroes a velocity nobody
-re-sends, the kick that only connects inside 0.30 m and a ±35° cone, and the scoop that
-succeeds 60 % of the time because upstream's is open-loop.
+or a test might have come to rely on: the seeded spawn order (duck, then ball, from the same
+distributions), the 0.3 s deadman that zeroes a velocity nobody re-sends, the kick that only
+connects inside 0.30 m and a ±35° cone, and the scoop that succeeds 60 % of the time because
+upstream's is open-loop.
+
+What is not kept is the cartoon's person marker: nobody stands in this arena. The cartoon
+draws its person from the RNG *after* the duck and the ball, so dropping it leaves every
+seeded duck and ball exactly where it was in both worlds — a seed still lays out everything
+the two arenas share. `follow-me`, which is a task about a person, is 2D-only for it.
 
 The duck's base is a `Body`. Two exist: `Puppet`, a kinematic block that moves exactly as
 the cartoon does and needs nothing downloaded, and `MicroduckBody`, upstream's real model
@@ -26,7 +31,6 @@ from quackd.sim3d.scene import (
     BALL_PARK,
     BALL_R,
     OFFSCREEN_PX,
-    PERSON_R,
     PUPPET_BODY_Z,
     PUPPET_HEAD_AHEAD,
     PUPPET_HEAD_Z,
@@ -291,14 +295,15 @@ def make_body(name: str) -> Body:
 
 
 class MujocoWorld:
-    """One duck, one ball, one person, four walls, and MuJoCo between them."""
+    """One duck, one ball, four walls, and MuJoCo between them."""
 
-    def __init__(self, *, seed: int = 0, person: bool = True, body: Body | str = "puppet") -> None:
+    def __init__(self, *, seed: int = 0, body: Body | str = "puppet") -> None:
         self.seed = seed
         self.rng = np.random.default_rng(seed)
         self.body: Body = make_body(body) if isinstance(body, str) else body
-        # duck, ball and person spawn in EXACTLY sim2d's RNG order, from its distributions:
-        # a seed lays the arena out the same way in both simulators
+        # duck then ball, in EXACTLY sim2d's RNG order and from its distributions: a seed puts
+        # both where the cartoon puts them. The cartoon draws a person after these two and this
+        # world has none, and because that draw came last its absence moves neither of them.
         x = float(self.rng.uniform(-0.3, 0.3))
         y = float(self.rng.uniform(-0.3, 0.3))
         theta = float(self.rng.uniform(-math.pi, math.pi))
@@ -306,17 +311,9 @@ class MujocoWorld:
             bx, by = self.rng.uniform(-0.75, 0.75, size=2)
             if math.hypot(bx - x, by - y) >= 0.5:
                 break
-        self.people: list[tuple[float, float]] = []
-        if person:
-            for _ in range(1000):
-                px, py = self.rng.uniform(-0.8, 0.8, size=2)
-                if math.hypot(px - x, py - y) >= 0.6 and math.hypot(px - bx, py - by) >= 0.4:
-                    break
-            self.people.append((float(px), float(py)))
         xml = arena_xml(
             self.body.xml,
             ball=(float(bx), float(by)),
-            person=self.people[0] if self.people else None,
             timestep=PHYSICS_DT,
             include=self.body.include_xml,
         )
@@ -497,8 +494,8 @@ class MujocoWorld:
         """`stand_up`: put it back on its feet, stopped, and not inside anything.
 
         The body knows how to stand itself up but not what it would be standing in. A duck
-        goes down while walking, so it comes to rest wherever it slid to: against a wall, on
-        top of the ball, or overlapping the person. And `stop()` first, because the twist that
+        goes down while walking, so it comes to rest wherever it slid to: against a wall or on
+        top of the ball. And `stop()` first, because the twist that
         put it down is still on the books until the deadman notices.
         """
         if self.posture != "fallen":
@@ -514,9 +511,7 @@ class MujocoWorld:
         """`(x, y)` pushed out of anything solid and back inside the walls."""
         lim = ARENA_HALF - DUCK_R
         x, y = min(max(x, -lim), lim), min(max(y, -lim), lim)
-        obstacles = [(px, py, PERSON_R) for px, py in self.people]
-        if self.ball_present:
-            obstacles.append((self.ball_x, self.ball_y, BALL_R))
+        obstacles = [(self.ball_x, self.ball_y, BALL_R)] if self.ball_present else []
         for ox, oy, r in obstacles:
             dx, dy = x - ox, y - oy
             dist = math.hypot(dx, dy)
@@ -597,7 +592,6 @@ class MujocoWorld:
             "kicks": self.kicks,
             "quacks": len(self.quacks),
             "head_yaw_deg": round(math.degrees(self.head[0]), 1),
-            "people": [{"x": round(px, 3), "y": round(py, 3)} for px, py in self.people],
             "physics": self.body.name,
         }
         snap.update(self.body.extras())
